@@ -49,6 +49,8 @@ def select_gpu(csv_text: str, selector: str | None = None, visible: str | None =
 
 def detect_gpu(worker: dict) -> dict:
     csv = command(['nvidia-smi', '--query-gpu=index,uuid,name,memory.total,memory.free,driver_version', '--format=csv,noheader,nounits'])
+    if worker.get('backend') == 'lmstudio' and len([line for line in csv.splitlines() if line.strip()]) != 1:
+        raise BackendError("The LM Studio adapter currently supports single-NVIDIA-GPU hosts only; its existing daemon does not inherit this worker's CUDA device selection")
     gpu = select_gpu(csv, worker.get('gpu_selector'), os.environ.get('CUDA_VISIBLE_DEVICES'))
     expected = worker.get('expected_gpu_name')
     if expected and expected.casefold() not in gpu['name'].casefold():
@@ -242,7 +244,10 @@ class ManagedBackend:
                                 'requested_gpu_offload':self.worker.get('gpu_offload','max'),
                                 'full_gpu_residency_verified':False,'cache_policy':'backend_default_uncontrolled'}
         except BaseException:
-            self.unload()
+            try:
+                self.unload()
+            except Exception:
+                pass  # Preserve the original load error; never report cleanup as the root cause.
             raise
 
     def generate(self,messages,settings,seed):

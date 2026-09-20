@@ -39,7 +39,12 @@ def parse_json(text: str) -> Any:
         return result
     def invalid_constant(s):
         raise ValueError(f"Non-JSON constant: {s}")
-    return json.loads(text, object_pairs_hook=pairs, parse_constant=invalid_constant)
+    def finite_float(s):
+        value = float(s)
+        if not math.isfinite(value):
+            raise ValueError("JSON number exceeds the supported finite range")
+        return value
+    return json.loads(text, object_pairs_hook=pairs, parse_constant=invalid_constant, parse_float=finite_float)
 
 
 def equal(a: Any, b: Any) -> bool:
@@ -200,7 +205,7 @@ def score(fixture: dict, raw: str, representation: str) -> dict:
         return {"valid": False, "exact_match": False, "error": str(exc),
                 "required_changes": len(expected), "correct_changes": 0,
                 "missed_changes": len(expected), "wrong_values": 0,
-                "unsupported_changes": 0, "precision": None, "recall": 0.0 if expected else None}
+                "unsupported_changes": None, "precision": None, "recall": 0.0 if expected else None}
     predicted = field_changes(fixture["initial_state"], actual)
     shared = expected.keys() & predicted.keys()
     correct = sum(equal(expected[p], predicted[p]) for p in shared)
@@ -265,8 +270,17 @@ def validate_inputs(models: Any, experiment: Any, fixtures: list[dict]) -> None:
         raise ValueError("Output budget leaves no context for input")
     if experiment["context_tokens"] != 4096:
         raise ValueError("Initial VRAM budgets are only declared for 4096 tokens; add a budget profile before expanding")
+    if len(experiment["pipelines"]) != len(set(experiment["pipelines"])):
+        raise ValueError("Duplicate pipelines")
+    if not fixtures:
+        raise ValueError("At least one fixture is required")
     if not experiment["seeds"] or any(type(s) is not int or s < 0 for s in experiment["seeds"]):
         raise ValueError("Seeds must be nonnegative integers")
+    if len(experiment["seeds"]) != len(set(experiment["seeds"])):
+        raise ValueError("Duplicate seeds")
+    top_p = experiment["top_p"]
+    if type(top_p) not in (int, float) or not 0 < top_p <= 1:
+        raise ValueError("top_p must be in (0, 1]")
     t = experiment["temperature"]
     if type(t) not in (int, float) or not math.isfinite(t) or t < 0:
         raise ValueError("Invalid temperature")
