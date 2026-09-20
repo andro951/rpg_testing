@@ -6,12 +6,12 @@ Environment: Linux x86-64, Python 3.13.5, jsonschema 4.26.0. No NVIDIA GPU utili
 
 `python -m unittest discover -s tests -v`
 
-**49 tests passed** in the final direct invocation (3.579 seconds). The bootstrap also ran the same suite successfully before each of the two final smoke runs.
+**50 tests passed** in the final direct invocation. The bootstrap also ran the same suite successfully before each of the two final smoke runs.
 
 Coverage by component:
 
 - Core: strict JSON parsing, duplicate/non-finite rejection, JSON-type-aware comparison, all six JSON Patch operations, semantic list/set operations, pointer escapes, bounds, atomic application, schema validation, expected-state equivalence, missed/wrong/unsupported edits, unchanged fields, configuration validation, exclusion of ground truth from prompts, immutable result checksums and corrupt-file handling.
-- Runtime: all four pipelines; grouping by model; per-case resume; wrong answers counted as completed; bounded infrastructure retries; truncated output; preservation of an analysis response when a later request fails; experiment identities; artifact shard matching and hashing; CUDA-visible GPU selection; single-GPU LM Studio guard; load-command construction; mocked LM Studio lifecycle and refusal to unload an unrelated model; actual localhost HTTP client/stub exchange; context/endpoint/settings guards; bootstrap lock behavior.
+- Runtime: all four pipelines; grouping by model; per-case resume; wrong answers counted as completed; bounded infrastructure retries; truncated output; preservation of an analysis response when a later request fails; experiment identities; artifact shard matching and hashing; CUDA-visible GPU selection; single-GPU LM Studio guard; preservation of the scheduler-provided CUDA visibility in the child server; load-command construction; mocked LM Studio lifecycle and refusal to unload an unrelated model; actual localhost HTTP client/stub exchange; context/endpoint/settings guards; bootstrap lock behavior.
 - Git: temporary local bare repositories test fast-forward sync, dirty-checkout refusal, separate result branches/worktrees, result push/reopen, protection against unrelated staged files, and worker-ID validation. These tests do not touch the user's remote repository.
 - Analysis: checksum validation, exclusion of simulated records by default, deduplication of copied records, refusal of distinct completions sharing an identity, separate infrastructure-error accounting, JSON/CSV export, and empty/missing-input handling.
 - Unity script: Bash syntax and refusal to run outside a Slurm allocation. No actual Unity job was submitted.
@@ -21,9 +21,9 @@ Coverage by component:
 Commands:
 
 ```text
-python run_worker.py --no-sync --mock --output .local/final-smoke
-python run_worker.py --no-sync --mock --output .local/final-smoke
-python -m rpgbench.analyze .local/final-smoke --include-simulated --output .local/final-smoke-analysis
+python run_worker.py --no-sync --mock --output .local/release-smoke
+python run_worker.py --no-sync --mock --output .local/release-smoke
+python -m rpgbench.analyze .local/release-smoke --include-simulated --output .local/release-smoke-analysis
 ```
 
 First run: **24 new completed cases**, three model-load groups, zero infrastructure errors.

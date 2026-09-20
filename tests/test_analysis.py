@@ -87,4 +87,20 @@ class AnalysisTests(unittest.TestCase):
                 with self.assertRaises(BackendError):backend.load(model,binding,exp)
                 cmd.assert_not_called()
 
+    def test_llama_child_preserves_scheduler_cuda_visibility(self):
+        worker={'backend':'llama_cpp','base_url':'http://127.0.0.1:8080/v1'}
+        model=read_json(ROOT/'models.json')[0];exp=read_json(ROOT/'experiment.json')
+        with tempfile.TemporaryDirectory() as d:
+            backend=ManagedBackend(worker,Path(d),{'uuid':'GPU-test'})
+            alias='rpgbench-'+model['id']
+            with patch.dict('os.environ',{'CUDA_VISIBLE_DEVICES':'scheduler-device'}), \
+                 patch('rpgbench.backends.socket.socket') as sock, \
+                 patch('rpgbench.backends.subprocess.Popen') as process, \
+                 patch.object(backend.client,'models',return_value={'data':[{'id':alias}]}):
+                sock.return_value.__enter__.return_value.connect_ex.return_value=1
+                process.return_value.poll.return_value=None
+                backend.load(model,{'files':model['files']},exp)
+                self.assertEqual(process.call_args.kwargs['env']['CUDA_VISIBLE_DEVICES'],'scheduler-device')
+                backend.unload()
+
 if __name__=='__main__':unittest.main()

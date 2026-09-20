@@ -223,7 +223,8 @@ class ManagedBackend:
                     if sock.connect_ex((host.hostname,host.port or 8080))==0:
                         raise BackendError("Server port is already in use; refusing to control an unrelated process")
                 self.log_file=(self.log_dir/(model['id']+'.load.txt')).open('w',encoding='utf-8')
-                env=dict(os.environ,CUDA_VISIBLE_DEVICES=self.gpu['uuid'])
+                env=dict(os.environ)
+                env.setdefault('CUDA_VISIBLE_DEVICES', self.gpu['uuid'])
                 self.process=subprocess.Popen(command_line,stdout=self.log_file,stderr=subprocess.STDOUT,env=env)
             else:
                 raise BackendError("Unsupported backend")
