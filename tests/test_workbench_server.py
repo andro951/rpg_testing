@@ -15,6 +15,10 @@ from workbench.domain import read_json
 
 ROOT=Path(__file__).resolve().parents[1]
 
+def configured_case_count(folder):
+    tests=[read_json(p) for p in folder.glob('*.json')]
+    return sum(t.get('repetitions',1)*sum(v.get('enabled',True) for v in t['variants']) for t in tests if t.get('enabled',True))
+
 class ServerTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
@@ -57,13 +61,13 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.app.store.all(),[]);self.assertTrue(self.app.report['ready'])
     def test_run_resume_and_read_results(self):
         self.assertEqual(self.req('/api/run',{})[0],202);self.wait()
-        rs=json.loads(self.req('/api/results')[1]);self.assertEqual(len(rs),8)
+        rs=json.loads(self.req('/api/results')[1]);self.assertEqual(len(rs),configured_case_count(self.root/'test_specs'))
         self.req('/api/run',{});self.wait();self.assertEqual(self.app.completed_now,0)
     def test_export_and_summary(self):
         self.app.run();status,body,headers=self.req('/api/export')
         self.assertEqual(status,200);z=zipfile.ZipFile(io.BytesIO(body))
         self.assertIn('summary.csv',z.namelist());self.assertIn('summary.json',z.namelist())
-        self.assertEqual(json.loads(self.req('/api/analysis')[1])['records'],8)
+        self.assertEqual(json.loads(self.req('/api/analysis')[1])['records'],configured_case_count(self.root/'test_specs'))
     def test_unknown_api(self):self.assertEqual(self.req('/api/exec',{'cmd':'whatever'})[0],404)
     def test_unsafe_test_id(self):
         test=read_json(self.root/'test_specs/time_only.json');test['id']='../oops'

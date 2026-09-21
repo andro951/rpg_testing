@@ -15,6 +15,10 @@ from workbench import preflight
 
 ROOT=Path(__file__).resolve().parents[1]
 
+def configured_case_count(folder):
+    tests=[read_json(p) for p in folder.glob('*.json')]
+    return sum(t.get('repetitions',1)*sum(v.get('enabled',True) for v in t['variants']) for t in tests if t.get('enabled',True))
+
 class ControllerTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
@@ -23,13 +27,14 @@ class ControllerTests(unittest.TestCase):
     def test_preflight_no_inference(self):
         with patch('workbench.controller.DemoBackend') as backend:
             self.assertTrue(self.app.check()['ready']);backend.assert_not_called()
-    def test_eight_cases_and_resume(self):
-        self.app.run();self.assertEqual(self.app.completed_now,8)
-        records=self.app.store.all();self.assertEqual(len(records),8)
+    def test_configured_cases_and_resume(self):
+        expected=configured_case_count(self.root/'test_specs')
+        self.app.run();self.assertEqual(self.app.completed_now,expected)
+        records=self.app.store.all();self.assertEqual(len(records),expected)
         self.assertTrue(all(r['simulated'] and r['score']['exact_match'] for r in records))
         self.app.run();self.assertEqual(self.app.completed_now,0)
         self.assertEqual(self.app.report['plan']['pending'],0)
-        self.assertEqual(self.app.report['plan']['complete'],8)
+        self.assertEqual(self.app.report['plan']['complete'],expected)
     def test_delete_result_reruns_one(self):
         self.app.run();r=self.app.store.all()[0]
         self.app.delete_result(r['model_id'],r['case_id']);self.app.run()
@@ -84,7 +89,7 @@ class ControllerTests(unittest.TestCase):
             supports_schema=True;supports_cache=True
             def generate(self,*a):return {'text':'not JSON','finish_reason':'stop'}
         with patch('workbench.controller.DemoBackend',Broken):self.app.run()
-        records=self.app.store.all();self.assertEqual(len(records),8)
+        records=self.app.store.all();self.assertEqual(len(records),configured_case_count(self.root/'test_specs'))
         self.assertTrue(all(r['status']=='completed' and not r['score']['valid'] for r in records))
     def test_pins_from_results_no_weights(self):
         self.app.run();m={'id':'demo-2b','files':['demo.gguf']}

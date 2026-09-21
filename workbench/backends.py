@@ -214,15 +214,17 @@ class DemoBackend:
         self.counter+=1
         source=parse(messages[1]['content'].split('\nSOURCE\n',1)[1])
         instruction=messages[-1]['content'];event=source.get('new_information','')
-        is_time='minutes' in event
+        is_inventory='A2667' in event and 'received' in event.lower() and 'shipped' in event.lower()
+        is_time='minutes' in event and not is_inventory
         if schema and schema.get('type')=='boolean':
             text='true' if ('time' in instruction.lower() and is_time) or 'correct' in instruction.lower() else 'false'
         elif schema and schema.get('type')=='string':text='"14:20"'
-        elif 'Describe' in instruction:text='The time changes to 14:20.' if is_time else 'Tom adds a green jacket and does not move.'
+        elif 'Describe' in instruction:
+            text='On-hand inventory changes from 42 to 49 units. Product metadata, reservations, reorder point, units on order, backorder status, supplier, bin location, and lifecycle status do not change.' if is_inventory else ('The time changes to 14:20.' if is_time else 'Tom adds a green jacket and does not move.')
         elif 'narrat' in instruction.lower():text='Tom waits in the kitchen. Exactly five minutes pass. The clock now reads 14:20.'
         else:
             semantic='list_add' in instruction or 'semantic' in instruction
-            patch=[{'op':'set' if semantic else 'replace','path':'/time','value':'14:20'}] if is_time else [{'op':'list_add' if semantic else 'add','path':'/characters/Tom/clothing'+('' if semantic else '/-'),'value':'green jacket'}]
+            patch=([{'op':'set' if semantic else 'replace','path':'/inventory/on_hand_units','value':49}] if is_inventory else ([{'op':'set' if semantic else 'replace','path':'/time','value':'14:20'}] if is_time else [{'op':'list_add' if semantic else 'add','path':'/characters/Tom/clothing'+('' if semantic else '/-'),'value':'green jacket'}]))
             text=canonical(patch)
         return {'text':text,'finish_reason':'stop','request_seconds':.02,'first_token_seconds':.01,
                 'usage':{},'timings':{},'cached_tokens':1024 if cache=='on' and self.counter>1 else 0,
