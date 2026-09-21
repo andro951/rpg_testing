@@ -358,3 +358,35 @@ Until Isaac asks to apply the planned changes:
 - Do not modify current runner behavior based on this document.
 
 Only keep this planning document updated as requirements evolve.
+
+
+## 17. Hardware-tier scheduling decision
+
+Do NOT run every smaller model on every larger GPU.
+
+Use discrete VRAM tiers and allow opportunistic testing approximately one tier above the model's assigned requirement.
+
+Current intended behavior:
+- Models assigned to **8 GB** should run on 8 GB hardware and may also be run on nearby 11/12 GB hardware when available.
+- Treat 11 GB and 12 GB GPUs as effectively the same comparison tier for models whose assigned requirement is 8 GB or lower.
+- A model assigned to **12 GB** must wait for hardware that actually provides at least 12 GB; an 11 GB GPU does NOT satisfy a 12 GB requirement.
+- Higher tiers should follow the same principle: test on the assigned tier and, where useful, the next nearby tier up rather than propagating the test indefinitely to 24/40/80 GB hardware.
+- Do not spend expensive 80 GB accelerator time rerunning small 8 GB models unless a specific experiment explicitly asks for that comparison.
+- Exact tier mapping (8, 12, 16, 24, 32, 40, 80, etc.) and what counts as the immediately adjacent tier should be represented explicitly in scheduler policy rather than inferred from arbitrary percentages.
+- The UI should show why a model is scheduled on a given GPU: **assigned tier** or **one-tier-up comparison**.
+
+## 18. Preflight fix interaction is always manual
+
+Preflight may detect and offer a specific repair action, but it must NEVER execute a repair automatically.
+
+Desired flow:
+1. Run Preflight.
+2. Show issues and their state.
+3. For a safely fixable issue, show a button whose text describes the exact action.
+4. Isaac manually clicks the button.
+5. Perform only that one repair.
+6. Verify the repair.
+7. Rerun/continue Preflight and present the next issue.
+
+There is no automatic chain of fixes and no silent remediation.
+
