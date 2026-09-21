@@ -11,6 +11,7 @@ from workbench.controller import Controller
 from workbench.domain import write_json,read_json
 from workbench.restarts import UpdateCoordinator,consume_request
 from workbench.unity import make_script
+from test_unity_script import BASH
 ROOT=Path(__file__).resolve().parents[1]
 
 class RestartTests(unittest.TestCase):
@@ -64,11 +65,11 @@ class RestartTests(unittest.TestCase):
         self.assertIn('--signal=B:USR1@60',make_script('16'))
         self.assertIn('.venv-workbench/bin/python',make_script('16'))
         self.assertIn('kill -USR1',make_script('16'))
-    @unittest.skipUnless(shutil.which('bash'),'Bash is not installed')
+    @unittest.skipUnless(BASH,'No working Bash; shell checks also run on Linux')
     def test_generated_slurm_shell_syntax(self):
         import subprocess
         for tier in ['8','11','12','16','24','32','40','48','80']:
-            result=subprocess.run(['bash','-n'],input=make_script(tier),text=True,capture_output=True)
+            result=subprocess.run([BASH,'-n'],input=make_script(tier),text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
 
 if __name__=='__main__':unittest.main()
