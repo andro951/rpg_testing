@@ -81,12 +81,8 @@ class ControllerTests(unittest.TestCase):
         from workbench.workflows import Cancelled
         with self.assertRaises(Cancelled):self.app.run()
     def test_errors_saved_not_hidden_retry(self):
-        class Broken:
-            load_metadata={}
-            def __init__(self,*a):pass
-            def load(self,*a):return {}
-            def unload(self):pass
-            supports_schema=True;supports_cache=True
+        from workbench.backends import DemoBackend
+        class Broken(DemoBackend):
             def generate(self,*a):return {'text':'not JSON','finish_reason':'stop'}
         with patch('workbench.controller.DemoBackend',Broken):self.app.run()
         records=self.app.store.all();self.assertEqual(len(records),configured_case_count(self.root/'test_specs'))

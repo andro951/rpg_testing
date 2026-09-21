@@ -7,12 +7,12 @@ ROOT=Path(__file__).resolve().parents[1]
 class ProcessTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-  self.b=NativeBackend({'backend':'llamacpp','llama_path':sys.executable,'runtime_cache':self.tmp.name},{'uuid':'GPU-SIMULATED'})
+  self.b=NativeBackend({'backend':'llamacpp','llama_path':sys.executable,'runtime_cache':self.tmp.name},{'uuid':'GPU-SIMULATED','name':'SIMULATED GPU'})
   self.addCleanup(self.b.unload)
   def args(exe,model,context,help_text,layers='all'):
    return [sys.executable,str(ROOT/'tests/helpers/native_stub.py'),'--port','1235','--alias',self.b.owned_id,'--ctx-size',str(context['allocated_tokens'])]
   self.patcher=patch.object(self.b,'launch_arguments',side_effect=args);self.patcher.start();self.addCleanup(self.patcher.stop)
-  self.cap=patch('workbench.native.capabilities',return_value={'help':'','version':'SIMULATED STUB'});self.cap.start();self.addCleanup(self.cap.stop)
+  self.cap=patch('workbench.native.capabilities',return_value={'help':'','version':'SIMULATED STUB','devices':'CUDA0: SIMULATED GPU'});self.cap.start();self.addCleanup(self.cap.stop)
  def load(self):return self.b.load({'id':'integration-stub','paths':['not-used.gguf']},{'allocated_tokens':8192,'native_tokens':65536})
  def test_owned_process_load_probe_generation_unload(self):
   metadata=self.load();process=self.b.process

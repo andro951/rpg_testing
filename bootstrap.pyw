@@ -30,9 +30,12 @@ def main():
         def install():
             try:
                 log=ROOT/'.local/setup.log';log.parent.mkdir(exist_ok=True)
+                temporary=ROOT/'.local/setup-temp';temporary.mkdir(exist_ok=True)
+                package_cache=ROOT/'.local/package-cache';package_cache.mkdir(exist_ok=True)
+                install_env=dict(os.environ,TEMP=str(temporary),TMP=str(temporary),TMPDIR=str(temporary),PIP_CACHE_DIR=str(package_cache))
                 with log.open('w',encoding='utf-8') as f:
-                    subprocess.run([sys.executable,'-m','venv',str(env)],stdout=f,stderr=subprocess.STDOUT,check=True,**flags)
-                    subprocess.run([str(python),'-m','pip','install','-r',str(ROOT/'requirements.txt')],stdout=f,stderr=subprocess.STDOUT,check=True,**flags)
+                    subprocess.run([sys.executable,'-m','venv',str(env)],stdout=f,stderr=subprocess.STDOUT,check=True,env=install_env,**flags)
+                    subprocess.run([str(python),'-m','pip','install','-r',str(ROOT/'requirements.txt')],stdout=f,stderr=subprocess.STDOUT,check=True,env=install_env,**flags)
                 outcome.append(None)
             except Exception as exc:outcome.append(str(exc))
             finally:done.set()

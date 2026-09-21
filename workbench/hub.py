@@ -46,7 +46,7 @@ class HubClient:
         params=urlencode({'search':query.strip(),'filter':'gguf','sort':'downloads','direction':-1,'limit':30,'full':'true'})
         data=self.json('https://huggingface.co/api/models?'+params)
         return [{'id':m['id'],'downloads':m.get('downloads'),'likes':m.get('likes'),'updated':m.get('lastModified'),
-                 'gated':m.get('gated',False),'license':m.get('cardData',{}).get('license')} for m in data]
+                 'gated':m.get('gated',False),'license':(m.get('cardData') or {}).get('license')} for m in data]
     def variants(self,repo,target_gb=8):
         safe_repo(repo)
         info=self.json('https://huggingface.co/api/models/'+repo+'?blobs=true')
@@ -71,21 +71,21 @@ def group_variants(info,target_gb):
         complete=not split or [f['rfilename'] for f in files]==[f'{split[1]}-{i:05}-of-{int(split[3]):05}.gguf' for i in range(1,int(split[3])+1)]
         match=re.search(r'(IQ[1-8]_[A-Z0-9_]+|Q[2-8]_[A-Z0-9_]+|BF16|F16|F32)(?=$|[^A-Z0-9_])',name.upper())
         quant=match[1] if match else 'UNKNOWN'
-        sizes=[f.get('size',f.get('lfs',{}).get('size')) for f in files]
+        sizes=[f.get('size',(f.get('lfs') or {}).get('size')) for f in files]
         size=sum(sizes) if all(type(n)is int and n>0 for n in sizes) else None
         paths=[f['rfilename'] for f in files];basenames=[PurePosixPath(p).name for p in paths]
         if len(set(basenames))!=len(basenames):continue
-        hashes={PurePosixPath(f['rfilename']).name:f.get('lfs',{}).get('sha256') for f in files}
+        hashes={PurePosixPath(f['rfilename']).name:(f.get('lfs') or {}).get('sha256') for f in files}
         hashes=hashes if all(isinstance(h,str) and re.fullmatch(r'[0-9a-f]{64}',h) for h in hashes.values()) else {}
         item={'id':'hf-'+digest({'repo':repo,'revision':revision,'files':paths})[:20],
-              'repo_id':repo,'revision':revision,'base_model':info.get('cardData',{}).get('base_model') or repo,
+              'repo_id':repo,'revision':revision,'base_model':(info.get('cardData') or {}).get('base_model') or repo,
               'files':basenames,'remote_files':dict(zip(basenames,paths)),'quantization':quant,'size_bytes':size,
               'file_sizes':dict(zip(basenames,sizes)),'sha256':hashes,'complete':complete,'shards':len(files),
-              'license':info.get('cardData',{}).get('license'),'gated':info.get('gated',False),
+              'license':(info.get('cardData') or {}).get('license'),'gated':info.get('gated',False),
               'required_vram_gb':None,'vram_status':'unassigned'}
         out.append(item)
     recommend(out,target_gb)
-    return {'repo_id':repo,'revision':revision,'variants':out,'license':info.get('cardData',{}).get('license'),
+    return {'repo_id':repo,'revision':revision,'variants':out,'license':(info.get('cardData') or {}).get('license'),
             'note':'Sizes are download sizes, not runtime VRAM. Recommendations are heuristics, never quality or fit measurements.'}
 
 

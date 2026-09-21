@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 from .execution_policy import (CPUOffload, ContextCapacity, DoesNotFit, RunFailure, RuntimeStall,
-    UnverifiedPlacement, LOAD_TIMEOUT_SECONDS, classify_load_failure, placement)
+    UnverifiedPlacement, LOAD_TIMEOUT_SECONDS, PRIMARY_CASE_SECONDS, classify_load_failure, placement)
 from .inventory import executable
 from .workflows import Cancelled, Unsupported
 
@@ -25,7 +25,7 @@ def diagnostic_command(args, timeout=30):
 
 def capabilities(exe, preparation=False):
     help_text=diagnostic_command([exe,'--help'])
-    required=['--ctx-size','--n-predict','--gpu-layers','--parallel','--no-context-shift','--slots','--fit','--api-key','--list-devices']
+    required=['--ctx-size','--n-predict','--gpu-layers','--parallel','--no-context-shift','--slots','--fit','--api-key','--list-devices','--device']
     missing=[flag for flag in required if not re.search(re.escape(flag)+r'(?=[\s,=]|$)',help_text)]
     if missing:raise RunFailure('Runtime lacks required controls: '+', '.join(missing))
     result={'help':help_text,'version':diagnostic_command([exe,'--version'])}
@@ -37,6 +37,19 @@ def capabilities(exe, preparation=False):
     return result
 
 
+def select_device(report,gpu_name):
+    """Pin the runtime GPU by detected hardware name, not an assumed Vulkan/CUDA ordinal."""
+    def norm(text):return re.sub(r'[^a-z0-9]','',text.lower().replace('nvidia','').replace('geforce',''))
+    wanted=norm(gpu_name);matches=[]
+    for line in report.splitlines():
+        match=re.match(r'\s*((?:CUDA|Vulkan)\d+)\s*:\s*(.+)',line,re.I)
+        if match and wanted and wanted in norm(match[2]):matches.append(match[1])
+    cuda=[name for name in matches if name.upper().startswith('CUDA')]
+    preferred=cuda or matches
+    if len(preferred)!=1:raise RunFailure('Cannot uniquely match the detected GPU to llama.cpp devices: '+gpu_name)
+    return preferred[0]
+
+
 class NativeBackend:
     supports_cache=True
     supports_schema=True
@@ -45,10 +58,10 @@ class NativeBackend:
         self.settings,self.gpu,self.log=settings,gpu,log
         if settings.get('backend','llamacpp')!='llamacpp':raise ValueError('Only native llama.cpp is supported')
         self.token=secrets.token_urlsafe(32)
-        self.transport=Transport('http://127.0.0.1:1235',self.token,timeout=30)
+        self.transport=Transport('http://127.0.0.1:1235',self.token,timeout=PRIMARY_CASE_SECONDS+30)
         self.process=None;self.reader=None;self.owned_id=None;self.context=None
         self.load_metadata={};self.version_info={};self.lines=[];self.timed_out=False
-        self.requested_layers='all';self.execution_class='full_gpu'
+        self.requested_layers='all';self.execution_class='full_gpu';self.device=None
 
     def cancel(self):
         self.transport.cancel()
@@ -70,13 +83,17 @@ class NativeBackend:
                 error.partial=getattr(exc,'partial',{})
                 raise error from exc
             raise
-        finally:timer.cancel()
+        finally:
+            timer.cancel()
+            if threading.current_thread() is not timer:timer.join(timeout=2)
 
     def launch_arguments(self,exe,model,context,help_text,layers='all'):
         args=[exe,'--model',model['paths'][0],'--alias',self.owned_id,'--host','127.0.0.1','--port','1235',
               '--ctx-size',str(context['allocated_tokens']),'--n-predict','-1','--gpu-layers',str(layers),
               '--fit','off','--parallel','1','--split-mode','none','--no-context-shift','--slots','--api-key',self.token]
-        for flag in ('--jinja','--no-webui','--no-mmproj','--op-offload','--kv-offload'):
+        if self.device:args += ['--device',self.device]
+        if '--cache-ram' in help_text:args += ['--cache-ram','0']
+        for flag in ('--jinja','--no-webui','--no-mmproj','--op-offload','--kv-offload','--no-cache-idle-slots','--offline'):
             if flag in help_text:args.append(flag)
         for flag in ('--n-cpu-moe','--n-cpu-ffn'):
             if flag in help_text:args += [flag,'0']
@@ -88,12 +105,14 @@ class NativeBackend:
         self.owned_id='rpg-workbench-'+model['id']
         exe=executable('llama-server',self.settings.get('llama_path',''))
         if not exe:raise RunFailure('Select or install llama-server in Worker setup')
-        info=capabilities(exe,preparation=True);self.version_info={'llama_server':info['version']}
+        info=capabilities(exe,preparation=False);self.version_info={'llama_server':info['version']}
+        self.device=select_device(info['devices'],self.gpu.get('name',''))
         with socket.socket() as sock:
             sock.settimeout(.25)
             if sock.connect_ex(('127.0.0.1',1235))==0:
                 raise RunFailure('Port 1235 belongs to another process; it was not stopped')
         args=self.launch_arguments(exe,model,context,info['help'],layers)
+        # Environment defaults must not secretly request CPU experts, another model, or a log file.
         env={k:v for k,v in os.environ.items() if not k.startswith(('LLAMA_ARG_','HF_'))}
         if 'CUDA_VISIBLE_DEVICES' not in env and self.gpu.get('uuid'):env['CUDA_VISIBLE_DEVICES']=self.gpu['uuid']
         cache=Path(self.settings.get('runtime_cache',Path.cwd()/'.local/runtime-cache'));cache.mkdir(parents=True,exist_ok=True)
@@ -102,7 +121,7 @@ class NativeBackend:
         started=time.perf_counter()
         try:
             self.process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,
-                                          encoding='utf-8',errors='replace',env=env,**flags)
+                                          encoding='utf-8',errors='replace',env=env,cwd=str(Path(exe).resolve().parent),**flags)
             process=self.process
             def drain():
                 for line in process.stdout:
@@ -123,10 +142,15 @@ class NativeBackend:
                     except Exception:
                         if self.timed_out:raise RuntimeStall('Model load timed out')
                     time.sleep(.15)
+                deadline=time.monotonic()+1
+                while placement(self.lines)['status']=='unverified' and time.monotonic()<deadline:
+                    if cancel and cancel.is_set():raise Cancelled('Stopped while verifying placement')
+                    time.sleep(.01)
                 evidence=placement(self.lines)
                 if evidence['status']=='unverified':raise UnverifiedPlacement('No verifiable layer-placement report',evidence)
                 if execution_class=='full_gpu' and evidence['status']!='full_gpu':raise CPUOffload('Partial GPU placement',evidence)
                 if execution_class=='cpu_offloaded' and evidence['status']=='full_gpu':
+                    # Do not label a CPU-offload trial as full-GPU success: retry policy must explicitly request all layers.
                     raise RunFailure('Hybrid load unexpectedly reports all layers on GPU',evidence)
                 if evidence.get('gpu_layers',0)==0:raise DoesNotFit('No model layers were placed on the GPU',evidence)
                 models=self.transport.request('/v1/models')

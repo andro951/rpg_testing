@@ -72,12 +72,13 @@ class FakeTransport:
 class AdapterTests(unittest.TestCase):
     def backend(self,kind):
         b=LocalBackend({'backend':kind},{'uuid':'GPU-test'});b.context=4096;b.owned_id='chosen-model';b.transport=FakeTransport();return b
-    def test_lmstudio_omits_arbitrary_output_limit(self):
-        b=self.backend('lmstudio');b.generate([{'role':'user','content':'test'}],{'temperature':0,'seed':42},{'type':'boolean'})
+    def test_removed_studio_backend_rejected(self):
+        with self.assertRaises(ValueError):self.backend('lmstudio')
+    def test_native_structured_output(self):
+        b=self.backend('llamacpp');b.generate([],{'temperature':0},{'type':'boolean'})
         body=b.transport.calls[-1][1]
-        self.assertNotIn('max_tokens',body);self.assertNotIn('max_output_tokens',body)
         self.assertEqual(body['response_format']['json_schema']['schema'],{'type':'boolean'})
-        self.assertEqual(body['model'],'chosen-model')
+        self.assertEqual(body['max_tokens'],-1)
     def test_native_unlimited_and_cache_off_erase(self):
         b=self.backend('llamacpp');r=b.generate([],{'temperature':0},None,'off')
         body=b.transport.calls[-1][1]
@@ -86,25 +87,21 @@ class AdapterTests(unittest.TestCase):
     def test_native_cache_on(self):
         b=self.backend('llamacpp');b.generate([],{},None,'on')
         self.assertTrue(b.transport.calls[-1][1]['cache_prompt'])
-    def test_lmstudio_controlled_cache_not_claimed(self):
-        b=self.backend('lmstudio')
-        with self.assertRaises(Unsupported):b.generate([],{},None,'on')
-        self.assertEqual(b.transport.calls,[])
     def test_native_input_exhaustion_no_generation(self):
         b=self.backend('llamacpp');b.transport.token_count=4096
-        with self.assertRaises(BackendError):b.generate([],{},None)
+        from workbench.execution_policy import ContextCapacity
+        with self.assertRaises(ContextCapacity):b.generate([],{},None)
         self.assertNotIn('/v1/chat/completions',[x[0] for x in b.transport.calls])
     def test_missing_cache_reset_confirmation(self):
         b=self.backend('llamacpp');b.transport.request=lambda *a,**k:{}
         with self.assertRaises(Unsupported):b.clear_cache()
     def test_seed_and_temperature_are_per_request(self):
-        b=self.backend('lmstudio')
+        b=self.backend('llamacpp')
         b.generate([],{'temperature':.8,'seed':7},None)
         b.generate([],{'temperature':0,'seed':7},None)
-        self.assertEqual([x[1]['temperature'] for x in b.transport.calls],[.8,0])
-        self.assertEqual([x[1]['seed'] for x in b.transport.calls],[7,7])
-    def test_unload_only_owned_instance(self):
-        b=self.backend('lmstudio');b.unload()
-        self.assertEqual(b.transport.calls[-1][:2],('/api/v1/models/unload',{'instance_id':'chosen-model'}))
-        self.assertIsNone(b.owned_id)
+        self.assertEqual([x[1]['temperature'] for x in b.transport.calls if x[0]=='/v1/chat/completions'],[.8,0])
+        self.assertEqual([x[1]['seed'] for x in b.transport.calls if x[0]=='/v1/chat/completions'],[7,7])
+    def test_unload_does_not_touch_external_server(self):
+        b=self.backend('llamacpp');b.unload()
+        self.assertEqual(b.transport.calls,[]);self.assertIsNone(b.owned_id)
 if __name__=='__main__':unittest.main()

@@ -98,7 +98,7 @@ class EdgeTests(unittest.TestCase):
         source=(ROOT/'workbench/domain.py').read_text()
         self.assertIn("'inventory.py'",source.split('def code_fingerprint():',1)[1].split('def case_id',1)[0])
     def test_health_check_not_semantic_readiness_gate(self):
-        source=(ROOT/'workbench/backends.py').read_text()
+        source=(ROOT/'workbench/native.py').read_text()
         self.assertIn("self.load_metadata['health_exact_ready']",source)
         self.assertNotIn("raise BackendError('Not READY')",source)
 if __name__=='__main__':unittest.main()

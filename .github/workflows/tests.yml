@@ -1,7 +1,7 @@
 name: Harness tests
 on:
   push:
-    branches: [main]
+    branches: [main, native-unattended-upgrade]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -24,10 +24,10 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
       - name: Archive public source for review
-        if: matrix.os == 'ubuntu-latest'
+        if: always() && matrix.os == 'ubuntu-latest'
         run: git archive --format=zip HEAD -o repository-source.zip
       - uses: actions/upload-artifact@v4
-        if: matrix.os == 'ubuntu-latest'
+        if: always() && matrix.os == 'ubuntu-latest'
         with:
           name: public-repository-source
           path: repository-source.zip
@@ -37,6 +37,7 @@ jobs:
     timeout-minutes: 15
     env:
       WORKBENCH_SCREENSHOT: workbench-browser.png
+      WORKBENCH_MODELS_SCREENSHOT: workbench-models.png
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,10 +46,13 @@ jobs:
       - run: python -m pip install -r requirements.txt playwright
       - run: python -m playwright install --with-deps chromium
       - run: python tests/browser_smoke.py
+      - run: python tests/browser_native_setup.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: workbench-browser-check
-          path: workbench-browser.png
+          path: |
+            workbench-browser.png
+            workbench-models.png
           if-no-files-found: ignore
           retention-days: 7

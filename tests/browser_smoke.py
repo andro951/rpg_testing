@@ -39,8 +39,6 @@ def main():
                 base=f'http://127.0.0.1:{server.server_port}'
                 bridge=os.environ.get('WORKBENCH_BROWSER_BRIDGE')=='1'
                 if bridge:
-                    # For hosted browsers with network policy restrictions. This tests the
-                    # unchanged UI JavaScript through real Python loopback HTTP, not browser networking.
                     def transport(path,options):
                         data=options.get('body')
                         request=urllib.request.Request(base+path,data=data.encode() if data else None,headers=options.get('headers',{}))
@@ -81,8 +79,15 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 page.locator('nav button[data-page="tests"]').click();expect(page.locator('#test-list article')).to_have_count(base_test_count)
                 page.locator('#example-select').select_option('cached_questions');page.locator('#import-example').click()
                 expect(page.locator('#test-list article')).to_have_count(base_test_count+1)
-                page.locator('nav button[data-page="overview"]').click();page.locator('#run').click()
-                expect(page.locator('#session-complete')).to_have_text('2',timeout=15000)
+                page.locator('nav button[data-page="overview"]').click();page.locator('#preflight').click()
+                expect(page.locator('#readiness')).to_have_text('Ready',timeout=15000)
+                for _ in range(100):
+                    if app.report is not None and not app.operation.locked():break
+                    page.wait_for_timeout(100)
+                assert app.report is not None and not app.operation.locked()
+                expected_pending=app.report['plan']['pending']
+                page.locator('#run').click()
+                expect(page.locator('#session-complete')).to_have_text(str(expected_pending),timeout=15000)
                 expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)
                 with page.expect_download() as info:page.locator('#export').click()
                 assert info.value.suggested_filename.endswith('.zip')
@@ -96,6 +101,10 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 page.set_viewport_size({'width':800,'height':1000})
                 page.locator('nav button[data-page="overview"]').click()
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'Horizontal overflow'
+                page.locator('nav button[data-page="hub"]').click()
+                expect(page.locator('#hub-query')).to_be_visible()
+                expect(page.locator('#download-destination')).to_contain_text('CHOOSE A FOLDER')
+                assert not page.locator('#backend').count(),'LM Studio selector must be removed'
                 assert not errors,errors
                 browser.close()
                 print(('LOCAL HTTP BRIDGE; browser networking not exercised. ' if bridge else '')+'PASS: browser pairing, preflight, run, resume, deletion/rerun, models, stable dropdown, cached workflow import, export, host browsing, pairing display and responsive layout.')

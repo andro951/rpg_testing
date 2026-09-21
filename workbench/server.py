@@ -100,7 +100,7 @@ class Handler(BaseHTTPRequestHandler):
                 for f in sorted(p.iterdir(),key=lambda p:(not p.is_dir(),p.name.lower())):
                     if f.is_symlink() or f.name.startswith('.'):continue
                     try:
-                        if f.is_dir() or f.suffix.lower() in ('.exe','.pem','.key','.pub') or f.name in ('lms','llama-server','id_ed25519','id_rsa'):
+                        if f.is_dir() or f.suffix.lower() in ('.exe',) or f.name in ('llama-server',):
                             entries.append({'name':f.name,'path':str(f),'directory':f.is_dir()})
                     except OSError:continue
                 roots=[f'{chr(d)}:/' for d in range(65,91) if Path(f'{chr(d)}:/').is_dir()] if os.name=='nt' else ['/']
@@ -132,6 +132,9 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/run':app.start('run');return self.send(202,{'started':True})
             if path=='/api/fix':app.start('fix',data);return self.send(202,{'started':True})
             if path=='/api/control':app.control(data['action']);return self.send(200,{'ok':True})
+            if path in ('/api/hub/search','/api/hub/variants','/api/hub/download','/api/runtime/list','/api/runtime/install'):
+                kind={'/api/hub/search':'hub_search','/api/hub/variants':'hub_variants','/api/hub/download':'hub_download','/api/runtime/list':'runtime_list','/api/runtime/install':'runtime_install'}[path]
+                app.start(kind,data);return self.send(202,{'started':True})
             if path=='/api/settings':app.configure(data);return self.send(200,{'ok':True})
             if path=='/api/model/assign':app.assign_model(data['id'],data['required_vram_gb']);return self.send(200,{'ok':True})
             if path=='/api/result/delete':app.delete_result(data['model_id'],data['case_id']);return self.send(200,{'ok':True})

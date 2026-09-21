@@ -19,7 +19,7 @@ class DownloadTests(unittest.TestCase):
         obj=io.BytesIO(self.data);obj.headers={'Content-Length':str(len(self.data))};return obj
     def test_download_verified(self):
         download_model(self.model,self.root,self.cancel,opener=self.opener)
-        self.assertEqual((self.root/'publisher/model/test.gguf').read_bytes(),self.data)
+        self.assertEqual((self.root/'publisher/model/main/test.gguf').read_bytes(),self.data)
     def test_no_overwrite_verified_existing(self):
         download_model(self.model,self.root,self.cancel,opener=self.opener)
         download_model(self.model,self.root,self.cancel,opener=lambda *a,**k:self.fail('Must not redownload'))
