@@ -35,12 +35,12 @@ class LauncherRestartTests(unittest.TestCase):
             with patch('workbench.backends.Transport',FakeTransport),patch('launch_workbench.current_head',return_value='new'),patch('time.sleep'):
                 self.assertEqual(launch_workbench.reopen_existing_worker(root,self.args(),data),0)
             self.assertEqual(FakeTransport.posts,[('/api/restart',{})])
-    def test_unknown_git_head_does_not_force_restart(self):
+    def test_legacy_worker_restarts_even_when_git_head_is_unavailable(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);data=self.setup_data(temp)
-            FakeTransport.states=[{}];FakeTransport.posts=[]
-            with patch('workbench.backends.Transport',FakeTransport),patch('launch_workbench.current_head',return_value=None):
+            FakeTransport.states=[{}, {'process_source_commit':None}];FakeTransport.posts=[]
+            with patch('workbench.backends.Transport',FakeTransport),patch('launch_workbench.current_head',return_value=None),patch('time.sleep'):
                 self.assertEqual(launch_workbench.reopen_existing_worker(root,self.args(),data),0)
-            self.assertEqual(FakeTransport.posts,[])
+            self.assertEqual(FakeTransport.posts,[('/api/restart',{})])
 
 if __name__=='__main__':unittest.main()
