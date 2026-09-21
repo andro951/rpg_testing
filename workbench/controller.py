@@ -237,6 +237,11 @@ class Controller(ModelManager):
             existing={'id':safe_id(mid),'base_model':item['name'],'files':item['files'],'quantization':item['quantization']};models.append(existing)
         existing.update(required_vram_gb=tier,vram_status='user_assigned_unverified',sha256=self.fingerprint(item))
         validate_catalog(models);write_json(self.root/'models.json',models);self.report=None
+        # Keep the already-discovered card in sync with the catalog immediately. Assignment
+        # must not require a rescan or preflight just to display what the user selected.
+        item.update(required_vram_gb=tier,vram_status='user_assigned_unverified',
+                    catalogued=True,catalog=copy.deepcopy(existing))
+        self.message='Assigned '+mid+' to '+str(tier)+' GB. Run preflight when you are ready.'
         self.log('catalog','Assigned '+mid+' to '+str(tier)+' GB; estimate is not measured VRAM.')
     def control(self,action):
         if action=='pause':self.resume_event.clear();self.pause_requested=True

@@ -71,6 +71,20 @@ class ModelManagementTests(unittest.TestCase):
             self.app.configure({'model_root':str(self.models)})
         self.assertEqual(self.app.settings['model_root'],str(self.models.resolve()))
         self.assertFalse(self.app.folder_scanned)
+    def test_vram_assignment_updates_one_discovered_model_immediately(self):
+        for name in ('Alpha-Q4_K_M.gguf','Beta-Q4_K_M.gguf'):
+            (self.models/name).write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        self.assertEqual(len(self.app.last_models),2)
+        first,second=self.app.last_models
+        self.assertIsNone(first['required_vram_gb']);self.assertIsNone(second['required_vram_gb'])
+        self.app.assign_model(first['id'],8)
+        self.assertEqual(first['required_vram_gb'],8);self.assertIsNone(second['required_vram_gb'])
+        self.assertTrue(first['catalogued']);self.assertEqual(first['catalog']['required_vram_gb'],8)
+        self.app.assign_model(second['id'],12)
+        self.assertEqual(first['required_vram_gb'],8);self.assertEqual(second['required_vram_gb'],12)
+        saved={m['id']:m['required_vram_gb'] for m in self.app.catalog()}
+        self.assertEqual(saved,{first['id']:8,second['id']:12})
     def test_manager_download_requires_folder(self):
         self.app.hub_detail=self.selection()
         with patch('workbench.downloads.download_model') as fn:

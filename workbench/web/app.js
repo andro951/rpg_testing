@@ -30,8 +30,46 @@ renderModels();$('log-view').textContent=s.logs.map(l=>l.time+' ['+l.category+']
 if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=s.settings.publish_results; }
 renderHub();renderRuntimes();folderPrompts();
 }
-let modelRenderSignature='';
-function renderModels(){const list=$('model-list');const signature=JSON.stringify([state.models,state.busy,state.demo]);if(signature===modelRenderSignature)return;modelRenderSignature=signature;list.replaceChildren();for(const m of state.models){const card=el('article',undefined,'model-card');const heading=el('div',undefined,'section-header');heading.append(el('h3',m.name),el('span',m.quantization,'badge'));card.append(heading,el('p',(m.size_bytes/1e9).toFixed(2)+' GB download · '+(m.complete?'All shards found':'Missing shards')+' · '+(m.required_vram_gb===null?'Unassigned':m.required_vram_gb+' GB assigned')));const controls=el('div',undefined,'actions');const select=el('select');select.setAttribute('aria-label','VRAM for '+m.id);select.append(new Option('Choose VRAM',''));for(const t of [8,12,16,24,32,40,48,80])select.append(new Option(t+' GB',String(t)));select.value=String(m.required_vram_gb||'');controls.append(select);const save=button('Save VRAM',async()=>{if(!select.value)throw Error('Select a VRAM tier.');await api('/api/model/assign',{id:m.id,required_vram_gb:Number(select.value)});toast('Model assignment saved.');await api('/api/preflight',{});});save.disabled=state.busy||state.demo;controls.append(save);if(m.recommended_vram_gb){const accept=button('Accept recommended '+m.recommended_vram_gb+' GB',async()=>{await api('/api/model/assign',{id:m.id,required_vram_gb:m.recommended_vram_gb});await api('/api/preflight',{});});accept.disabled=state.busy||state.demo;controls.append(accept);}card.append(controls);if(m.errors.length)card.append(el('p',m.errors.join('; '),'error'));const d=el('details');d.append(el('summary','Files and discovery details'),el('pre',JSON.stringify({paths:m.paths,missing_shards:m.missing_shards},null,2)));card.append(d);list.append(card);}if(!state.models.length)list.append(el('article',state.state==='scanning'?'Scanning the selected models folder…':'No discovered models yet. Choose or rescan the active folder.'));}
+let modelRenderSignature='',modelVramDrafts=new Map();
+async function saveModelVram(model,tier){
+ await api('/api/model/assign',{id:model.id,required_vram_gb:tier});
+ modelVramDrafts.delete(model.id);
+ render(await api('/api/state'));
+ toast(model.name+' assigned to '+tier+' GB. Run preflight when ready.');
+}
+function renderModels(){
+ const list=$('model-list');
+ const signature=JSON.stringify([state.models,state.busy,state.demo,[...modelVramDrafts.entries()]]);
+ if(signature===modelRenderSignature)return;
+ modelRenderSignature=signature;list.replaceChildren();
+ for(const m of state.models){
+  const assigned=m.required_vram_gb??null;
+  const card=el('article',undefined,'model-card');
+  const heading=el('div',undefined,'section-header');heading.append(el('h3',m.name),el('span',m.quantization,'badge'));
+  card.append(heading,el('p',(m.size_bytes/1e9).toFixed(2)+' GB download · '+(m.complete?'All shards found':'Missing shards')+' · '+(assigned===null?'VRAM: Unassigned':'VRAM: '+assigned+' GB assigned')));
+  const controls=el('div',undefined,'actions');
+  const select=el('select');select.setAttribute('aria-label','VRAM for '+m.id);select.append(new Option('Choose VRAM',''));
+  for(const t of [8,12,16,24,32,40,48,80])select.append(new Option(t+' GB',String(t)));
+  const draft=modelVramDrafts.has(m.id)?modelVramDrafts.get(m.id):assigned;
+  select.value=draft===null||draft===undefined?'':String(draft);
+  controls.append(select);
+  const save=button('Save VRAM',async()=>{if(!select.value)throw Error('Select a VRAM tier.');await saveModelVram(m,Number(select.value));});
+  const updateSave=()=>{save.disabled=state.busy||state.demo||!select.value||Number(select.value)===assigned;};
+  select.addEventListener('change',()=>{modelVramDrafts.set(m.id,select.value?Number(select.value):null);updateSave();});
+  updateSave();controls.append(save);
+  if(m.recommended_vram_gb){
+   const applied=assigned===m.recommended_vram_gb;
+   const accept=button(applied?'Recommended '+m.recommended_vram_gb+' GB applied':'Accept recommended '+m.recommended_vram_gb+' GB',async()=>{
+    modelVramDrafts.delete(m.id);await saveModelVram(m,m.recommended_vram_gb);
+   });
+   accept.disabled=state.busy||state.demo||applied;controls.append(accept);
+  }
+  card.append(controls);
+  if(m.errors.length)card.append(el('p',m.errors.join('; '),'error'));
+  const d=el('details');d.append(el('summary','Files and discovery details'),el('pre',JSON.stringify({paths:m.paths,missing_shards:m.missing_shards},null,2)));card.append(d);list.append(card);
+ }
+ if(!state.models.length)list.append(el('article',state.state==='scanning'?'Scanning the selected models folder…':'No discovered models yet. Choose or rescan the active folder.'));
+}
 async function poll(){if(polling||!key)return;polling=true;try{render(await api('/api/state'));if($('login').open)$('login').close();}catch(e){$('connection').textContent='● Worker disconnected';}finally{polling=false;}}
 async function loadTests(){if(state?.busy){$('test-list').replaceChildren(el('article','Test-file editing is available when the current operation has finished.'));return;}const data=await api('/api/tests');testData=data.tests;$('example-select').replaceChildren(...data.examples.map(x=>new Option(x,x)));const list=$('test-list');list.replaceChildren();for(const t of data.tests){const card=el('article');card.append(el('h3',t.name||t.id),el('p',t.id+' · '+t.variants.length+' workflow variants · '+(t.repetitions||1)+' repetition(s) · '+(t.enabled===false?'Disabled':'Enabled')));card.append(button('View / edit JSON',()=>openEditor(t)),el('p',t.variants.map(v=>v.id+' ('+v.steps.length+' top-level steps)').join(' · '),'muted'));list.append(card);}}
 function openEditor(t){$('test-json').value=JSON.stringify(t,null,2);$('editor').showModal();}
