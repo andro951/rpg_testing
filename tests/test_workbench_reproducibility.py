@@ -61,7 +61,9 @@ class ReproducibilityTests(unittest.TestCase):
             if j['test']['id']=='clothing_append':
                 self.app.store.save({'status':'completed','model_id':self.model['id'],'case_id':j['case_id']})
         second=self.app.check()
-        self.assertEqual(second['plan']['pending'],4)
+        configured=[read_json(p) for p in (self.root/'test_specs').glob('*.json')]
+        expected_remaining=sum(t.get('repetitions',1)*sum(v.get('enabled',True) for v in t['variants']) for t in configured if t.get('enabled',True) and t['id']!='clothing_append')
+        self.assertEqual(second['plan']['pending'],expected_remaining)
         self.assertEqual(context,self.app.plan['groups'][0]['context'])
         self.assertEqual(first['plan']['target'],second['plan']['target'])
     def test_summary_separates_artifacts_test_versions_and_simulation(self):
