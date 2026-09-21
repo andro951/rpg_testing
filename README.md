@@ -1,158 +1,71 @@
-# RPG state-update testing
+# RPG Testing Workbench
 
-A GPU-local benchmark worker for this task:
+A browser-controlled benchmark for **original JSON state + new information → state update**. The worker and model run on the GPU computer. A laptop can control the worker through Tailscale; inference remains on the GPU host.
 
-**Original JSON state + new natural-language information -> state update.**
+## Start without a terminal
 
-The first release has two synthetic safe-for-work fixtures, four inference pipelines, two patch interpreters, deterministic scoring, automatic model switching, per-case resume, and optional GitHub result publishing. The full research design is in [docs/DESIGN.md](docs/DESIGN.md). This is a tested prototype, not yet a GPU-validated benchmark release.
+Update the `main` branch using GitHub Desktop, open the repository folder, then double-click:
 
-## What “context” means
+- **`Start Workbench.vbs`** — actual worker and browser controls.
+- **`Start Demo.vbs`** — the same interface with an explicitly simulated model. No GPU or weights are required; this checks the interface, not model quality.
 
-`context_tokens` is the amount of text the model can work with in a request, measured in tokens (pieces of text). It includes the instructions, original state, new information, any earlier analysis supplied to that request, and room for the answer. It is **not** the model's size and does not mean persistent memory of a game.
+Python 3.10+ must already be installed. The graphical bootstrap asks permission before creating a private Python environment and installing missing requirements. LM Studio, its compatible runtime, and downloaded models remain prerequisites for actual inference. Git is needed for repository self-tests and source/result synchronization.
 
-The first experiment uses **4,096 tokens**, with up to **512 output tokens per call**. These are intentionally small plumbing tests. Larger context settings can need more memory; this release rejects a context other than 4,096 until its VRAM budgets are reviewed. It never silently truncates the source to fit.
+On a fresh clone, the demo has two tests × four variants = **eight cases**. Click **Run preflight**, then **Run remaining tests**. Run again to confirm completed cases are skipped. Inspect a result, delete it, and run again to see exactly that case scheduled.
 
-## Configuration
+## Normal workflow
 
-- [models.json](models.json) is **only an array of model variants**: model name, publisher, exact GGUF filenames, quantization, `required_vram_gb` and supporting metadata.
-- [experiment.json](experiment.json) holds context length, generation settings, pipelines, seeds and repetitions.
-- [worker.example.json](worker.example.json) is a desktop configuration template. Copy it to `worker.local.json`, which Git ignores.
-- [worker.unity.example.json](worker.unity.example.json) is the corresponding llama.cpp template for an allocated Unity GPU node.
-- [fixtures](fixtures) contains the two original states, source events, expected final states, and example patches. Expected answers are NEVER sent to the model.
+Open **Models** and run a scan/preflight. The worker reads recognized LM Studio settings for the current model folder rather than guessing a default weights directory. An unknown or empty folder is surfaced through the UI. New GGUF variants get a VRAM dropdown and an **Accept recommended … GB** button. No manual model-key/path bindings are required.
 
-`required_vram_gb` is a conservative **device-capacity budget for the declared 4K-context configuration**, not GGUF file size or a proven peak-memory measurement. All initial entries are marked `estimated_unverified`. To match NVIDIA reporting, the field uses GiB; publisher download sizes use decimal GB. Eight is the lowest target hardware tier, so small model entries also target an 8 GiB device even if they may run on less.
+Click **Run preflight**. Each repairable issue has a specific action, such as **Start LM Studio server**, **Download …**, or **Save and push catalog and test edits**. Every repair needs approval. Checks do not perform a chain of fixes silently.
 
-The included catalog contains Qwen3.5 2B, 4B and 9B variants for smaller cards; Qwen3.8-27B at Q3/Q4/Q6/Q8 for larger cards; Qwen3.5-35B-A3B Q4 as a mixture-of-experts comparison; and Qwen3.5-122B-A10B Q4 as a large-cluster reference. Exact files and source links are in the catalog. **The 122B Q4 model has two shards; both are required.** A large reference model is not the ground-truth judge.
+Click **Run remaining tests**. The worker rechecks readiness, groups unfinished cases by model, loads and probes that model, runs its cases, saves each result, then advances. Controls include **Pause after case**, **Resume**, **Stop after model**, and **Stop now**.
 
-## What the two fixtures do
+Use **Results** to inspect raw evidence or delete a result for rerunning. **Download all logs & results** exports result JSON, logs, and summary CSV/JSON. Disk-heavy inspection/export waits until the active operation finishes or stops.
 
-**`time_only`:** exactly five minutes pass, changing `14:15` to `14:20`. Every other value must remain identical.
+## Included capabilities
 
-**`clothing_append`:** Tom puts a green jacket over his existing blue shirt, while keeping his jeans. He says he wants to go outside but does not move. Only his clothing array gains `green jacket`; time, location, other clothing, and Susie's data stay unchanged.
+The generic workflow interpreter supports direct standard JSON Patch and semantic patches; analysis followed by patch generation; typed/JSON-schema output; conditional follow-up questions; shared-prefix cache-on/off comparisons; bounded verification/repair loops; and narration followed by state updating with the same loaded model.
 
-These test a scalar, a nested list, and preservation of unrelated state. They are smoke fixtures, NOT enough data for a research conclusion.
+All experimental settings live in `test_specs/*.json`. The UI contains a validating editor and import buttons for examples under `examples/test_specs/`. There are no temperature/seed/context/output controls for an ad hoc run. `models.json` remains a models-only catalog with `required_vram_gb`.
 
-## Four pipelines
+Scheduling uses the assigned hardware tier plus one adjacent tier, not every larger GPU. An 11 GB GPU is an opportunistic comparison for 8 GB models and never satisfies a 12 GB assignment. VRAM recommendations are estimates. Context is allocated automatically and recorded. No arbitrary 512-token response cap is imposed.
 
-1. `direct_json_patch`: one response containing RFC 6902 JSON Patch.
-2. `direct_semantic`: one response containing explicit `set`, `list_add`, or `list_remove` operations.
-3. `analyze_json_patch`: natural-language changes first, then a separate JSON Patch response.
-4. `analyze_semantic`: natural-language changes first, then semantic operations.
+**Controlled cache tests require native llama.cpp.** This LM Studio adapter does not claim controllable, verifiable cache reuse; preflight blocks those variants there. Ordinary LM Studio workflows can still make multiple calls and request constrained JSON. Native cache experiments retain backend reuse evidence; absent evidence invalidates the cache measurement.
 
-Both formats use JSON Pointer paths. Semantic `set` requires an existing target; `list_add` appends one element; `list_remove` requires exactly one matching element. Standard JSON Patch additionally supports its usual index-based list operations. The scorer applies the patch to a copy, validates the resulting state, and compares it to ground truth. Equivalent valid patches can receive the same correctness score.
+## Laptop control
 
-Invalid JSON, a wrong answer, and a truncated answer are completed benchmark outcomes. They are not repeatedly sampled until one happens to pass. Transport failures have a separate bounded retry policy.
+Start the workbench on the desktop. In **Worker setup**, click **Enable private Tailscale access**, then **Show pairing key on this host**. Open the displayed address on the laptop and enter that key. Normal controls, including the folder browser, operate on the desktop.
 
-## 1. Install and test without a GPU
+The desktop must stay awake with the worker running. The service binds only to loopback and the explicitly enabled Tailscale address, uses a pairing key and same-origin checks, and offers no arbitrary-command endpoint. Do not add public port forwarding. Firewall and tailnet permissions must permit the connection.
 
-Use Python 3.10 or newer and Git. In the repository directory:
+## Unity
 
-```text
-python -m pip install -r requirements.txt
-python -m unittest discover -s tests -v
-python run_worker.py --no-sync --mock --output .local/smoke
-python run_worker.py --no-sync --mock --output .local/smoke
-```
+Use **Prepare for a different GPU** and download the generated Unity job script. Submit it through supported Unity OnDemand Job Composer after preparing the repository, Python environment, native `llama-server`, and model files on Unity storage. It runs the same controller inside a Slurm allocation and refuses GPU batch operation on a login node.
 
-The first mock run should complete **24 cases**: three eligible model catalog entries x two fixtures x four pipelines. The second should report **24 already complete and zero new model loads/calls**. The mock is a deterministic test double, NOT a real model. Its results are explicitly marked simulated and cannot be published using `--mock --publish`.
+A preparation check on the laptop cannot certify another machine's filesystem, drivers, authorization or future GPU. The allocated worker rechecks readiness. Review partition/constraint examples against the resources actually available to your account.
 
-Preview the scheduler without inference:
+## Evidence and synchronization
+
+Results are individual checksummed files with `status` first:
 
 ```text
-python run_worker.py --no-sync --plan --vram-gb 16
+.local/workbench/results/<model-id>/<case-id>.json
+.local/workbench/logs/<timestamp>-<id>.json
 ```
 
-`--vram-gb` applies only to planning or mock runs. Real runs detect the physical GPU and do not trust a supplied label.
+Completed incorrect/invalid answers remain completed experiments. Errors and aborted cases remain pending. Completion comes from files, not a tracker database. Deleting a result schedules it again. Artifact fingerprint metadata is cached separately, not used as a completion tracker.
 
-## 2. Set up the desktop once
+Source is pulled conservatively before real runs when enabled. Changed source requires **Restart workbench** so the new code runs in a fresh process. Optional publication sends only result/log directories to a separate worker branch, outside measured workflows. No force-reset, automatic stash or broad `git add .` occurs.
 
-1. Ensure LM Studio and its llama.cpp runtime support the downloaded model. This adapter needs the current `/api/v1/models` API and the `lms` CLI. An old installation may need an update. Run `lms --help` and `lms ls --json` in the same terminal you will use for Python.
-2. Download a catalog GGUF in LM Studio. Start with `Qwen3.5-2B-Q8_0.gguf`, not every model in the catalog. Models are NOT downloaded automatically by the worker.
-3. Copy `worker.example.json` to `worker.local.json`. Fill in the exact key from `lms ls --json`, absolute paths to the corresponding GGUF files, and the installed LM Studio AND engine runtime build in `backend_version`.
-4. Keep the API bound to localhost. If API authentication is enabled, set `RPG_MODEL_API_KEY` in the process environment, never in a committed file. Unload existing models yourself before starting a dedicated worker run; the worker deliberately refuses to evict unrelated models.
-5. Use LM Studio's normal settings for the first smoke attempt and record any manual settings alongside the runtime build. Inspect the raw response before treating it as a controlled study. Reasoning modes, prompt templates, KV-cache placement and other backend defaults are NOT fully normalized by this first version.
+This repository is public. **Only synthetic safe-for-work fixtures and outputs belong here.** Never publish API credentials, private saves, real patient/student records, explicit content or model weights.
 
-The managed LM Studio adapter currently requires a host with **one NVIDIA GPU**. It does not pretend that selecting a GPU in Python controls an already-running multi-GPU LM Studio daemon. The llama.cpp adapter selects the assigned device for its child process.
+## Validation
 
-## 3. Run the first actual model test
+The full committed suite passed **179 tests on Windows and 179 on Linux**, plus a real Chromium browser workflow in GitHub Actions. See [TEST_REPORT](docs/TEST_REPORT.md) for the tested commit and evidence, [WORKBENCH_GUIDE](docs/WORKBENCH_GUIDE.md) for usage, and [PLANNED_CHANGES](docs/PLANNED_CHANGES.md) for requirement coverage.
 
-Commit/push source changes first. Then, on the desktop:
+No real GPU model inference was available during this implementation. Actual GTX 1080/LM Studio loading, real Tailscale connectivity, and Unity allocation must still be tested on those systems. Peak VRAM is explicitly unavailable and complete GPU residency is unverified. Simulated results are never model-quality or throughput evidence.
 
-```text
-python run_worker.py --worker worker.local.json --worker-id desktop-1080 --model qwen35-2b-q8_0
-```
+## Legacy prototype
 
-This pulls source with `git pull --ff-only`, runs the unit suite, detects the GTX 1080, hashes the local model, loads it, runs the two fixtures under all four pipelines, and records eight outcomes. Run the same command again to verify resume. These are real outcomes only when you run the command against your actual server; no such GPU run was available during development of this release.
-
-To process **all locally configured, eligible models**, omit `--model`:
-
-```text
-python run_worker.py --worker worker.local.json --worker-id desktop-1080 --publish
-```
-
-The worker groups all pending cases by model, loads it once, warms it up, runs its cases, unloads only its own model, then advances. Unconfigured/download-missing or under-budget model entries are reported as skipped. A load failure is recorded separately; it never silently substitutes a different model, quantization or CPU-offload configuration.
-
-A source checkout with uncommitted changes stops before the pull. No automatic reset, stash or force-push occurs. `--no-sync` is an explicit development/offline option. The `.local/worker.lock` prevents simultaneous workers in one checkout; after a hard crash, inspect the running processes before manually removing a stale lock.
-
-## 4. GitHub results and analysis
-
-`--publish` creates a **worker-specific results branch**, e.g. `results/desktop-1080`, using an ignored worktree. It checkpoints after requests at roughly three-minute intervals, and at completion. Publishing never occurs inside a measured inference call. Results are saved locally immediately, not only when Git succeeds.
-
-Code stays pinned throughout the run. Results-only commits do not change case identities. Different workers use different result branches. Git is transport, NOT a distributed job-lock service: do not run concurrent jobs with the same worker ID, and use one worker checkout per GPU job. Automatic resume is per worker results directory; cross-worker claims/global deduplication are not implemented.
-
-On the laptop, fetch a results branch without changing your code branch:
-
-```text
-git fetch origin
-git worktree add --detach ../rpg-results-desktop origin/results/desktop-1080
-python -m rpgbench.analyze ../rpg-results-desktop/results/desktop-1080 --output .local/analysis-desktop
-```
-
-The exporter writes `summary.json` and `cases.csv`. It ignores simulated results by default, validates result checksums, removes identical copied records, separates infrastructure failures, and refuses multiple distinct completed records with the same experiment identity. Give intentional repeats different `repetitions` in the experiment.
-
-For the offline smoke output only:
-
-```text
-python -m rpgbench.analyze .local/smoke --include-simulated --output .local/smoke-analysis
-```
-
-This repository is public. The publication feature is for these synthetic SFW fixtures and benchmark outputs. Do not point it at private saves, real medical/student records, API credentials, or explicit content. Weight files never belong in Git.
-
-## 5. Unity
-
-The harness runs on a Slurm **compute node**, beside its own llama.cpp server. It does not run GPU inference on the login node and does not start a Tailscale tunnel on Unity. Use the university's supported SSH/OnDemand access for control.
-
-Before submitting: clone/pull the repo, create a Python environment, install requirements, install/build a compatible `llama-server`, and download the intended model shards to persistent project storage. Copy `worker.unity.example.json` to `worker.local.json` and fill in real paths, exact backend build, and any expected GPU name.
-
-Example submission from the repository after confirming access to the requested partition/device:
-
-```bash
-export RPG_WORKER_ID=unity-a4000
-export RPG_PYTHON=/absolute/path/to/venv/bin/python
-sbatch --partition=gpu --constraint=a4000 --gpus=1 --mem=32G --time=01:00:00 scripts/unity_job.sh
-```
-
-For the 122B reference, request an appropriate 80 GiB allocation and enough host RAM, not that A4000 example. Unity documents `a100-80g` as a device constraint, but availability and authorization are scheduler matters. Do not assume the partition contains every GPU. Set the worker's `llama_server_executable` to a build compatible with the allocated GPU and loaded CUDA modules. This release does not provision those packages for you.
-
-The script requires a Slurm job ID, preserves the allocation, and calls the same worker. A preempted/killed job keeps completed case files; a request interrupted before saving is rerun. Graceful scheduler-signal draining is a planned addition, not claimed here. If compute nodes lack outbound Git access, synchronize before allocation, pass `--no-sync`, and transfer/publish results afterward from an allowed host.
-
-## Measurements and limitations
-
-Implemented: strict final-state match; field-change correctness; missed/unsupported changes; wrong values; invalid output; per-call wall time; whole-pipeline time; load time separately; backend-reported token counts; raw requests/responses; model file hashes; GPU identity/VRAM/driver; OS/CPU/software metadata; bounded transport retry; atomic per-case results; Git checkpoints; JSON/CSV exports.
-
-Not yet verified/measured: actual peak VRAM, proof of full GPU residency, streaming time-to-first-token, isolated prefill/decode speed, controlled cache hits, and normalized model-specific reasoning/template settings. Unavailable metrics are null/explicitly unknown, never invented from total request duration. The first measurements are smoke data, not final latency comparisons.
-
-Planned research additions: narrative generation, conditional field-by-field questions, grammar-constrained decoding, independent verification/repair, controlled prefix-cache on/off comparisons, bigger fixtures and more repetitions. The first four pipelines are unrestricted text generation followed by strict parsing; they do not yet enforce JSON while decoding.
-
-See [docs/TEST_REPORT.md](docs/TEST_REPORT.md) for what was actually executed and [docs/DESIGN.md](docs/DESIGN.md) for the complete plan.
-
-## Primary documentation
-
-- [LM Studio loading/estimation CLI](https://lmstudio.ai/docs/cli/local-models/load)
-- [LM Studio local model keys](https://lmstudio.ai/docs/cli/local-models/ls)
-- [LM Studio model inventory API](https://lmstudio.ai/docs/developer/rest/list)
-- [LM Studio chat-completions API](https://lmstudio.ai/docs/developer/openai-compat/chat-completions)
-- [Unity GPU allocation and constraints](https://docs.unity.uri.edu/documentation/tools/gpus/)
-- [RFC 6902 JSON Patch](https://www.rfc-editor.org/rfc/rfc6902)
-
-Model publisher URLs and the verification date are recorded per entry in `models.json`.
+`run_worker.py`, `rpgbench/`, `fixtures/` and `experiment.json` remain for historical reproduction. **The new browser workbench does not use `worker.local.json` or `experiment.json`.** Use the new launchers and `test_specs/`.

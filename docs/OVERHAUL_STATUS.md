@@ -1,9 +1,9 @@
-# Workbench overhaul — in progress
+# Browser workbench overhaul — software handoff
 
-Implementation authorized by Isaac on 2026-09-20. The planning-only hold is lifted.
+The browser UI, controller, discovery, preflight/manual repairs, generic workflows, file-based resume, evidence export, private remote-control support and launchers are implemented and pushed to main.
 
-Published checkpoints include scheduling, flat result files, discovery and the generic workflow/scoring interpreter. New controller/backends and their tests are being integrated locally before publication.
+Code commit `13554b40d1337dc02d92696233b019c2a4886c5c` passed all GitHub Actions jobs in run `35556535167`: 179 unit/smoke tests on Windows, 179 on Linux, and the real Chromium browser workflow. This documentation checkpoint adds no runtime changes.
 
-Local full-suite check after combining the existing repository with new code: **121 tests passed**, including 50 original tests and 71 workbench tests. Includes real localhost HTTP/SSE with a stub, simulated complete runs/resume/deletion, and missing-completed-model preflight.
+Start with **Start Demo.vbs**, then **Start Workbench.vbs**. See the root README and WORKBENCH_GUIDE.md. The old worker.local.json/experiment.json instructions apply only to the retained CLI prototype.
 
-Actual model inference, Windows hardware and Unity access have not been exercised here. CI now runs on Windows and Linux. Further checkpoints will add browser controls and final validation. Do not treat this in-progress checkpoint as a finished UI release.
+Actual GPU inference, the user's LM Studio installation, the Tailscale route and Unity allocation remain untested here. Peak VRAM is unavailable and full GPU residency is unverified. See TEST_REPORT.md for evidence and PLANNED_CHANGES.md for coverage and limits.
