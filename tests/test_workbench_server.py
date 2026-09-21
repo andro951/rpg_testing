@@ -48,6 +48,16 @@ class ServerTests(unittest.TestCase):
     def test_bad_key(self):self.assertEqual(self.req('/api/state',headers={'Authorization':'Bearer wrong'})[0],403)
     def test_bad_origin(self):self.assertEqual(self.req('/api/run',{},headers={'Origin':'http://evil.example'})[0],403)
     def test_bad_host(self):self.assertEqual(self.req('/api/state',headers={'Host':'evil.example'})[0],403)
+    def test_running_server_freezes_static_assets_to_loaded_code(self):
+        original=self.server.static_assets['/app.js']
+        self.server.static_assets['/app.js']=b'FROZEN-COMPATIBLE-UI'
+        try:
+            status,data,_=self.req('/app.js',auth=False)
+            self.assertEqual(status,200);self.assertEqual(data,b'FROZEN-COMPATIBLE-UI')
+        finally:self.server.static_assets['/app.js']=original
+    def test_state_exposes_loaded_source_commit(self):
+        state=json.loads(self.req('/api/state')[1])
+        self.assertIn('process_source_commit',state)
     def test_static_assets_no_token_leak(self):
         for path in ['/','/app.js','/style.css']:
             status,data,hs=self.req(path,auth=False);self.assertEqual(status,200);self.assertNotIn(b'testing-key',data)
