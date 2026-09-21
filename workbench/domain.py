@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 TIERS = (8, 12, 16, 24, 32, 40, 48, 80)
-ENGINE_VERSION = 'workflows-4'
+ENGINE_VERSION = 'native-two-pass-2'
 
 
 def canonical(value: Any) -> str:
@@ -56,8 +56,9 @@ def safe_id(value: str) -> str:
     return value
 
 
-def device_tier(capacity: float) -> int | None:
+def device_tier(capacity: float, gpu_name: str = "") -> int | None:
     """Round only known nominal capacities (ECC reporting), not arbitrary shortages."""
+    if re.fullmatch(r'(?:NVIDIA\s+)?L4',gpu_name.strip(),re.I) and 21<=capacity<=24.48:return 24
     for tier in (8, 11, 12, 16, 24, 32, 40, 48, 80):
         if tier * .98 <= capacity <= tier * 1.02:
             return tier
@@ -87,7 +88,7 @@ def code_fingerprint():
     """Only experiment-affecting implementation, not CSS or laptop paths."""
     base=Path(__file__).parent
     return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
-                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py')})
+                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
 
 
 def experiment_spec(test: dict, variant: dict) -> dict:
@@ -121,7 +122,7 @@ class ResultStore:
         checksum = record.pop('sha256', None)
         if checksum != digest(record):
             raise ValueError(f'Checksum mismatch: {path.name}')
-        if record.get('status') not in ('completed', 'error', 'aborted'):
+        if record.get('status') not in ('completed', 'skipped', 'error', 'aborted'):
             raise ValueError(f'Unknown result status: {path.name}')
         if path.stem != record.get('case_id') or path.parent.name != record.get('model_id'):
             raise ValueError('Result identity does not match its filename')
@@ -130,7 +131,7 @@ class ResultStore:
 
     def done(self, model_id: str, cid: str) -> bool:
         path = self.path(model_id, cid)
-        return path.exists() and self.read(path)['status'] == 'completed'
+        return path.exists() and self.read(path)['status'] in ('completed','skipped')
 
     def save(self, record: dict) -> Path:
         record = dict(record)
@@ -146,7 +147,7 @@ class ResultStore:
             previous.pop('sha256', None)
             history.append(previous)
             record['attempts'] = history
-        if record['status'] not in ('completed', 'error', 'aborted'):
+        if record['status'] not in ('completed', 'skipped', 'error', 'aborted'):
             raise ValueError('Unknown status')
         record = {'status': record.pop('status'), **record}
         write_json(path, {**record, 'sha256': digest(record)})

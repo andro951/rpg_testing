@@ -18,11 +18,13 @@ import zipfile
 from datetime import datetime,timezone
 from pathlib import Path
 from .domain import ResultStore, TIERS, canonical, digest, read_json, safe_id, write_json, validate_test
-from .inventory import command, executable, file_hashes, lmstudio_folder
+from .inventory import command, executable, file_hashes, scan_models
 from .planning import validate_catalog
 from . import preflight
 from .workflows import execute, Cancelled
-from .backends import LocalBackend, DemoBackend
+from .backends import DemoBackend
+from .native import NativeBackend
+from .model_manager import ModelManager
 
 
 def now():return datetime.now(timezone.utc).isoformat()
@@ -37,14 +39,22 @@ def exclusive_edit(method):
     return wrapped
 
 
-class Controller:
+class Controller(ModelManager):
     def __init__(self,root:Path,demo=False):
         self.root=Path(root).resolve();self.demo=demo
         self.data=self.root/'.local'/('demo' if demo else 'workbench');self.data.mkdir(parents=True,exist_ok=True)
         self.settings_path=self.data/'settings.json'
-        defaults={'backend':'lmstudio','model_root':'','confirmed_empty_folder':'','lms_path':'','llama_path':'',
-                  'model_api_token':'','sync_source':not demo,'publish_results':False,'remote_enabled':False}
-        self.settings={**defaults,**(read_json(self.settings_path) if self.settings_path.exists() else {})}
+        defaults={'backend':'llamacpp','model_root':'','confirmed_empty_folder':'','llama_path':'',
+                  'hf_token':'','sync_source':not demo,'publish_results':False,'remote_enabled':False,'models_folder_version':1}
+        saved=read_json(self.settings_path) if self.settings_path.exists() else {}
+        # Explicit consent for the new folder policy: no migration from LM Studio or guessed defaults.
+        if saved.get('models_folder_version')!=1:saved.pop('model_root',None);saved.pop('confirmed_empty_folder',None)
+        self.settings={**defaults,**{k:v for k,v in saved.items() if k in defaults}}
+        self.settings['backend']='llamacpp'
+        self.settings['runtime_cache']=str(self.root/'.local/runtime-cache')
+        self.hub_results=[];self.hub_detail=None;self.runtime_options=[];self.folder_scanned=False
+        self.run_total=0;self.run_processed=0;self.skipped_models=[];self.load_attempts=[]
+        self.monitor=None;self.last_telemetry=None;self.timing_active=False;self.run_provenance={}
         self.store=ResultStore(self.data/'results');self.registry_path=self.data/'artifacts.json'
         self.registry=read_json(self.registry_path) if self.registry_path.exists() else {}
         self.last_models=[];self.report=None;self.plan=None;self.state='idle';self.message='Run preflight to inspect pending work.'
@@ -58,40 +68,38 @@ class Controller:
         self.log('startup','Workbench started'+(' in SIMULATED DEMO mode' if demo else ''))
     def log(self,category,message):
         text=str(message)
-        for secret in (self.settings.get('model_api_token'),):
+        for secret in (self.settings.get('hf_token'),self.settings.get('model_api_token')):
             if secret:text=text.replace(secret,'[REDACTED]')
         entry={'time':now(),'category':category,'message':text}
         with self.lock:
             self.logs.append(entry);self.pending_logs.append(entry)
             if len(self.logs)>2000:self.logs=self.logs[-2000:]
     def flush_logs(self):
-        with self.lock:items=self.pending_logs;self.pending_logs=[]
+        if self.timing_active:raise RuntimeError('Logs are buffered until the timed workflow finishes')
+        with self.lock:items=list(self.pending_logs)
         if items:
             stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
             write_json(self.data/'logs'/(stamp+'.json'),items)
+            with self.lock:del self.pending_logs[:len(items)]
     def catalog(self):
         if self.demo:return [{'id':'demo-2b','base_model':'SIMULATED','files':['demo.gguf'],'quantization':'SIMULATED','required_vram_gb':8,'sha256':{'demo.gguf':'a'*64}}]
         models=read_json(self.root/'models.json');validate_catalog(models);return models
     def demo_models(self):
         return [{'id':'demo-2b','name':'Simulated 2B fixture model','files':['demo.gguf'],'paths':[],
                  'size_bytes':2*1024**3,'quantization':'SIMULATED','required_vram_gb':8,'recommended_vram_gb':8,
-                 'catalogued':True,'complete':True,'missing_shards':[],'errors':[],'model_key':'demo',
+                 'catalogued':True,'complete':True,'missing_shards':[],'errors':[],
                  'metadata':{'general.name':'SIMULATED','demo.context_length':65536},'catalog':self.catalog()[0]}]
     def folder_info(self):
         if self.demo:return {'path':'SIMULATED: no weights used','source':'demo','issue':None}
-        if self.settings['backend']=='lmstudio':
-            active=lmstudio_folder()
-            if active.get('path'):return active
-        else:active={'path':None,'source':None,'issue':'Choose Unity/native model storage.'}
-        if self.settings.get('model_root'):return {'path':self.settings['model_root'],'source':'user-confirmed active folder','issue':None}
-        return active
+        path=self.settings.get('model_root','')
+        return {'path':path or None,'source':'Explicitly chosen models folder' if path else None,
+                'issue':None if path else 'Choose a models folder. There is no automatic default.'}
     def backend_version(self):
-        if self.demo:return 'demo-v2'
+        if self.demo:return 'demo-native-v3'
         if self.version_cache:return self.version_cache
-        kind=self.settings['backend'];exe=executable('lms' if kind=='lmstudio' else 'llama-server',self.settings.get('lms_path' if kind=='lmstudio' else 'llama_path',''))
-        try:
-            version=command([exe,'--version']) if exe else 'unavailable'
-            if exe and kind=='lmstudio':version+=' | '+command([exe,'runtime','ls'])
+        from .native import diagnostic_command
+        exe=executable('llama-server',self.settings.get('llama_path',''))
+        try:version=diagnostic_command([exe,'--version']) if exe else 'unavailable'
         except Exception as exc:version='unavailable: '+str(exc)
         if not version.startswith('unavailable'):self.version_cache=version
         return version
@@ -149,12 +157,19 @@ class Controller:
                 if kind=='preflight':self.check((payload or {}).get('preparation'))
                 elif kind=='fix':self.fix(payload);self.check()
                 elif kind=='run':self.run()
+                elif kind=='hub_search':self.search_hub(payload)
+                elif kind=='hub_inspect':self.inspect_hub(payload)
+                elif kind=='hub_download':self.download_selected(payload)
+                elif kind=='runtime_list':self.list_runtimes()
+                elif kind=='runtime_install':self.install_runtime(payload)
+                elif kind=='scan':self.scan_folder()
                 else:raise ValueError('Unknown operation')
             except Cancelled:self.state='stopped';self.message='Stopped. Unfinished cases remain pending.'
             except Exception as exc:self.state='error';self.message=str(exc);self.log('error',exc)
             finally:
-                if self.state in ('checking','fixing'):self.state='idle'
-                self.flush_logs();self.operation.release()
+                if kind!='run' and self.state not in ('error','stopped'):self.state='idle'
+                try:self.flush_logs()
+                finally:self.operation.release()
         self.thread=threading.Thread(target=work,daemon=True);self.thread.start()
     def fix(self,action):
         if not self.report:raise ValueError('Run preflight first.')
@@ -163,18 +178,10 @@ class Controller:
         a=found['action'];kind=a['type'];self.log('action','User approved: '+found['label'])
         if kind=='create_folder':(self.data/a['name']).mkdir(parents=True,exist_ok=True)
         elif kind=='confirm_folder':self.settings['confirmed_empty_folder']=self.folder_info()['path'];self.save_settings()
-        elif kind=='start_server':
-            exe=executable('lms',self.settings['lms_path'])
-            if not exe:raise ValueError('LM Studio CLI unavailable')
-            self.log('action',command([exe,'server','start','--port','1234'],timeout=90))
-        elif kind=='unload_models':
-            from .backends import Transport
-            transport=Transport('http://127.0.0.1:1234',self.settings.get('model_api_token',''))
-            for instance in a['ids']:transport.request('/api/v1/models/unload',{'instance_id':instance})
         elif kind=='download_model':
             from .downloads import download_model
             model=next(m for m in self.catalog() if m['id']==a['model_id'])
-            download_model(model,Path(self.folder_info()['path']),self.cancel_event,self.log)
+            download_model(model,Path(self.folder_info()['path']),self.cancel_event,self.log,token=self.settings.get('hf_token',''))
         elif kind=='delete_corrupt':
             path=self.store.path(a['model_id'],a['case_id'])
             if path.exists():path.unlink()
@@ -188,15 +195,28 @@ class Controller:
         write_json(self.settings_path,self.settings)
         try:os.chmod(self.settings_path,0o600)
         except OSError:pass
+    def scan_folder(self):
+        if self.demo:self.last_models=self.demo_models();return
+        path=self.settings.get('model_root','')
+        if not path:raise ValueError('Choose your models folder first')
+        self.last_models=scan_models(Path(path),self.catalog());self.folder_scanned=True
+        self.message=f'Found {len(self.last_models)} model variants.'
     @exclusive_edit
     def configure(self,values):
-        allowed=set(self.settings)-{'remote_enabled'}
-        if set(values)-allowed:raise ValueError('Unknown settings; test settings belong in test files.')
+        allowed={'model_root','confirmed_empty_folder','llama_path','hf_token','sync_source','publish_results'}
+        if set(values)-allowed:raise ValueError('Unknown setting; native llama.cpp is the only backend and test settings belong in tests')
         for key,val in values.items():
-            if key in ('sync_source','publish_results') and type(val)is not bool:raise ValueError('Expected boolean')
-            elif key not in ('sync_source','publish_results') and not isinstance(val,str):raise ValueError('Expected text')
-        if values.get('backend',self.settings['backend']) not in ('lmstudio','llamacpp'):raise ValueError('Unknown backend')
+            if key in ('sync_source','publish_results'):
+                if type(val)is not bool:raise ValueError('Expected boolean')
+            elif not isinstance(val,str):raise ValueError('Expected text')
+        if 'model_root' in values and values['model_root']:
+            folder=Path(values['model_root']).expanduser()
+            if not folder.is_absolute() or not folder.is_dir():raise ValueError('Choose an existing absolute models folder')
+            values={**values,'model_root':str(folder.resolve())}
+            if values['model_root']!=self.settings['model_root']:
+                self.settings['confirmed_empty_folder']=''
         self.settings.update(values);self.save_settings();self.version_cache=None;self.report=None
+        if 'model_root' in values and values['model_root']:self.scan_folder()
     @exclusive_edit
     def assign_model(self,mid,tier):
         if self.demo:raise ValueError('Demo model assignments are simulated and read-only.')
@@ -212,7 +232,7 @@ class Controller:
     def control(self,action):
         if action=='pause':self.resume_event.clear();self.pause_requested=True
         elif action=='resume':self.pause_requested=False;self.resume_event.set()
-        elif action=='stop_after_model':self.stop_after_model=True;self.resume_event.set()
+        elif action=='stop_after_model':self.stop_after_model=True;self.pause_requested=False;self.resume_event.set()
         elif action=='stop':
             self.cancel_event.set();self.resume_event.set()
             if self.backend:self.backend.cancel()
@@ -221,57 +241,19 @@ class Controller:
         if not self.demo and self.settings['sync_source']:
             from .gitops import pull
             if pull(self.root):
-                self.restart_required=True;raise RuntimeError('Pulled new code. Click Restart workbench so the new version is used.')
+                self.restart_required=True;raise RuntimeError('Source changed before the run. Restart with the new version before starting tests.')
         report=self.check()
         if not report['ready']:self.state='idle';return
-        plan=self.plan;self.state='running';self.completed_now=0;self.session_errors=0;self.started=now();self.finished=None
-        self.pause_requested=False;self.stop_after_model=False
-        session=uuid.uuid4().hex
-        for group in plan['groups']:
-            if not group['jobs']:continue
-            if self.cancel_event.is_set():raise Cancelled()
-            model=group['installed'];self.current={'model':model['id'],'stage':'loading'};self.message='Loading '+model['id']
-            self.backend=DemoBackend(self.log) if self.demo else LocalBackend(self.settings,report['gpu'],self.log)
-            try:
-                loaded=self.backend.load(model,group['context'],self.cancel_event)
-                self.log('model','Loaded and probed '+model['id'])
-                for job in group['jobs']:
-                    if self.cancel_event.is_set():raise Cancelled()
-                    self.current={'model':model['id'],'test':job['test']['id'],'variant':job['variant']['id'],'stage':'starting'}
-                    def stage(value):
-                        with self.lock:self.current['stage']=value
-                    record={'status':'error','case_id':job['case_id'],'model_id':model['id'],'test_id':job['test']['id'],
-                            'variant_id':job['variant']['id'],'repetition':job['repetition'],'target':plan['target'],
-                            'test_definition':job['test'],'variant_definition':job['variant'],'artifact_hashes':group['model'].get('sha256',{}),
-                            'model_definition':group['model'],'session_id':session,'started_at':now(),'simulated':self.demo,'load':copy.deepcopy(loaded),
-                            'gpu':report['gpu'],'provenance':{'backend_version':self.backend_version(),'python':platform.python_version(),'source_commit':self.source_commit(),'workflow_code':self.workflow_code()},
-                            'peak_vram_gib':None,'peak_vram_note':'Not sampled; unavailable, not zero.'}
-                    try:
-                        outcome=execute(job['test'],job['variant'],self.backend,self.cancel_event,stage)
-                        record.update(status='completed',**outcome);self.completed_now+=1
-                    except Cancelled as exc:
-                        record.update(status='aborted',error='Stopped by user',partial=getattr(exc,'partial',None));raise
-                    except Exception as exc:
-                        record.update(status='error',error=str(exc),partial=getattr(exc,'partial',None));self.session_errors+=1
-                    finally:
-                        record['finished_at']=now()
-                        self.store.save(record);self.log('case',job['case_id']+' '+record['status']);self.flush_logs()
-                        self.publish()
-                    if self.pause_requested:
-                        self.state='paused';self.message='Paused after current case.'
-                        self.resume_event.wait()
-                        self.state='running'
-                        if self.cancel_event.is_set():raise Cancelled()
-            except Cancelled:raise
-            except Exception as exc:self.session_errors+=1;self.log('model_error',model['id']+': '+str(exc))
-            finally:
-                try:self.backend.unload()
-                except Exception as exc:self.log('unload_error',exc)
-                self.backend=None;self.flush_logs()
-            if self.stop_after_model:break
-        self.finished=now();self.current=None;self.publish(force=True)
+        self.state='running';self.completed_now=0;self.session_errors=0;self.started=now();self.finished=None
+        self.pause_requested=False;self.stop_after_model=False;self.resume_event.set()
+        from .scheduler import Session
+        from .demo_native import DemoNative
+        self.run_provenance={'backend_version':self.backend_version(),'python':platform.python_version(),
+                             'source_commit':self.source_commit(),'workflow_code':self.workflow_code()}
+        try:Session(self,report,self.plan,DemoNative if self.demo else NativeBackend).run()
+        finally:self.finished=now();self.current=None
         self.state='finished' if not self.session_errors else 'finished_with_errors'
-        self.message='Finished. Incorrect answers remain recorded; infrastructure errors remain pending.'
+        self.message='Run finished. Full-GPU, skipped, and hybrid results are recorded separately.'
         self.report,self.plan=preflight.build(self)
     def source_commit(self):
         try:
@@ -293,12 +275,16 @@ class Controller:
         with self.lock:
             return {'state':self.state,'busy':self.operation.locked(),'message':self.message,'report':copy.deepcopy(self.report),
                     'models':copy.deepcopy(self.last_models),'current':copy.deepcopy(self.current),'completed_now':self.completed_now,
-                    'session_errors':self.session_errors,'demo':self.demo,'restart_required':self.restart_required,
-                    'settings':{k:v for k,v in self.settings.items() if k!='model_api_token'},
-                    'has_api_token':bool(self.settings.get('model_api_token')),'logs':copy.deepcopy(self.logs[-300:]),
+                    'session_errors':self.session_errors,'demo':self.demo,'run_total':self.run_total,'run_processed':self.run_processed,
+                    'telemetry':self.monitor.snapshot() if self.monitor else self.last_telemetry,
+                    'skipped_models':copy.deepcopy(self.skipped_models),'load_attempts':copy.deepcopy(self.load_attempts),
+                    'hub_results':copy.deepcopy(self.hub_results),'hub_detail':copy.deepcopy(self.hub_detail),'runtime_options':copy.deepcopy(self.runtime_options),
+                    'folder_scanned':self.folder_scanned,'restart_required':self.restart_required,
+                    'settings':{k:v for k,v in self.settings.items() if not k.endswith(('token','secret'))},
+                    'has_hf_token':bool(self.settings.get('hf_token')),'logs':copy.deepcopy(self.logs[-300:]),
                     'remote':self.remote_info,'started_at':self.started,'finished_at':self.finished}
+    @exclusive_edit
     def result_records(self):
-        if self.operation.locked():raise RuntimeError('Results disk reads wait until the active operation is finished or stopped.')
         records=[]
         for path in sorted(self.store.root.glob('*/*.json')):
             try:records.append(self.store.read(path))

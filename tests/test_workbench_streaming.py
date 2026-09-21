@@ -4,7 +4,9 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
-from workbench.backends import Transport, LocalBackend, BackendError
+from workbench.backends import Transport, BackendError
+from workbench.native import NativeBackend
+from workbench.execution_policy import ContextCapacity
 from workbench.workflows import Cancelled, Unsupported
 
 class Handler(BaseHTTPRequestHandler):
@@ -70,41 +72,39 @@ class FakeTransport:
         return {'text':'true','finish_reason':'stop','usage':{},'timings':{},'cached_tokens':0}
 
 class AdapterTests(unittest.TestCase):
-    def backend(self,kind):
-        b=LocalBackend({'backend':kind},{'uuid':'GPU-test'});b.context=4096;b.owned_id='chosen-model';b.transport=FakeTransport();return b
-    def test_lmstudio_omits_arbitrary_output_limit(self):
-        b=self.backend('lmstudio');b.generate([{'role':'user','content':'test'}],{'temperature':0,'seed':42},{'type':'boolean'})
+    def backend(self):
+        b=NativeBackend({'backend':'llamacpp'},{'uuid':'GPU-test'});b.context=4096;b.owned_id='chosen-model';b.transport=FakeTransport();return b
+    def test_native_no_arbitrary_output_limit(self):
+        b=self.backend();b.generate([{'role':'user','content':'test'}],{'temperature':0,'seed':42},{'type':'boolean'})
         body=b.transport.calls[-1][1]
-        self.assertNotIn('max_tokens',body);self.assertNotIn('max_output_tokens',body)
+        self.assertEqual(body['max_tokens'],-1)
         self.assertEqual(body['response_format']['json_schema']['schema'],{'type':'boolean'})
         self.assertEqual(body['model'],'chosen-model')
     def test_native_unlimited_and_cache_off_erase(self):
-        b=self.backend('llamacpp');r=b.generate([],{'temperature':0},None,'off')
+        b=self.backend();r=b.generate([],{'temperature':0},None,'off')
         body=b.transport.calls[-1][1]
         self.assertEqual(body['max_tokens'],-1);self.assertFalse(body['cache_prompt'])
         self.assertIn('/slots/0?action=erase',[x[0] for x in b.transport.calls]);self.assertEqual(r['input_tokens_verified'],8)
     def test_native_cache_on(self):
-        b=self.backend('llamacpp');b.generate([],{},None,'on')
+        b=self.backend();b.generate([],{},None,'on')
         self.assertTrue(b.transport.calls[-1][1]['cache_prompt'])
-    def test_lmstudio_controlled_cache_not_claimed(self):
-        b=self.backend('lmstudio')
-        with self.assertRaises(Unsupported):b.generate([],{},None,'on')
-        self.assertEqual(b.transport.calls,[])
+    def test_removed_backend_is_not_selectable(self):
+        with self.assertRaises(ValueError):NativeBackend({'backend':'lmstudio'},{})
     def test_native_input_exhaustion_no_generation(self):
-        b=self.backend('llamacpp');b.transport.token_count=4096
-        with self.assertRaises(BackendError):b.generate([],{},None)
+        b=self.backend();b.transport.token_count=4096
+        with self.assertRaises(ContextCapacity):b.generate([],{},None)
         self.assertNotIn('/v1/chat/completions',[x[0] for x in b.transport.calls])
     def test_missing_cache_reset_confirmation(self):
-        b=self.backend('llamacpp');b.transport.request=lambda *a,**k:{}
+        b=self.backend();b.transport.request=lambda *a,**k:{}
         with self.assertRaises(Unsupported):b.clear_cache()
     def test_seed_and_temperature_are_per_request(self):
-        b=self.backend('lmstudio')
+        b=self.backend()
         b.generate([],{'temperature':.8,'seed':7},None)
         b.generate([],{'temperature':0,'seed':7},None)
-        self.assertEqual([x[1]['temperature'] for x in b.transport.calls],[.8,0])
-        self.assertEqual([x[1]['seed'] for x in b.transport.calls],[7,7])
-    def test_unload_only_owned_instance(self):
-        b=self.backend('lmstudio');b.unload()
-        self.assertEqual(b.transport.calls[-1][:2],('/api/v1/models/unload',{'instance_id':'chosen-model'}))
-        self.assertIsNone(b.owned_id)
+        requests=[x for x in b.transport.calls if x[0]=='/v1/chat/completions']
+        self.assertEqual([x[1]['temperature'] for x in requests],[.8,0])
+        self.assertEqual([x[1]['seed'] for x in requests],[7,7])
+    def test_unload_without_owned_process_does_not_stop_external_server(self):
+        b=self.backend();b.unload()
+        self.assertEqual(b.transport.calls,[]);self.assertIsNone(b.owned_id)
 if __name__=='__main__':unittest.main()

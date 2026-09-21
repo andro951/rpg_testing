@@ -26,7 +26,7 @@ class ExtraTests(unittest.TestCase):
                 r=super().generate(*args);r['cached_tokens']=None;return r
         t=read_json(ROOT/'examples/test_specs/cached_questions.json')
         self.assertFalse(execute(t,t['variants'][0],Missing())['measurement_valid'])
-    def test_lmstudio_cache_rejected(self):
+    def test_unverified_cache_backend_rejected(self):
         b=DemoBackend();b.supports_cache=False
         t=read_json(ROOT/'examples/test_specs/cached_questions.json')
         with self.assertRaises(Unsupported):execute(t,t['variants'][0],b)

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from workbench.controller import Controller
 from workbench.domain import ResultStore,read_json,validate_test
 from workbench.workflows import execute,messages
-from workbench.backends import DemoBackend
+from workbench.demo_native import DemoNative as DemoBackend
 ROOT=Path(__file__).resolve().parents[1]
 
 class EdgeTests(unittest.TestCase):
@@ -68,7 +68,7 @@ class EdgeTests(unittest.TestCase):
     def test_pause_and_resume(self):
         class Slow(DemoBackend):
             def generate(self,*a,**kw):time.sleep(.05);return super().generate(*a,**kw)
-        with patch('workbench.controller.DemoBackend',Slow):
+        with patch('workbench.demo_native.DemoNative',Slow):
             self.app.start('run')
             deadline=time.monotonic()+10
             while self.app.current is None and time.monotonic()<deadline:time.sleep(.01)
@@ -88,7 +88,7 @@ class EdgeTests(unittest.TestCase):
                         raise Cancelled('test cancel')
                     time.sleep(.01)
                 return super().generate(*a,**kw)
-        with patch('workbench.controller.DemoBackend',Slow):
+        with patch('workbench.demo_native.DemoNative',Slow):
             self.app.start('run');deadline=time.monotonic()+5
             while (not self.app.current or self.app.current['stage']=='loading') and time.monotonic()<deadline:time.sleep(.01)
             self.app.control('stop');self.app.thread.join(5)
@@ -98,7 +98,7 @@ class EdgeTests(unittest.TestCase):
         source=(ROOT/'workbench/domain.py').read_text()
         self.assertIn("'inventory.py'",source.split('def code_fingerprint():',1)[1].split('def case_id',1)[0])
     def test_health_check_not_semantic_readiness_gate(self):
-        source=(ROOT/'workbench/backends.py').read_text()
+        source=(ROOT/'workbench/native.py').read_text()
         self.assertIn("self.load_metadata['health_exact_ready']",source)
         self.assertNotIn("raise BackendError('Not READY')",source)
 if __name__=='__main__':unittest.main()

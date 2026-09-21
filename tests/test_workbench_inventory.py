@@ -15,18 +15,19 @@ def fake_gguf(path, name='Example'):
     path.write_bytes(b'GGUF'+struct.pack('<IQQ',3,0,2)+st('general.name')+struct.pack('<I',8)+st(name)+st('qwen.context_length')+struct.pack('<II',4,32768))
 
 class InventoryTests(unittest.TestCase):
-    def test_reads_settings_not_default(self):
+    def test_scan_only_the_supplied_root(self):
         with tempfile.TemporaryDirectory() as tmp:
-            home=Path(tmp);p=home/'.lmstudio/settings.json';p.parent.mkdir();p.write_text(json.dumps({'modelsDirectory':str(home/'custom')}))
-            self.assertEqual(lmstudio_folder(home)['path'],str(home/'custom'))
-    def test_no_guessed_fallback(self):
+            home=Path(tmp);wanted=home/'chosen';wanted.mkdir()
+            fake_gguf(home/'other/model.gguf')
+            self.assertEqual(scan_models(wanted,[]),[])
+    def test_empty_root_does_not_create_default(self):
         with tempfile.TemporaryDirectory() as tmp:
-            home=Path(tmp);(home/'.lmstudio/models').mkdir(parents=True)
-            self.assertIsNone(lmstudio_folder(home)['path'])
-    def test_corrupt_settings(self):
+            root=Path(tmp)/'does-not-exist'
+            self.assertEqual(scan_models(root,[]),[]);self.assertFalse(root.exists())
+    def test_scan_does_not_modify_existing_weights(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p=Path(tmp)/'.lmstudio/settings.json';p.parent.mkdir();p.write_text('{')
-            self.assertIsNone(lmstudio_folder(Path(tmp))['path'])
+            p=Path(tmp)/'M-Q4_K_M.gguf';fake_gguf(p);before=p.read_bytes()
+            scan_models(Path(tmp),[]);self.assertEqual(p.read_bytes(),before)
     def test_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'a.gguf';fake_gguf(p)
@@ -39,8 +40,8 @@ class InventoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'author/repo/Model-Q4_K_M.gguf';fake_gguf(p)
             catalog=[{'id':'m','files':[p.name],'required_vram_gb':8}]
-            out=scan_models(Path(tmp),catalog,[{'key':'author/repo@q4_k_m','path':str(p)}])
-            self.assertEqual(out[0]['id'],'m');self.assertTrue(out[0]['complete']);self.assertEqual(out[0]['model_key'],'author/repo@q4_k_m')
+            out=scan_models(Path(tmp),catalog)
+            self.assertEqual(out[0]['id'],'m');self.assertTrue(out[0]['complete']);self.assertEqual(out[0]['paths'],[str(p)])
     def test_split_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'model-Q4_K_M-00001-of-00002.gguf';fake_gguf(p)
@@ -57,7 +58,7 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(detect_gpus(lambda args:raw)[0]['name'],'A100')
     def test_auto_context(self):
         out=automatic_context([{'source':{'x':'hello'},'variants':[{'steps':[]}]}],{'a.context_length':8192})
-        self.assertEqual(out['allocated_tokens'],4096);self.assertIsNone(out['output_cap'])
+        self.assertEqual(out['allocated_tokens'],8192);self.assertIsNone(out['output_cap'])
     def test_no_unknown_context_guess(self):
         with self.assertRaises(ValueError):automatic_context([],{})
 

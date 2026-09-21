@@ -45,7 +45,7 @@ class NativeBackend:
         self.settings,self.gpu,self.log=settings,gpu,log
         if settings.get('backend','llamacpp')!='llamacpp':raise ValueError('Only native llama.cpp is supported')
         self.token=secrets.token_urlsafe(32)
-        self.transport=Transport('http://127.0.0.1:1235',self.token,timeout=30)
+        self.transport=Transport('http://127.0.0.1:1235',self.token,timeout=60)
         self.process=None;self.reader=None;self.owned_id=None;self.context=None
         self.load_metadata={};self.version_info={};self.lines=[];self.timed_out=False
         self.requested_layers='all';self.execution_class='full_gpu'
@@ -88,13 +88,28 @@ class NativeBackend:
         self.owned_id='rpg-workbench-'+model['id']
         exe=executable('llama-server',self.settings.get('llama_path',''))
         if not exe:raise RunFailure('Select or install llama-server in Worker setup')
-        info=capabilities(exe,preparation=True);self.version_info={'llama_server':info['version']}
+        info=capabilities(exe,preparation=False);self.version_info={'llama_server':info['version']}
         with socket.socket() as sock:
             sock.settimeout(.25)
             if sock.connect_ex(('127.0.0.1',1235))==0:
                 raise RunFailure('Port 1235 belongs to another process; it was not stopped')
         args=self.launch_arguments(exe,model,context,info['help'],layers)
-        env={k:v for k,v in os.environ.items() if not k.startswith(('LLAMA_ARG_','HF_'))}
+        devices=re.findall(r'^\s*((?:CUDA|Vulkan)\d+)\s*:\s*(.*)$',info.get('devices',''),re.M)
+        if devices:
+            cuda=[d for d in devices if d[0].startswith('CUDA')]
+            if cuda:
+                if len(cuda)!=1:raise RunFailure('Native runtime exposes multiple CUDA devices; use one allocated/visible GPU')
+                chosen=cuda[0][0]
+            else:
+                if os.environ.get('SLURM_JOB_ID'):raise RunFailure('Use CUDA in Slurm; Vulkan does not honor the CUDA allocation mask')
+                name=re.sub(r'^(?:NVIDIA\s+)?(?:GeForce\s+)?','',self.gpu.get('name',''),flags=re.I)
+                matches=[d for d in devices if name and name.lower() in d[1].lower()]
+                if len(matches)!=1:raise RunFailure('Could not map the Vulkan device to the detected NVIDIA GPU')
+                chosen=matches[0][0]
+            args+=['--device',chosen]
+            self.version_info['selected_device']=chosen
+        elif info.get('devices') is not None:raise RunFailure('Native runtime did not identify a GPU device')
+        env={k:v for k,v in os.environ.items() if not k.startswith(('LLAMA_ARG_','HF_','GGML_'))}
         if 'CUDA_VISIBLE_DEVICES' not in env and self.gpu.get('uuid'):env['CUDA_VISIBLE_DEVICES']=self.gpu['uuid']
         cache=Path(self.settings.get('runtime_cache',Path.cwd()/'.local/runtime-cache'));cache.mkdir(parents=True,exist_ok=True)
         env.update(CUDA_CACHE_PATH=str(cache),XDG_CACHE_HOME=str(cache),HF_HOME=str(cache/'huggingface'))
@@ -174,6 +189,8 @@ class NativeBackend:
         from .backends import BackendError
         try:result=self.transport.request('/v1/chat/completions',body,stream=True,cancel=cancel)
         except BackendError as exc:
+            if cancel and cancel.is_set():
+                stopped=Cancelled('Stopped');stopped.partial_response=getattr(exc,'partial_response',{});raise stopped from exc
             classified=classify_load_failure(str(exc))
             classified.partial_response=getattr(exc,'partial_response',{})
             raise classified from exc

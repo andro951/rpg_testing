@@ -173,6 +173,11 @@ class Session:
                 finally:self.close_model()
                 if a.stop_after_model:return
             # Only memory/placement failures get a second pass, never unrelated invalid models.
+            combined={}
+            for group,jobs in self.deferred:
+                entry=combined.setdefault(group['model']['id'],(group,{}))
+                entry[1].update({j['case_id']:j for j in jobs})
+            self.deferred=[(g,list(jobs.values())) for g,jobs in combined.values()]
             self.deferred.sort(key=lambda g:g[0]['installed']['size_bytes'])
             for group,jobs in self.deferred:
                 self.check_stop()

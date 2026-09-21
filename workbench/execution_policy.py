@@ -53,10 +53,10 @@ def placement(lines):
             cpu_compute.append(line)
     result = {'status': 'unverified', 'gpu_layers': None, 'total_layers': None, 'cpu_layers': None,
               'cpu_kv_evidence': cpu_kv, 'cpu_compute_evidence': cpu_compute,
-              'scope': 'backend-reported model layers and placement diagnostics; not independent OS allocation verification'}
+              'scope': 'backend-reported model layers and KV placement; CPU control/sampling buffers are not model layers; OS paging is not independently verified'}
     if ratio:
         result.update(ratio)
-        result['status'] = 'cpu_offloaded' if ratio['cpu_layers'] or cpu_kv or cpu_compute else 'full_gpu'
+        result['status'] = 'cpu_offloaded' if ratio['cpu_layers'] or cpu_kv else 'full_gpu'
     return result
 
 

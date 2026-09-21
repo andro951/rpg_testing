@@ -100,7 +100,7 @@ class Handler(BaseHTTPRequestHandler):
                 for f in sorted(p.iterdir(),key=lambda p:(not p.is_dir(),p.name.lower())):
                     if f.is_symlink() or f.name.startswith('.'):continue
                     try:
-                        if f.is_dir() or f.suffix.lower() in ('.exe','.pem','.key','.pub') or f.name in ('lms','llama-server','id_ed25519','id_rsa'):
+                        if f.is_dir() or f.suffix.lower() in ('.exe',) or f.name in ('llama-server',):
                             entries.append({'name':f.name,'path':str(f),'directory':f.is_dir()})
                     except OSError:continue
                 roots=[f'{chr(d)}:/' for d in range(65,91) if Path(f'{chr(d)}:/').is_dir()] if os.name=='nt' else ['/']
@@ -129,6 +129,10 @@ class Handler(BaseHTTPRequestHandler):
                 prep=data.get('preparation')
                 if prep and (type(prep.get('vram_gb'))is not int or prep['vram_gb'] not in (*TIERS,11) or not isinstance(prep.get('gpu_name'),str)):raise ValueError('Invalid preparation GPU')
                 app.start('preflight',data);return self.send(202,{'started':True})
+            operations={'/api/hub/search':'hub_search','/api/hub/inspect':'hub_inspect','/api/hub/download':'hub_download',
+                        '/api/runtime/list':'runtime_list','/api/runtime/install':'runtime_install','/api/models/scan':'scan'}
+            if path in operations:
+                app.start(operations[path],data);return self.send(202,{'started':True})
             if path=='/api/run':app.start('run');return self.send(202,{'started':True})
             if path=='/api/fix':app.start('fix',data);return self.send(202,{'started':True})
             if path=='/api/control':app.control(data['action']);return self.send(200,{'ok':True})

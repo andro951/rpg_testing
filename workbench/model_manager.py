@@ -17,6 +17,7 @@ class ModelManager:
         self.hub_detail=HubClient(self.settings.get('hf_token','')).variants(payload['repo_id'],payload.get('target_gb',8))
         self.message='Quantizations loaded from a pinned repository revision.'
     def download_selected(self,payload):
+        if self.demo:raise ValueError('Demo mode never installs real models. Open the normal Workbench launcher.')
         from .downloads import download_model
         root=Path(self.settings.get('model_root',''))
         if not self.settings.get('model_root') or not root.is_absolute() or not root.is_dir():
@@ -45,6 +46,7 @@ class ModelManager:
         from .runtimes import RuntimeClient
         self.runtime_options=RuntimeClient().releases();self.message='Select an official build to install it.'
     def install_runtime(self,payload):
+        if self.demo:raise ValueError('Demo mode never installs runtimes. Open the normal Workbench launcher.')
         from .runtimes import install
         from .native import capabilities
         choice=next((b for b in self.runtime_options if b['id']==payload.get('id')),None)

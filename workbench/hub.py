@@ -46,7 +46,7 @@ class HubClient:
         params=urlencode({'search':query.strip(),'filter':'gguf','sort':'downloads','direction':-1,'limit':30,'full':'true'})
         data=self.json('https://huggingface.co/api/models?'+params)
         return [{'id':m['id'],'downloads':m.get('downloads'),'likes':m.get('likes'),'updated':m.get('lastModified'),
-                 'gated':m.get('gated',False),'license':m.get('cardData',{}).get('license')} for m in data]
+                 'gated':m.get('gated',False),'license':(m.get('cardData') or {}).get('license')} for m in data]
     def variants(self,repo,target_gb=8):
         safe_repo(repo)
         info=self.json('https://huggingface.co/api/models/'+repo+'?blobs=true')
@@ -78,14 +78,14 @@ def group_variants(info,target_gb):
         hashes={PurePosixPath(f['rfilename']).name:f.get('lfs',{}).get('sha256') for f in files}
         hashes=hashes if all(isinstance(h,str) and re.fullmatch(r'[0-9a-f]{64}',h) for h in hashes.values()) else {}
         item={'id':'hf-'+digest({'repo':repo,'revision':revision,'files':paths})[:20],
-              'repo_id':repo,'revision':revision,'base_model':info.get('cardData',{}).get('base_model') or repo,
+              'repo_id':repo,'revision':revision,'base_model':(info.get('cardData') or {}).get('base_model') or repo,
               'files':basenames,'remote_files':dict(zip(basenames,paths)),'quantization':quant,'size_bytes':size,
               'file_sizes':dict(zip(basenames,sizes)),'sha256':hashes,'complete':complete,'shards':len(files),
-              'license':info.get('cardData',{}).get('license'),'gated':info.get('gated',False),
+              'license':(info.get('cardData') or {}).get('license'),'gated':info.get('gated',False),
               'required_vram_gb':None,'vram_status':'unassigned'}
         out.append(item)
     recommend(out,target_gb)
-    return {'repo_id':repo,'revision':revision,'variants':out,'license':info.get('cardData',{}).get('license'),
+    return {'repo_id':repo,'revision':revision,'variants':out,'license':(info.get('cardData') or {}).get('license'),
             'note':'Sizes are download sizes, not runtime VRAM. Recommendations are heuristics, never quality or fit measurements.'}
 
 
@@ -102,10 +102,11 @@ def recommend(items,target):
         score=bits+(0.3 if '_K_M' in q else 0)-(0.2 if '_K_S' in q else 0)
         item['_rank']=score if room>=1.25 else -10+score/100
     ordered=sorted(items,key=lambda x:(x['_rank'],x['size_bytes'] or 0),reverse=True)
-    picked=[]
+    picked=[];best_size=next((x['size_bytes']/2**30 for x in ordered if x['_rank']>=0),None)
     for item in ordered:
         if item['_rank']<0:continue
         size=item['size_bytes']/2**30
+        if picked and (best_size<target*.55 or size<max(target*.55,best_size-target*.2)):continue
         if all(abs(size-v) >= max(.4,target*.05) for v in picked):
             item['recommended']=True;picked.append(size)
         if len(picked)==3:break
