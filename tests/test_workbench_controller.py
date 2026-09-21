@@ -24,6 +24,11 @@ class ControllerTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name);shutil.copytree(ROOT/'test_specs',self.root/'test_specs')
         self.app=Controller(self.root,demo=True);self.app.selftest=lambda:None
+    def test_progress_snapshot_reports_completed_preflight_and_run(self):
+        self.app.check()
+        p=self.app.snapshot()['progress'];self.assertEqual(p['phase'],'preflight');self.assertEqual(p['overall_percent'],100)
+        self.app.run()
+        p=self.app.snapshot()['progress'];self.assertEqual(p['phase'],'run');self.assertEqual(p['overall_percent'],100)
     def test_preflight_no_inference(self):
         with patch('workbench.demo_native.DemoNative') as backend:
             self.assertTrue(self.app.check()['ready']);backend.assert_not_called()

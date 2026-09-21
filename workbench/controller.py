@@ -54,6 +54,8 @@ class Controller(ModelManager):
         self.settings['runtime_cache']=str(self.root/'.local/runtime-cache')
         self.hub_results=[];self.hub_detail=None;self.runtime_options=[];self.folder_scanned=False
         self.run_total=0;self.run_processed=0;self.skipped_models=[];self.load_attempts=[]
+        self.progress={'active':False,'phase':'idle','task':'Idle','task_percent':0.0,'overall_percent':0.0,
+                       'detail':'','started_at':None,'updated_at':now()}
         self.monitor=None;self.last_telemetry=None;self.timing_active=False;self.run_provenance={}
         self.store=ResultStore(self.data/'results');self.registry_path=self.data/'artifacts.json'
         self.registry=read_json(self.registry_path) if self.registry_path.exists() else {}
@@ -67,6 +69,22 @@ class Controller(ModelManager):
         for name in ('results','logs'):(self.data/name).mkdir(exist_ok=True)
         self.process_source_commit=self.source_commit()
         self.log('startup','Workbench started'+(' in SIMULATED DEMO mode' if demo else ''))
+    def set_progress(self,phase,task,task_percent=None,overall_percent=None,detail='',active=True):
+        def pct(value,old):
+            if value is None:return old
+            return max(0.0,min(100.0,float(value)))
+        with self.lock:
+            old=self.progress
+            started=old.get('started_at') if old.get('active') and old.get('phase')==phase else now()
+            self.progress={'active':bool(active),'phase':str(phase),'task':str(task),
+                           'task_percent':pct(task_percent,old.get('task_percent',0.0)),
+                           'overall_percent':pct(overall_percent,old.get('overall_percent',0.0)),
+                           'detail':str(detail or ''),'started_at':started,'updated_at':now()}
+    def finish_progress(self,phase,task,detail=''):
+        self.set_progress(phase,task,100,100,detail,False)
+    def run_overall_percent(self,extra_completed=0):
+        total=max(1,self.run_total)
+        return min(100.0,100.0*(self.run_processed+extra_completed)/total)
     def log(self,category,message):
         text=str(message)
         for secret in (self.settings.get('hf_token'),self.settings.get('model_api_token')):
@@ -104,12 +122,19 @@ class Controller(ModelManager):
         except Exception as exc:version='unavailable: '+str(exc)
         if not version.startswith('unavailable'):self.version_cache=version
         return version
-    def fingerprint(self,item):
+    def fingerprint(self,item,progress=None):
         if self.demo:return {'demo.gguf':'a'*64}
         signature=[(str(Path(p).resolve()),Path(p).stat().st_size,Path(p).stat().st_mtime_ns) for p in item['paths']]
         key=digest(signature)
-        if key in self.verified_fingerprints:return self.verified_fingerprints[key]
-        hashes=file_hashes(item['paths']);self.verified_fingerprints[key]=hashes
+        if key in self.verified_fingerprints:
+            if progress:progress(item['size_bytes'],item['size_bytes'],item['name'])
+            return self.verified_fingerprints[key]
+        saved=self.registry.get(item['id'],{})
+        if saved.get('signature')==signature and saved.get('sha256'):
+            hashes=saved['sha256'];self.verified_fingerprints[key]=hashes
+            if progress:progress(item['size_bytes'],item['size_bytes'],item['name'])
+            return hashes
+        hashes=file_hashes(item['paths'],progress);self.verified_fingerprints[key]=hashes
         self.registry[item['id']]={'sha256':hashes,'signature':signature,'verified_at':now()}
         write_json(self.registry_path,self.registry)
         return hashes
@@ -131,28 +156,37 @@ class Controller(ModelManager):
         except Exception as exc:return [preflight.issue('git',str(exc)+' Use a Git clone for automatic sync, or disable Git in Worker setup.','Open Worker setup',{'type':'setup'})]
         return []
     def selftest(self):
+        self.set_progress('preflight','Harness self-tests',10,2,'Checking the workbench code before touching model files.')
         paths=sorted((self.root/'workbench').glob('*.py'))+sorted((self.root/'tests').glob('test*.py'))
         signature=digest({str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths})
-        if signature==self.selftest_digest:return
+        if signature==self.selftest_digest:
+            self.set_progress('preflight','Harness self-tests',100,10,'Already verified in this workbench session.')
+            return
         self.log('preflight','Running harness unit/smoke tests (no real GPU inference).')
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
+        self.set_progress('preflight','Harness self-tests',35,5,'Running the unit/smoke suite. This is a coarse estimate.')
         result=subprocess.run([sys.executable,'-m','unittest','discover','-s','tests'],cwd=self.root,capture_output=True,text=True,timeout=180,**flags)
+        self.set_progress('preflight','Harness self-tests',100,10,'Harness tests completed.')
         self.log('selftest',result.stdout+result.stderr)
         if result.returncode:raise RuntimeError('Harness self-tests failed; inspect Logs. No benchmark was run.')
         self.selftest_digest=signature
     def check(self,preparation=None):
         self.message='Checking files, pending work, and backend readiness.'
+        self.set_progress('preflight','Starting preflight',0,0,'Preparing readiness checks.')
         self.selftest()
-        report,plan=preflight.build(self,preparation)
+        report,plan=preflight.build(self,preparation,track_progress=True)
         self.report,self.plan=report,plan
         self.message='Preparation checks passed; actual GPU checks remain.' if report['prepared'] else 'Ready.' if report['ready'] else 'Preflight found issues. Use the individual action buttons.'
         self.log('preflight',self.message)
+        self.finish_progress('preflight','Preflight complete',self.message)
         self.flush_logs();return report
     def start(self,kind='preflight',payload=None):
         if not self.operation.acquire(blocking=False):raise RuntimeError('Another operation is active.')
         if self.restart_required:self.operation.release();raise RuntimeError('Source changed. Restart the workbench before continuing.')
         self.state='checking' if kind=='preflight' else 'fixing' if kind=='fix' else 'scanning' if kind=='scan' else 'running'
-        if kind=='scan':self.message='Scanning the selected models folder…'
+        if kind=='scan':
+            self.message='Scanning the selected models folder…'
+            self.set_progress('scan','Scanning model folder',0,0,'Discovering GGUF files.')
         self.cancel_event.clear()
         def work():
             try:
@@ -198,11 +232,16 @@ class Controller(ModelManager):
         try:os.chmod(self.settings_path,0o600)
         except OSError:pass
     def scan_folder(self):
-        if self.demo:self.last_models=self.demo_models();return
+        if self.demo:
+            self.last_models=self.demo_models();self.finish_progress('scan','Model scan complete','Simulated model inventory.');return
         path=self.settings.get('model_root','')
         if not path:raise ValueError('Choose your models folder first')
-        self.last_models=scan_models(Path(path),self.catalog());self.folder_scanned=True
+        def scan_progress(done,total,name):
+            pct=100*done/max(1,total)
+            self.set_progress('scan','Scanning model metadata',pct,pct,name)
+        self.last_models=scan_models(Path(path),self.catalog(),scan_progress);self.folder_scanned=True
         self.message=f'Found {len(self.last_models)} model variants.'
+        self.finish_progress('scan','Model scan complete',self.message)
     @exclusive_edit
     def configure(self,values):
         values=dict(values)
@@ -261,6 +300,7 @@ class Controller(ModelManager):
         report=self.check()
         if not report['ready']:self.state='idle';return
         self.state='running';self.completed_now=0;self.session_errors=0;self.started=now();self.finished=None
+        self.set_progress('run','Starting benchmark run',0,0,'Preparing the first pending model and case.')
         self.pause_requested=False;self.stop_after_model=False;self.resume_event.set()
         from .scheduler import Session
         from .demo_native import DemoNative
@@ -270,7 +310,8 @@ class Controller(ModelManager):
         finally:self.finished=now();self.current=None
         self.state='finished' if not self.session_errors else 'finished_with_errors'
         self.message='Run finished. Full-GPU, skipped, and hybrid results are recorded separately.'
-        self.report,self.plan=preflight.build(self)
+        self.finish_progress('run','Benchmark run complete',self.message)
+        self.report,self.plan=preflight.build(self,track_progress=False)
     def source_commit(self):
         try:
             from .gitops import git
@@ -299,7 +340,7 @@ class Controller(ModelManager):
                     'settings':{k:v for k,v in self.settings.items() if not k.endswith(('token','secret'))},
                     'has_hf_token':bool(self.settings.get('hf_token')),'logs':copy.deepcopy(self.logs[-300:]),
                     'remote':self.remote_info,'started_at':self.started,'finished_at':self.finished,
-                    'process_source_commit':self.process_source_commit}
+                    'process_source_commit':self.process_source_commit,'progress':copy.deepcopy(self.progress)}
     @exclusive_edit
     def result_records(self):
         records=[]

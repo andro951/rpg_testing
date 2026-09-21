@@ -16,10 +16,15 @@ def issue(code, message, label=None, action=None, level='blocked'):
     return {'id':code,'message':message,'level':'fixable' if action else level,'label':label,'action':action}
 
 
-def build(app, preparation=None):
+def build(app, preparation=None, track_progress=True):
+    def update(task,task_percent,overall_percent,detail=''):
+        if track_progress:app.set_progress('preflight',task,task_percent,overall_percent,detail)
     problems=[];settings=app.settings;kind=settings['backend']
+    update('Loading benchmark definitions',0,10,'Reading models and enabled test files.')
     models=app.catalog();tests=load_tests(app.root/'test_specs')
+    update('Loading benchmark definitions',100,15,f'{len(tests)} enabled tests loaded.')
     if not tests:problems.append(issue('tests','No enabled test files. Add or enable a test in Test definitions.'))
+    update('Detecting GPU and runtime',10,16,'Inspecting the execution environment.')
     if app.demo:
         gpu={'name':'SIMULATED GTX 1080','uuid':'demo','total_gib':8,'free_gib':8,'driver':'simulated'}
     elif preparation:
@@ -33,6 +38,7 @@ def build(app, preparation=None):
             problems.append(issue('gpu','GPU detection failed: '+str(exc)))
             gpu={'name':'Unavailable','total_gib':0,'driver':None,'uuid':None}
     backend_version=app.backend_version()
+    update('Detecting GPU and runtime',100,20,'Hardware and backend identity collected.')
     target={'gpu_name':gpu['name'],'vram_gb':device_tier(gpu['total_gib'],gpu['name']) or gpu['total_gib'],
             'backend':'demo' if app.demo else kind,'backend_version':backend_version,
             'os':platform.platform(),'python':platform.python_version(),'cpu':platform.processor() or platform.machine(),'driver':gpu.get('driver'),
@@ -40,6 +46,7 @@ def build(app, preparation=None):
             # The recipe is computable without model files so completed models remain optional.
             'context_recipe':automatic_context(tests, {'planning.context_length':2**63-1})['allocated_tokens'],
             'execution_policy':'native-two-pass-v2'}
+    update('Checking existing results',0,20,'Validating saved completion evidence.')
     # Pins are metadata, NOT completion tracking. Recover from checksummed results if needed.
     for file in app.store.root.glob('*/*.json'):
         try:app.store.read(file)
@@ -53,25 +60,42 @@ def build(app, preparation=None):
         return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'issues':problems,
                 'gpu':gpu,'plan':{'pending':0,'complete':0,'model_loads':0,'groups':[]},
                 'note':'Completion cannot be trusted until corrupt result files are resolved.'},None
+    update('Checking existing results',100,25,'Saved result files checked.')
     models=app.with_known_pins(models)
     store=app.store
     plan=pending_plan(models,tests,target,store)
     folder_info=app.folder_info()
     path=folder_info.get('path')
     inventory=[];inventory_error=None
-    found=app.demo_models() if app.demo else scan_models(Path(path),models) if path else []
+    update('Scanning model files',0,25,'Finding GGUF files and reading lightweight metadata.')
+    def scan_progress(done,total,name):
+        update('Scanning model files',100*done/max(1,total),25+10*done/max(1,total),name)
+    found=app.demo_models() if app.demo else scan_models(Path(path),models,scan_progress) if path else []
+    update('Scanning model files',100,35,f'{len(found)} model variants discovered.')
     app.last_models=found;app.folder_scanned=bool(path)
     # Changed existing files cannot be mistaken for the older artifact's completed work.
     changed=False
-    for item in found:
-        if item['catalogued'] and item['complete'] and not item['errors']:
-            pinned=app.fingerprint(item)
-            for m in models:
-                if m['id']==item['id'] and m.get('sha256')!=pinned:
-                    m['sha256']=pinned;changed=True
+    hash_items=[item for item in found if item['catalogued'] and item['complete'] and not item['errors']]
+    hash_total=sum(item['size_bytes'] for item in hash_items);hash_done=0
+    update('Verifying model files',100 if not hash_items else 0,35,'No eligible model files need verification.' if not hash_items else f'0.00 / {hash_total/1e9:.2f} GB read')
+    for item_index,item in enumerate(hash_items,1):
+        base=hash_done
+        def hash_progress(done,total,name,base=base,item=item,item_index=item_index):
+            current=base+done
+            task_pct=100*done/max(1,total)
+            overall_pct=35+55*current/max(1,hash_total)
+            detail=f'Model {item_index}/{len(hash_items)} · {name} · {current/1e9:.2f} / {hash_total/1e9:.2f} GB'
+            update('Verifying model files',task_pct,overall_pct,detail)
+        pinned=app.fingerprint(item,hash_progress)
+        hash_done+=item['size_bytes']
+        for m in models:
+            if m['id']==item['id'] and m.get('sha256')!=pinned:
+                m['sha256']=pinned;changed=True
+    update('Verifying model files',100,90,f'{hash_done/1e9:.2f} GB verified across {len(hash_items)} model variants.')
     if changed:plan=pending_plan(models,tests,target,store)
     grouped={}
     for item in found:grouped.setdefault(item['id'],[]).append(item)
+    update('Checking execution readiness',0,90,'Checking storage, runtime controls, contexts, and pending models.')
     # A missing folder or backend is irrelevant when no pending model needs it.
     if plan['pending']:
         if not path and not app.demo:
@@ -123,7 +147,9 @@ def build(app, preparation=None):
     for item in found:
         if item['required_vram_gb'] is None:
             problems.append(issue('unassigned_'+item['id'],'Assign a VRAM tier to '+item['name']+' in Models.','Assign VRAM',{'type':'models'},'needs_input'))
+    update('Checking execution readiness',85,98,'Checking Git/source state and final readiness.')
     problems.extend(app.git_issues())
+    update('Finalizing preflight',100,100,'Preflight report assembled.')
     report={'ready':not problems and not preparation,'prepared':not problems and bool(preparation),
             'preparation_only':bool(preparation),'issues':problems,'plan':public_plan(plan),'gpu':gpu,
             'folder':folder_info,'inventory_warning':inventory_error,

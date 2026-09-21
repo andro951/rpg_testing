@@ -49,6 +49,16 @@ class InventoryTests(unittest.TestCase):
     def test_projector_ignored(self):
         with tempfile.TemporaryDirectory() as tmp:
             fake_gguf(Path(tmp)/'mmproj-model.gguf');self.assertEqual(scan_models(Path(tmp),[]),[])
+    def test_file_hash_progress_tracks_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'a.gguf';fake_gguf(p);events=[]
+            file_hashes([str(p)],lambda done,total,name:events.append((done,total,name)))
+            self.assertTrue(events);self.assertEqual(events[-1][0],events[-1][1]);self.assertEqual(events[-1][2],'a.gguf')
+    def test_scan_progress_reaches_total(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_gguf(Path(tmp)/'a.gguf');fake_gguf(Path(tmp)/'b.gguf');events=[]
+            scan_models(Path(tmp),[],lambda done,total,name:events.append((done,total,name)))
+            self.assertTrue(events);self.assertEqual(events[-1][:2],(2,2))
     def test_file_hash_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'a.gguf';fake_gguf(p);a=file_hashes([str(p)]);fake_gguf(p,'Changed');self.assertNotEqual(a,file_hashes([str(p)]))

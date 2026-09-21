@@ -52,6 +52,8 @@ class Session:
         if count and record['case_id'] not in self.counted:
             self.counted.add(record['case_id']);self.app.run_processed+=1
         self.app.log('case',record['case_id']+' '+record['status']+' '+record['execution_class'])
+        self.app.set_progress('run','Saving benchmark result',100,self.app.run_overall_percent(),
+                              record.get('test_id','')+' / '+record.get('variant_id',''))
         self.app.flush_logs();self.app.publish()
 
     def skip(self,group,jobs,exc,mode='full_gpu',recoverable=False):
@@ -80,9 +82,12 @@ class Session:
         self.app.current={'model':mid,'stage':'loading','pass':phase,'execution_class':mode}
         self.app.message=f'{phase}: loading {mid}'
         self.app.backend=self.backend_factory(self.app.settings,self.report['gpu'],self.app.log)
+        self.app.backend.progress=lambda task,pct,detail='':self.app.set_progress(
+            'run',task,pct,self.app.run_overall_percent(),f'{mid} · {detail}')
         self.monitor=self.monitor_factory(self.report['gpu'].get('uuid'),simulated=self.app.demo)
         self.monitor.start();self.app.monitor=self.monitor
         try:
+            self.app.set_progress('run','Loading model',0,self.app.run_overall_percent(),f'{mid} · {phase}')
             data=self.app.backend.load(model,context,self.app.cancel_event,layers=layers,execution_class=mode)
             seed_key=(mid,mode,str(layers),context.get('allocated_tokens'))
             if seed_key not in self.seed_checks:
@@ -125,9 +130,15 @@ class Session:
                 try:
                     # One timer includes ALL calls, branches and review passes in this workflow.
                     self.app.timing_active=True
+                    case_label=f"{job['test']['id']} / {job['variant']['id']} / repetition {job['repetition']+1}"
+                    self.app.set_progress('run','Running benchmark case',0,self.app.run_overall_percent(),case_label)
+                    def case_progress(info):
+                        self.app.current.update(stage=info['step'])
+                        self.app.set_progress('run','Running benchmark case',info['percent'],self.app.run_overall_percent(),
+                                              case_label+' · '+str(info['step']))
                     with self.app.backend.budget(seconds):
                         result=monitored_execute(job['test'],job['variant'],self.app.backend,
-                            self.app.cancel_event,lambda step:self.app.current.update(stage=step),self.monitor,job['repetition'])
+                            self.app.cancel_event,lambda step:self.app.current.update(stage=step),self.monitor,job['repetition'],case_progress)
                     record.update(status='completed',**result);self.app.completed_now+=1
                 except Cancelled as exc:
                     record.update(status='aborted',error='Stopped',partial=getattr(exc,'partial',{}))

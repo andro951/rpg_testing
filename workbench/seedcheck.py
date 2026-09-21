@@ -24,17 +24,20 @@ def response_digest(result):
     return hashlib.sha256(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode('utf-8')).hexdigest()
 
 
-def run_seed_check(backend,cancel=None):
+def run_seed_check(backend,cancel=None,progress=None):
     messages=[{'role':'user','content':PROMPT}]
     runs=[]
     try:
-        for seed in (PRIMARY_SEED,PRIMARY_SEED,ALTERNATE_SEED):
+        seeds=(PRIMARY_SEED,PRIMARY_SEED,ALTERNATE_SEED)
+        for index,seed in enumerate(seeds,1):
+            if progress:progress('Seed reproducibility check',100*(index-1)/len(seeds),f'Generation {index}/{len(seeds)} · seed {seed}')
             settings={**SETTINGS,'seed':seed}
             result=backend.generate(messages,settings,None,'off',cancel)
             runs.append({'seed':seed,'finish_reason':result.get('finish_reason'),
                          'digest':response_digest(result),
                          'visible_chars':len(result.get('text','')),
                          'reasoning_chars':len(result.get('reasoning_text',''))})
+        if progress:progress('Seed reproducibility check',100,'Three diagnostic generations completed.')
     finally:
         backend.clear_cache()
     complete=all(r['finish_reason']=='stop' for r in runs)

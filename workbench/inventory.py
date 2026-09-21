@@ -84,7 +84,7 @@ def gguf_metadata(path: Path) -> dict:
         return metadata
 
 
-def scan_models(root: Path, catalog: list[dict]) -> list[dict]:
+def scan_models(root: Path, catalog: list[dict], progress=None) -> list[dict]:
     if not root.is_dir():return []
     groups={}
     for path in sorted(root.rglob('*.gguf')):
@@ -92,8 +92,8 @@ def scan_models(root: Path, catalog: list[dict]) -> list[dict]:
         match=re.fullmatch(r'(.+)-(\d{5})-of-(\d{5})\.gguf',path.name)
         group=str(path.parent/(match[1]+'.gguf')) if match else str(path)
         groups.setdefault(group,[]).append(path)
-    out=[]
-    for key,paths in groups.items():
+    out=[];group_items=list(groups.items());total_groups=len(group_items)
+    for group_index,(key,paths) in enumerate(group_items,1):
         paths=sorted(paths)
         names=[p.name for p in paths]
         shard=re.fullmatch(r'(.+)-(\d{5})-of-(\d{5})\.gguf',paths[0].name)
@@ -123,15 +123,19 @@ def scan_models(root: Path, catalog: list[dict]) -> list[dict]:
                     'recommended_vram_gb':recommend_vram(size_bytes),'catalogued':bool(entry),
                     'complete':names==expected,'missing_shards':sorted(set(expected)-set(names)),
                     'metadata':meta,'errors':errors,'catalog':entry})
+        if progress:progress(group_index,total_groups,paths[0].name)
+    if progress and not total_groups:progress(1,1,'No GGUF files found')
     return out
 
 
-def file_hashes(paths: list[str]) -> dict:
-    out={}
+def file_hashes(paths: list[str], progress=None) -> dict:
+    out={};total=sum(Path(p).stat().st_size for p in paths);done=0
     for filename in paths:
         h=hashlib.sha256()
         with open(filename,'rb') as f:
-            for chunk in iter(lambda:f.read(8*1024*1024),b''):h.update(chunk)
+            for chunk in iter(lambda:f.read(8*1024*1024),b''):
+                h.update(chunk);done+=len(chunk)
+                if progress:progress(done,total,Path(filename).name)
         out[Path(filename).name]=h.hexdigest()
     return out
 

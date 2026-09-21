@@ -80,11 +80,17 @@ def evaluate(test,variant,values):
     return result_score
 
 
-def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0):
+def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progress=None):
     """No disk writes. Include all request work in pipeline time; score afterward."""
     from jsonschema import Draft202012Validator
     from jsonschema.exceptions import ValidationError
     values={};calls=[];events=[];cache=variant.get('cache','default');cache_valid=True
+    def units(items):
+        total=0
+        for item in items:
+            total+=item.get('max_iterations',1)*units(item['steps']) if item.get('type')=='loop' else 1
+        return total
+    total_units=max(1,units(variant['steps']));completed_units=0
     if cache!='default' and not backend.supports_cache:raise Unsupported('Controlled cache tests require the native llama.cpp adapter')
     if any(s.get('output',{}).get('type','text')!='text' for s in variant['steps']) and not backend.supports_schema:
         raise Unsupported('This workflow requires schema-constrained output')
@@ -92,7 +98,7 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0):
     try:
         if cache!='default':backend.clear_cache()
         def run(items,iteration=0):
-            nonlocal cache_valid
+            nonlocal cache_valid,completed_units
             for step in items:
                 if cancel and cancel.is_set():raise Cancelled('Stopped by user')
                 if not condition(step.get('when'),values):
@@ -105,6 +111,7 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0):
                     events.append({'step':step['id'],'status':'loop_finished','iterations':iterations})
                     continue
                 if on_stage:on_stage(step['id'])
+                if on_progress:on_progress({'step':step['id'],'status':'running','completed':completed_units,'total':total_units,'percent':100*completed_units/total_units})
                 schema=output_schema(step.get('output',{'type':'text'}))
                 prompt=messages(test,step,values,variant)
                 settings={'temperature':0.0,'top_p':1.0,'top_k':0,'min_p':0.0,'seed':42,**step.get('sampling',{})}
@@ -124,6 +131,8 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0):
                 if cache=='off' and cached!=0:cache_valid=False
                 if cache=='on' and len(calls)>1 and (cached is None or cached<variant.get('min_cached_tokens',1)):cache_valid=False
                 events.append({'step':step['id'],'status':'completed','iteration':iteration})
+                completed_units+=1
+                if on_progress:on_progress({'step':step['id'],'status':'completed','completed':completed_units,'total':total_units,'percent':100*completed_units/total_units})
         run(variant['steps'])
     except Cancelled as exc:
         exc.partial={'calls':calls,'outputs':values,'step_events':events,'pipeline_seconds':time.perf_counter()-started}
@@ -137,6 +146,7 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0):
         counts=[c.get('cached_tokens') for c in calls]
         valid_counts=all(type(n)is int and n>=0 for n in counts)
         cache_valid=(bool(counts) and valid_counts and all(n==0 for n in counts)) if cache=='off' else (len(counts)>1 and valid_counts and counts[0]==0 and all(n>=variant.get('min_cached_tokens',1) for n in counts[1:]))
+    if on_progress:on_progress({'step':'scoring','status':'running','completed':total_units,'total':total_units,'percent':95})
     score_started=time.perf_counter()
     scored={'valid':False,'exact_match':False,'error':error} if error else evaluate(test,variant,values)
     return {'calls':calls,'step_events':events,'outputs':values,'score':scored,

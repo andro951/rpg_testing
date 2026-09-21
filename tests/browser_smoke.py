@@ -59,9 +59,11 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 else:page.goto(base+'/#key=browser-test-key')
                 expect(page.locator('#connection')).to_contain_text('Connected')
                 page.locator('#preflight').click();expect(page.locator('#readiness')).to_have_text('Ready',timeout=15000)
+                expect(page.locator('#task-percent')).to_have_text('100.0%');expect(page.locator('#overall-percent')).to_have_text('100.0%')
                 expect(page.locator('#pending')).to_have_text(str(base_case_count))
                 assert not app.store.all(),'Preflight must not run inference'
                 page.locator('#run').click();expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)
+                expect(page.locator('#task-percent')).to_have_text('100.0%');expect(page.locator('#overall-percent')).to_have_text('100.0%')
                 expect(page.locator('#pending')).to_have_text('0');expect(page.locator('#complete')).to_have_text(str(base_case_count))
                 screenshot=os.environ.get('WORKBENCH_SCREENSHOT')
                 if screenshot:page.screenshot(path=screenshot,full_page=True)

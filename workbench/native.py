@@ -48,7 +48,7 @@ class NativeBackend:
         self.transport=Transport('http://127.0.0.1:1235',self.token,timeout=60)
         self.process=None;self.reader=None;self.owned_id=None;self.context=None
         self.load_metadata={};self.version_info={};self.lines=[];self.timed_out=False
-        self.requested_layers='all';self.execution_class='full_gpu'
+        self.requested_layers='all';self.execution_class='full_gpu';self.progress=lambda task,pct,detail='':None
 
     def cancel(self):
         self.transport.cancel()
@@ -83,6 +83,7 @@ class NativeBackend:
         return args
 
     def load(self,model,context,cancel=None,layers='all',execution_class='full_gpu'):
+        self.progress('Loading model',0,'Checking runtime and GPU controls.')
         self.lines=[];self.load_metadata={};self.context=context['allocated_tokens']
         self.requested_layers=layers;self.execution_class=execution_class
         self.owned_id='rpg-workbench-'+model['id']
@@ -94,6 +95,7 @@ class NativeBackend:
             if sock.connect_ex(('127.0.0.1',1235))==0:
                 raise RunFailure('Port 1235 belongs to another process; it was not stopped')
         args=self.launch_arguments(exe,model,context,info['help'],layers)
+        self.progress('Loading model',15,'Runtime verified; launching llama-server.')
         devices=re.findall(r'^\s*((?:CUDA|Vulkan)\d+)\s*:\s*(.*)$',info.get('devices',''),re.M)
         if devices:
             cuda=[d for d in devices if d[0].startswith('CUDA')]
@@ -116,6 +118,7 @@ class NativeBackend:
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
         started=time.perf_counter()
         try:
+            self.progress('Loading model',25,'Starting model process and waiting for readiness.')
             self.process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,
                                           encoding='utf-8',errors='replace',env=env,**flags)
             process=self.process
@@ -134,7 +137,9 @@ class NativeBackend:
                     if execution_class=='full_gpu' and evidence['status']=='cpu_offloaded':
                         raise CPUOffload('CPU model placement detected before benchmark',evidence)
                     try:
-                        if self.transport.request('/health').get('status')=='ok':break
+                        if self.transport.request('/health').get('status')=='ok':
+                            self.progress('Loading model',75,'llama-server is healthy; verifying placement and context.')
+                            break
                     except Exception:
                         if self.timed_out:raise RuntimeStall('Model load timed out')
                     time.sleep(.15)
@@ -156,11 +161,12 @@ class NativeBackend:
                     'runtime':self.version_info,'properties':props,
                     'full_gpu_layers_verified':evidence['status']=='full_gpu',
                     'independent_os_residency_verified':False}
+                self.progress('Loading model',90,'Placement verified; running readiness probe.')
                 probe=self.generate([{'role':'user','content':'Reply with the single word READY.'}],
                                     {'temperature':0,'seed':42,'top_p':1},None,'default',cancel)
                 if probe['finish_reason']!='stop' or not probe['text'].strip():raise RunFailure('Readiness probe did not finish normally')
                 self.load_metadata['health_check']=probe;self.load_metadata['health_exact_ready']=probe['text'].strip()=='READY'
-                self.clear_cache()
+                self.clear_cache();self.progress('Loading model',100,'Model loaded and ready.')
             return self.load_metadata
         except Exception as exc:
             from .backends import BackendError
@@ -174,7 +180,7 @@ class NativeBackend:
 
     def seed_reproducibility_check(self,cancel=None):
         from .seedcheck import run_seed_check
-        return run_seed_check(self,cancel)
+        return run_seed_check(self,cancel,self.progress)
 
     def clear_cache(self):
         result=self.transport.request('/slots/0?action=erase',{})
