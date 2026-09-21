@@ -48,6 +48,11 @@ class ModelManagementTests(unittest.TestCase):
         again=Controller(self.root)
         self.assertEqual(again.settings['model_root'],str(self.models.resolve()))
         self.assertEqual(again.settings['confirmed_empty_folder'],str(self.models.resolve()))
+    def test_confirmation_cannot_authorize_different_folder(self):
+        self.app.configure({'model_root':str(self.models)})
+        other=self.base/'other';other.mkdir()
+        with self.assertRaises(ValueError):self.app.configure({'confirmed_empty_folder':str(other)})
+        self.assertEqual(self.app.settings['confirmed_empty_folder'],'')
     def test_selecting_other_folder_resets_confirmation(self):
         self.app.configure({'model_root':str(self.models),'confirmed_empty_folder':str(self.models)})
         other=self.base/'other';other.mkdir();self.app.configure({'model_root':str(other)})
@@ -56,7 +61,7 @@ class ModelManagementTests(unittest.TestCase):
         path=self.models/'existing.gguf';path.write_bytes(DATA)
         self.app.configure({'model_root':str(self.models)})
         self.assertEqual(len(self.app.last_models),1)
-        self.assertEqual(self.app.last_models[0]['paths'],[str(path)])
+        self.assertEqual([Path(p).resolve() for p in self.app.last_models[0]['paths']],[path.resolve()])
         self.assertEqual(list(self.root.rglob('*.gguf')),[])
     def test_manager_download_requires_folder(self):
         self.app.hub_detail=self.selection()

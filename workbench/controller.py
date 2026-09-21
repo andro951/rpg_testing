@@ -203,6 +203,7 @@ class Controller(ModelManager):
         self.message=f'Found {len(self.last_models)} model variants.'
     @exclusive_edit
     def configure(self,values):
+        values=dict(values)
         allowed={'model_root','confirmed_empty_folder','llama_path','hf_token','sync_source','publish_results'}
         if set(values)-allowed:raise ValueError('Unknown setting; native llama.cpp is the only backend and test settings belong in tests')
         for key,val in values.items():
@@ -215,6 +216,12 @@ class Controller(ModelManager):
             values={**values,'model_root':str(folder.resolve())}
             if values['model_root']!=self.settings['model_root']:
                 self.settings['confirmed_empty_folder']=''
+        if values.get('confirmed_empty_folder'):
+            confirmation=Path(values['confirmed_empty_folder']).expanduser().resolve()
+            selected=values.get('model_root',self.settings['model_root'])
+            if not selected or confirmation!=Path(selected).resolve():
+                raise ValueError('Confirm the currently selected models folder, not a different path')
+            values['confirmed_empty_folder']=str(confirmation)
         self.settings.update(values);self.save_settings();self.version_cache=None;self.report=None
         if 'model_root' in values and values['model_root']:self.scan_folder()
     @exclusive_edit

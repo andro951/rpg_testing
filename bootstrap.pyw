@@ -32,7 +32,7 @@ def main():
                 log=ROOT/'.local/setup.log';log.parent.mkdir(exist_ok=True)
                 with log.open('w',encoding='utf-8') as f:
                     subprocess.run([sys.executable,'-m','venv',str(env)],stdout=f,stderr=subprocess.STDOUT,check=True,**flags)
-                    subprocess.run([str(python),'-m','pip','install','-r',str(ROOT/'requirements.txt')],stdout=f,stderr=subprocess.STDOUT,check=True,**flags)
+                    subprocess.run([str(python),'-m','pip','install','--no-cache-dir','-r',str(ROOT/'requirements.txt')],stdout=f,stderr=subprocess.STDOUT,check=True,**flags)
                 outcome.append(None)
             except Exception as exc:outcome.append(str(exc))
             finally:done.set()

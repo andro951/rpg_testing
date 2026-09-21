@@ -70,7 +70,7 @@ def bundles(releases,system=None,machine=None):
 
 
 def member_path(root,name):
-    if '\\' in name or ':' in name or name.startswith('/') or '..' in PurePosixPath(name).parts:
+    if '\x00' in name or '\\' in name or ':' in name or name.startswith('/') or '..' in PurePosixPath(name).parts:
         raise ValueError('Unsafe runtime archive path')
     path=root.joinpath(*PurePosixPath(name).parts)
     if not path.resolve().is_relative_to(root.resolve()):raise ValueError('Archive path escapes destination')
@@ -93,6 +93,8 @@ def extract_archive(archive,root,budget=MAX_EXTRACTED):
     if zipfile.is_zipfile(archive):
         with zipfile.ZipFile(archive) as z:
             for info in z.infolist():
+                # Validate original spelling before ZipInfo's OS-specific normalization.
+                member_path(root,info.orig_filename)
                 path=member_path(root,info.filename)
                 if stat.S_ISLNK(info.external_attr>>16):raise ValueError('ZIP symlinks are not supported')
                 if info.is_dir():path.mkdir(parents=True,exist_ok=True)

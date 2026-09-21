@@ -10,7 +10,11 @@ class RuntimeTests(unittest.TestCase):
   for name in ['../bad','/etc/file','C:/x','a\\b']:
    with tempfile.TemporaryDirectory() as d:
     p=Path(d)/'a.zip'
-    with zipfile.ZipFile(p,'w') as z:z.writestr(name,b'bad')
+    with zipfile.ZipFile(p,'w') as z:
+     # ZipInfo normally normalizes backslashes on Windows. Write the exact hostile
+     # archive spelling so the test exercises the extractor, not the ZIP builder.
+     info=zipfile.ZipInfo('safe');info.filename=name
+     z.writestr(info,b'bad')
     with self.assertRaises(ValueError):extract_archive(p,Path(d)/'out')
  def test_extraction_budget(self):
   with tempfile.TemporaryDirectory() as d:

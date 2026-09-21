@@ -32,7 +32,9 @@ def child(root,args):
                     app.log('batch_error',exc)
                     if app.restart_required:return 75
                     return 2
-                finally:app.flush_logs()
+                finally:
+                    app.flush_logs()
+                    if not app.restart_required:app.publish(force=True)
             from workbench.server import serve
             return serve(root,demo=args.demo,port=8766 if args.demo else 8765,open_browser=not args.no_browser)
     except WorkerBusy:
@@ -59,7 +61,17 @@ def main(argv=None):
     if args.no_browser:command.append('--no-browser')
     flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
     while True:
-        code=subprocess.call(command,cwd=root,**flags)
+        process=subprocess.Popen(command,cwd=root,**flags)
+        previous={}
+        def forward(signum,frame):
+            try:
+                if process.poll() is None:process.send_signal(signum)
+            except (OSError,ValueError):pass
+        for signum in (signal.SIGINT,signal.SIGTERM,getattr(signal,'SIGUSR1',None)):
+            if signum is not None:previous[signum]=signal.signal(signum,forward)
+        try:code=process.wait()
+        finally:
+            for signum,handler in previous.items():signal.signal(signum,handler)
         if code!=75:return code
         if not args.batch and '--no-browser' not in command:command.append('--no-browser')
 

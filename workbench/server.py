@@ -23,7 +23,7 @@ class WorkbenchServer(ThreadingHTTPServer):
         host=ipaddress.ip_address(address[0])
         if not host.is_loopback and host not in ipaddress.ip_network('100.64.0.0/10'):
             raise ValueError('Control server must bind to loopback or a Tailscale IPv4 address')
-        self.app=app;self.token=token;self.remote_server=None;self.exit_requested=False;self.owner=self
+        self.app=app;self.token=token;self.remote_server=None;self.exit_requested=False;self.owner=self;self.update_coordinator=None
         super().__init__(address,Handler)
     def enable_remote(self):
         if self.owner is not self:return self.owner.enable_remote()
@@ -47,6 +47,7 @@ class WorkbenchServer(ThreadingHTTPServer):
         self.app.settings['remote_enabled']=False;self.app.save_settings();self.app.remote_info=None
     def close_all(self):
         if self.owner is not self:return self.owner.close_all()
+        if self.update_coordinator:self.update_coordinator.stop.set()
         if self.remote_server:
             self.remote_server.shutdown();self.remote_server.server_close()
         self.shutdown();self.server_close()
@@ -184,9 +185,12 @@ def serve(root,demo=False,port=8765,open_browser=True):
     if app.settings.get('remote_enabled'):
         try:server.enable_remote()
         except Exception as exc:app.log('network','Could not restore previously approved Tailscale binding: '+str(exc))
+    from .restarts import UpdateCoordinator
+    server.update_coordinator=UpdateCoordinator(server).start()
     if open_browser:webbrowser.open(f'http://127.0.0.1:{server.server_port}/#key={token}')
     try:server.serve_forever()
     finally:
+        if server.update_coordinator:server.update_coordinator.stop.set()
         app.control('stop')
         if app.thread:app.thread.join(10)
         app.flush_logs();server.server_close()
