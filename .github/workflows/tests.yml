@@ -1,0 +1,32 @@
+name: Harness tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install jsonschema
+      - run: python -m unittest discover -s tests -v
+      - name: Archive public source for review
+        if: matrix.os == 'ubuntu-latest'
+        run: git archive --format=zip HEAD -o repository-source.zip
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: public-repository-source
+          path: repository-source.zip
+          retention-days: 7
