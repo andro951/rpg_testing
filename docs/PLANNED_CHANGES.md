@@ -280,7 +280,71 @@ Assumption for now:
 - Do not spend complexity on distributed claims/locks yet.
 - Resume behavior should primarily be based on local/result-file existence and Git-synced result files.
 
-## 12. Changes explicitly NOT to implement yet
+## 12. Preflight auto-fix UX
+
+Preflight should be designed as a guided repair loop rather than only an error report.
+
+For every detected problem that the harness can safely repair, show a button whose text states the exact repair, for example:
+- **Download Qwen3.5-9B Q4_K_M**
+- **Create Results Folder**
+- **Install Missing Python Packages**
+- **Start LM Studio Server**
+- **Pull Latest Benchmark Files**
+- **Accept Recommended 8 GB VRAM Tier**
+
+Ideal interaction: Isaac can run Preflight, press the offered fix, rerun/continue Preflight, and repeat until the entire preflight passes.
+
+Rules:
+- Never label a problem auto-fixable unless the repair can be performed deterministically and verified afterward.
+- The button text must describe the specific action, not merely say **Fix**.
+- Do not silently perform large downloads, destructive Git operations, model substitutions, driver changes, admin-level system changes, or anything that may affect unrelated software.
+- After every fix, verify that the issue is actually resolved.
+- Preflight should distinguish: PASS, FIXABLE, NEEDS USER INPUT, and BLOCKED/UNSUPPORTED.
+- The real Run operation still performs preflight automatically before starting benchmark cases.
+
+## 13. No user-visible context-limit setting
+
+There should be no context-length control in the normal UI and no per-run context setting that Isaac must choose.
+
+However, inference backends always have a finite context window and some backends reserve KV-cache memory based on the configured context size. Therefore the harness still needs an INTERNAL automatic context-sizing policy.
+
+Desired behavior:
+- Determine the model's supported context window automatically.
+- Determine the pending test's prompt requirements automatically.
+- Choose a sufficient context allocation automatically rather than asking the user.
+- Do not impose an arbitrary output-token cap.
+- Do not silently truncate prompts or outputs.
+- If a test cannot fit within the model's true context capability or available memory, preflight reports that explicitly.
+- Context allocation and any context-related VRAM effects are recorded as provenance, even though the user does not configure them.
+- Exact automatic sizing policy still needs to be finalized before implementation.
+
+## 14. Remote UI control over Tailscale
+
+All normal desktop-worker controls should be usable from the laptop without Remote Desktop.
+
+Preferred direction to discuss before implementation:
+- Run the benchmark control service on the GPU desktop.
+- Expose its UI/API only through the private Tailscale network, not the public Internet.
+- From the laptop, open/control the desktop worker through that private address.
+- The same controls available locally on the desktop should be available remotely: model discovery/assignment, Preflight, dynamic fixes, Run/Pause/Stop, status, results/log download and health information.
+- Benchmark inference still runs locally on the GPU host over loopback; remote UI traffic must never be included in benchmark timing.
+- Authentication/binding strategy must be decided before implementation (for example binding to the Tailscale interface or using Tailscale Serve).
+
+## 15. LM Studio model-root discovery
+
+Do NOT blindly scan conventional/default LM Studio folders.
+
+The harness should determine LM Studio's CURRENT configured model storage location from LM Studio's settings/configuration or supported CLI/API.
+
+Desired behavior:
+1. Query the active LM Studio model location.
+2. If it exists and contains models, use it automatically.
+3. If the configured folder exists but is empty, ask the user through the UI whether this is the intended folder rather than blindly accepting it.
+4. If the current configured folder cannot be determined, ask the user to select it through the UI.
+5. Remember/verify the choice rather than requiring repeated manual entry.
+6. Model discovery then scans that current configured root and/or LM Studio inventory.
+
+## 16. Changes explicitly NOT to implement yet
 
 Until Isaac asks to apply the planned changes:
 - Do not redesign result layout.
