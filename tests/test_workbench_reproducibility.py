@@ -54,6 +54,13 @@ class ReproducibilityTests(unittest.TestCase):
     def test_source_changes_invalidate(self):
         t=copy.deepcopy(self.test);t['source']['new_information']='A different fact'
         self.assertNotEqual(self.identity(),self.identity(t))
+    def test_artifact_metadata_identity_changes_case_id(self):
+        first=copy.deepcopy(self.model);second=copy.deepcopy(self.model)
+        first['artifact_identity']={'version':1,'files':[{'name':'m.gguf','size_bytes':100,'mtime_ns':1}]}
+        second['artifact_identity']={'version':1,'files':[{'name':'m.gguf','size_bytes':100,'mtime_ns':2}]}
+        variant=self.test['variants'][0];target={'vram_gb':8}
+        self.assertNotEqual(case_id(first,self.test,variant,0,target),case_id(second,self.test,variant,0,target))
+
     def test_retry_history_survives_completion(self):
         cid=self.identity();store=self.app.store
         for status,text in [('error','first transport failed'),('aborted','user stopped'),('completed','answer')]:
@@ -84,8 +91,9 @@ class ReproducibilityTests(unittest.TestCase):
         self.assertEqual(first['plan']['target'],second['plan']['target'])
     def test_summary_separates_artifacts_test_versions_and_simulation(self):
         base={'case_id':'a','model_id':'m','variant_id':'v','test_id':'t','status':'completed',
-              'artifact_hashes':{'m.gguf':'a'},'test_definition':self.test,'score':{'exact_match':True}}
-        changed_artifact={**base,'case_id':'b','artifact_hashes':{'m.gguf':'b'}}
+              'artifact_identity':{'version':1,'files':[{'name':'m.gguf','size_bytes':100,'mtime_ns':1}]},
+              'test_definition':self.test,'score':{'exact_match':True}}
+        changed_artifact={**base,'case_id':'b','artifact_identity':{'version':1,'files':[{'name':'m.gguf','size_bytes':100,'mtime_ns':2}]}}
         changed_test={**base,'case_id':'c','test_definition':{**self.test,'source':{'event':'different'}}}
         sim={**base,'case_id':'d','simulated':True}
         self.assertEqual(len(summarize([base,changed_artifact,changed_test,sim])['groups']),4)

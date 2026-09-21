@@ -82,13 +82,27 @@ class ModelManagementTests(unittest.TestCase):
             (self.models/name).write_bytes(DATA)
         self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
         first,second=self.app.last_models
-        with patch.object(self.app,'fingerprint',side_effect=AssertionError('VRAM assignment must not hash weights')):
+        with patch.object(self.app,'identify_artifact',side_effect=AssertionError('VRAM assignment must not inspect artifact identity')):
             self.app.assign_model(first['id'],8)
             self.app.assign_model(second['id'],12)
         self.assertEqual(first['required_vram_gb'],8)
         self.assertEqual(second['required_vram_gb'],12)
         saved={m['id']:m['required_vram_gb'] for m in self.app.catalog()}
         self.assertEqual(saved,{first['id']:8,second['id']:12})
+
+    def test_artifact_identity_reads_metadata_not_model_contents(self):
+        p=self.models/'Local-Q4_K_M.gguf';p.write_bytes(DATA)
+        item={'id':'local-test','paths':[str(p)],'size_bytes':p.stat().st_size,
+              'catalog':{'repo_id':'publisher/example','revision':'a'*40,
+                         'sha256':{p.name:hashlib.sha256(DATA).hexdigest()}}}
+        with patch('pathlib.Path.open',side_effect=AssertionError('artifact identity must not read GGUF contents')):
+            first=self.app.identify_artifact(item)
+        self.assertEqual(first['files'][0]['name'],p.name);self.assertEqual(first['files'][0]['size_bytes'],len(DATA))
+        self.assertEqual(first['repo_id'],'publisher/example');self.assertEqual(first['revision'],'a'*40)
+        self.assertEqual(first['sha256'],item['catalog']['sha256'])
+        stat=p.stat();os.utime(p,ns=(stat.st_atime_ns,stat.st_mtime_ns+1_000_000))
+        second=self.app.identify_artifact(item)
+        self.assertNotEqual(first,second)
 
     def test_vram_assignment_updates_one_discovered_model_immediately(self):
         for name in ('Alpha-Q4_K_M.gguf','Beta-Q4_K_M.gguf'):
