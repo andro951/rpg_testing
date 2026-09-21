@@ -139,7 +139,7 @@ class DemoBackend:
             elif 'inserted immediately before ticket' in lower_event:
                 target=re.search(r'before ticket (SR-[0-9]+)',event,re.I);key=ticket_key(target.group(1)) if target else None
                 patch=[{'op':'add','path':f'/tickets/{key}','value':{'ticket_id':'SR-99991','status':'open','priority':'urgent','subject':'VPN access failed after credential rotation','customer_contact':'new.user@example.test'}}]
-            elif 'moved in the active queue' in lower_event and len(ticket_ids)>=2:
+            elif 'moved in the active support queue' in lower_event and len(ticket_ids)>=2:
                 source_key=ticket_key(ticket_ids[0]);dest_key=ticket_key(ticket_ids[1])
                 patch=[{'op':'move','from':f'/tickets/{source_key}','path':f'/tickets/{dest_key}'}]
             elif 'copy the complete current record' in lower_event and ticket_ids:
