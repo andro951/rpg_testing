@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 let key=sessionStorage.getItem('rpg-worker-key')||'';
 const fragment=new URLSearchParams(location.hash.slice(1));
 if(fragment.has('key')){key=fragment.get('key');sessionStorage.setItem('rpg-worker-key',key);history.replaceState(null,'',location.pathname);}
-let state=null,page='overview',records=[],testData=[],browseTarget=null,browseState=null,polling=false,setupDirty=false;
+let state=null,page='overview',records=[],testData=[],polling=false,setupDirty=false;
 $('page-setup').addEventListener('input',()=>{setupDirty=true;});
 $('page-setup').addEventListener('change',()=>{setupDirty=true;});
 const titles={overview:'Overview',models:'Models',tests:'Test definitions',results:'Results',find:'Find models',runtime:'Native runtime',analysis:'Comparison',logs:'Logs',setup:'Worker setup'};
@@ -31,17 +31,15 @@ if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-roo
 renderHub();renderRuntimes();folderPrompts();
 }
 let modelRenderSignature='';
-function renderModels(){const list=$('model-list');const signature=JSON.stringify([state.models,state.busy,state.demo]);if(signature===modelRenderSignature)return;modelRenderSignature=signature;list.replaceChildren();for(const m of state.models){const card=el('article',undefined,'model-card');const heading=el('div',undefined,'section-header');heading.append(el('h3',m.name),el('span',m.quantization,'badge'));card.append(heading,el('p',(m.size_bytes/1e9).toFixed(2)+' GB download · '+(m.complete?'All shards found':'Missing shards')+' · '+(m.required_vram_gb===null?'Unassigned':m.required_vram_gb+' GB assigned')));const controls=el('div',undefined,'actions');const select=el('select');select.setAttribute('aria-label','VRAM for '+m.id);select.append(new Option('Choose VRAM',''));for(const t of [8,12,16,24,32,40,48,80])select.append(new Option(t+' GB',String(t)));select.value=String(m.required_vram_gb||'');controls.append(select);const save=button('Save VRAM',async()=>{if(!select.value)throw Error('Select a VRAM tier.');await api('/api/model/assign',{id:m.id,required_vram_gb:Number(select.value)});toast('Model assignment saved.');await api('/api/preflight',{});});save.disabled=state.busy||state.demo;controls.append(save);if(m.recommended_vram_gb){const accept=button('Accept recommended '+m.recommended_vram_gb+' GB',async()=>{await api('/api/model/assign',{id:m.id,required_vram_gb:m.recommended_vram_gb});await api('/api/preflight',{});});accept.disabled=state.busy||state.demo;controls.append(accept);}card.append(controls);if(m.errors.length)card.append(el('p',m.errors.join('; '),'error'));const d=el('details');d.append(el('summary','Files and discovery details'),el('pre',JSON.stringify({paths:m.paths,missing_shards:m.missing_shards},null,2)));card.append(d);list.append(card);}if(!state.models.length)list.append(el('article','No discovered models yet. Run preflight, then check the active folder.'));}
+function renderModels(){const list=$('model-list');const signature=JSON.stringify([state.models,state.busy,state.demo]);if(signature===modelRenderSignature)return;modelRenderSignature=signature;list.replaceChildren();for(const m of state.models){const card=el('article',undefined,'model-card');const heading=el('div',undefined,'section-header');heading.append(el('h3',m.name),el('span',m.quantization,'badge'));card.append(heading,el('p',(m.size_bytes/1e9).toFixed(2)+' GB download · '+(m.complete?'All shards found':'Missing shards')+' · '+(m.required_vram_gb===null?'Unassigned':m.required_vram_gb+' GB assigned')));const controls=el('div',undefined,'actions');const select=el('select');select.setAttribute('aria-label','VRAM for '+m.id);select.append(new Option('Choose VRAM',''));for(const t of [8,12,16,24,32,40,48,80])select.append(new Option(t+' GB',String(t)));select.value=String(m.required_vram_gb||'');controls.append(select);const save=button('Save VRAM',async()=>{if(!select.value)throw Error('Select a VRAM tier.');await api('/api/model/assign',{id:m.id,required_vram_gb:Number(select.value)});toast('Model assignment saved.');await api('/api/preflight',{});});save.disabled=state.busy||state.demo;controls.append(save);if(m.recommended_vram_gb){const accept=button('Accept recommended '+m.recommended_vram_gb+' GB',async()=>{await api('/api/model/assign',{id:m.id,required_vram_gb:m.recommended_vram_gb});await api('/api/preflight',{});});accept.disabled=state.busy||state.demo;controls.append(accept);}card.append(controls);if(m.errors.length)card.append(el('p',m.errors.join('; '),'error'));const d=el('details');d.append(el('summary','Files and discovery details'),el('pre',JSON.stringify({paths:m.paths,missing_shards:m.missing_shards},null,2)));card.append(d);list.append(card);}if(!state.models.length)list.append(el('article',state.state==='scanning'?'Scanning the selected models folder…':'No discovered models yet. Choose or rescan the active folder.'));}
 async function poll(){if(polling||!key)return;polling=true;try{render(await api('/api/state'));if($('login').open)$('login').close();}catch(e){$('connection').textContent='● Worker disconnected';}finally{polling=false;}}
 async function loadTests(){if(state?.busy){$('test-list').replaceChildren(el('article','Test-file editing is available when the current operation has finished.'));return;}const data=await api('/api/tests');testData=data.tests;$('example-select').replaceChildren(...data.examples.map(x=>new Option(x,x)));const list=$('test-list');list.replaceChildren();for(const t of data.tests){const card=el('article');card.append(el('h3',t.name||t.id),el('p',t.id+' · '+t.variants.length+' workflow variants · '+(t.repetitions||1)+' repetition(s) · '+(t.enabled===false?'Disabled':'Enabled')));card.append(button('View / edit JSON',()=>openEditor(t)),el('p',t.variants.map(v=>v.id+' ('+v.steps.length+' top-level steps)').join(' · '),'muted'));list.append(card);}}
 function openEditor(t){$('test-json').value=JSON.stringify(t,null,2);$('editor').showModal();}
 async function loadResults(){if(state?.busy){$('result-list').replaceChildren(el('article','Stop or finish the active run before loading results from disk. Live progress remains available in Overview.'));return;}records=await api('/api/results');renderResults();}
 function renderResults(){const search=$('result-filter').value.toLowerCase();const list=$('result-list');list.replaceChildren();for(const r of records.filter(r=>[r.model_id,r.test_id,r.variant_id].join(' ').toLowerCase().includes(search))){const card=el('article',undefined,'result-row');const title=el('div');title.append(el('b',r.model_id),el('p',r.test_id+' / '+r.variant_id,'muted'));const correct=r.score?.exact_match;let label=r.status!=='completed'?r.status:(correct===true?'PASS':correct===false?'FAIL':'NO EXACT ORACLE');if(r.measurement_valid===false&&r.status==='completed')label+=' · INVALID MEASUREMENT';label+=' · '+(r.execution_class||'legacy_unverified');card.append(title,el('span',label,correct===true?'success':'error'),el('span',typeof r.pipeline_seconds==='number'?r.pipeline_seconds.toFixed(3)+' s':'—'));const act=el('div',undefined,'actions');act.append(button('Inspect',()=>{$('result-json').textContent=JSON.stringify(r,null,2);$('inspect').showModal();}),button('Delete / rerun',async()=>{if(!confirm('Delete this result and make the case pending again? This action is recorded in the audit log.'))return;await api('/api/result/delete',{model_id:r.model_id,case_id:r.case_id});await loadResults();},'danger'));card.append(act);list.append(card);}if(!list.children.length)list.append(el('article','No matching result files.'));}
 async function download(path,name){const blob=await api(path);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-async function browse(path){browseState=await api('/api/browse'+(path?'?path='+encodeURIComponent(path):''));$('browse-path').value=browseState.path;const list=$('browse-items');list.replaceChildren();$('browse-roots').replaceChildren(...browseState.roots.map(r=>button(r,()=>browse(r))));for(const f of browseState.entries){if(!f.directory&&browseTarget==='model-root')continue;list.append(button((f.directory?'▸ ':'')+f.name,()=>{if(f.directory)return browse(f.path);$(browseTarget).value=f.path;setupDirty=true;$('browser').close();}));}$('choose-folder').classList.toggle('hidden',browseTarget!=='model-root');}
-async function openBrowse(target){browseTarget=target;await browse(target==='model-root'?$('model-root').value:'');$('browser').showModal();}
 on('login-submit',async()=>{key=$('login-key').value.trim();sessionStorage.setItem('rpg-worker-key',key);try{render(await api('/api/state'));$('login').close();}catch(e){$('login-error').textContent=e.message;}});
-on('preflight',async()=>{await api('/api/preflight',{});await poll();});on('rescan',async()=>{await api('/api/preflight',{});await poll();});on('run',async()=>{await api('/api/run',{});await poll();});
+on('preflight',async()=>{await api('/api/preflight',{});await poll();});on('rescan',async()=>{await scanModelsInBackground();});on('run',async()=>{await api('/api/run',{});await poll();});
 for(const [id,action] of [['pause','pause'],['resume','resume'],['stop-model','stop_after_model'],['stop','stop']])on(id,()=>api('/api/control',{action}));
 on('prepare',()=>api('/api/preflight',{preparation:{gpu_name:$('target-name').value,vram_gb:Number($('target-tier').value)}}));
 on('export',()=>download('/api/export','rpg-testing-evidence.zip'));on('unity-script',()=>download('/api/unity-script?tier='+$('target-tier').value,'rpg-unity-job.sh'));
@@ -49,8 +47,27 @@ on('refresh-tests',loadTests);on('refresh-results',loadResults);$('result-filter
 on('import-example',async()=>{await api('/api/test/import-example',{id:$('example-select').value});await loadTests();toast('Example added to test files.');});
 on('new-test',()=>openEditor(testData[0]?{...testData[0],id:'new_test',name:'New test'}:{schema_version:2,id:'new_test',workflow:'steps',source:{},variants:[]}));
 on('save-test',async()=>{let test;try{test=JSON.parse($('test-json').value);}catch{throw Error('This is not valid JSON.');}await api('/api/test/save',{test});$('editor').close();await loadTests();toast('Test validated and saved.');});
-on('save-setup',async()=>{const values={model_root:$('model-root').value.trim(),llama_path:$('llama-path').value.trim(),sync_source:$('sync-source').checked,publish_results:$('publish-results').checked};if($('api-token').value)values.hf_token=$('api-token').value;if(values.publish_results&&!state.settings.publish_results&&!confirm('Publish only synthetic safe-for-work results to the public GitHub repository? Do not enable for private data.'))return;await api('/api/settings',values);setupDirty=false;$('api-token').value='';toast('Worker setup saved. Run preflight next.');});
-on('browse-models',()=>openBrowse('model-root'));on('browse-llama',()=>openBrowse('llama-path'));on('browse-go',()=>browse($('browse-path').value));on('browse-up',()=>browse(browseState.parent));on('choose-folder',async()=>{$(browseTarget).value=browseState.path;$('browser').close();await api('/api/settings',{model_root:browseState.path});setupDirty=false;await poll();toast('Models folder selected.');});
+async function scanModelsInBackground(){await api('/api/models/scan',{});setPage('models');await poll();}
+async function chooseModelsFolder(){
+ folderChoosing=true;
+ try{
+  $('folder-onboarding').close();$('empty-folder').close();
+  const picked=await api('/api/picker/models',{initial:$('model-root').value.trim()});
+  if(picked.cancelled)return;
+  $('model-root').value=picked.path;setupDirty=false;
+  await api('/api/settings',{model_root:picked.path});
+  toast('Models folder saved. Scanning it now…');
+  await scanModelsInBackground();
+ }finally{folderChoosing=false;}
+}
+async function chooseLlamaServer(){
+ const picked=await api('/api/picker/llama',{initial:$('llama-path').value.trim()});
+ if(picked.cancelled)return;
+ $('llama-path').value=picked.path;setupDirty=false;
+ await api('/api/settings',{llama_path:picked.path});await poll();toast('llama-server selected.');
+}
+on('save-setup',async()=>{const previousRoot=state.settings.model_root;const values={model_root:$('model-root').value.trim(),llama_path:$('llama-path').value.trim(),sync_source:$('sync-source').checked,publish_results:$('publish-results').checked};if($('api-token').value)values.hf_token=$('api-token').value;if(values.publish_results&&!state.settings.publish_results&&!confirm('Publish only synthetic safe-for-work results to the public GitHub repository? Do not enable for private data.'))return;await api('/api/settings',values);setupDirty=false;$('api-token').value='';toast('Worker setup saved.');if(values.model_root&&values.model_root!==previousRoot){toast('Models folder saved. Scanning it now…');await scanModelsInBackground();}else{await poll();}});
+on('browse-models',chooseModelsFolder);on('browse-llama',chooseLlamaServer);
 on('enable-remote',async()=>{const r=await api('/api/remote/enable',{});$('remote-url').textContent=r.url;toast('Private controller enabled. Pair your laptop at the displayed address.');});
 on('disable-remote',async()=>{if(confirm('Disable remote access? A laptop connection will disconnect, but the local workbench stays available.'))await api('/api/remote/disable',{});});
 on('pairing',async()=>{$('pairing-value').textContent=(await api('/api/pairing-key')).key;});
@@ -62,7 +79,7 @@ on('restart',async()=>{await api('/api/restart',{});toast('Restarting with the l
 let hubSignature='',runtimeSignature='',folderChoosing=false;
 for(const tier of [8,12,16,24,32,40,48,80])$('hub-tier').append(new Option(tier+' GiB',String(tier)));
 function folderPrompts(){
- if(!state||state.demo||state.busy||$('login').open||folderChoosing||$('browser').open)return;
+ if(!state||state.demo||state.busy||$('login').open||folderChoosing)return;
  const root=state.settings.model_root;
  if(!root){if(!$('folder-onboarding').open)$('folder-onboarding').showModal();return;}
  if($('folder-onboarding').open)$('folder-onboarding').close();
@@ -70,7 +87,7 @@ function folderPrompts(){
   $('empty-folder-path').textContent=root;if(!$('empty-folder').open)$('empty-folder').showModal();
  }
 }
-async function pickFirstFolder(){folderChoosing=true;$('folder-onboarding').close();$('empty-folder').close();setPage('setup');await openBrowse('model-root');folderChoosing=false;}
+async function pickFirstFolder(){setPage('setup');await chooseModelsFolder();}
 on('onboarding-choose',pickFirstFolder);on('choose-different',pickFirstFolder);
 on('accept-empty',async()=>{await api('/api/settings',{confirmed_empty_folder:state.settings.model_root});$('empty-folder').close();setPage('find');await poll();});
 $('folder-onboarding').addEventListener('cancel',e=>{if(!state?.settings.model_root)e.preventDefault();});
@@ -96,7 +113,7 @@ function renderRuntimes(){
 function runtimeNote(){const r=(state?.runtime_options||[]).find(r=>r.id===$('runtime-select').value);$('runtime-note').textContent=r?.note||'Refresh to browse compatible-platform releases. GPU compatibility is checked by preflight.';}
 $('runtime-select').addEventListener('change',runtimeNote);
 on('runtime-install',async()=>{const r=(state.runtime_options||[]).find(r=>r.id===$('runtime-select').value);if(!r)throw Error('Find and select a runtime release first.');if(confirm('Install '+r.name+' under this repository? This does not install or change GPU drivers.'))await api('/api/runtime/install',{id:r.id});});
-on('runtime-locate',()=>{setPage('setup');return openBrowse('llama-path');});
+on('runtime-locate',async()=>{setPage('setup');await chooseLlamaServer();});
 async function loadAnalysis(){if(state?.busy){$('analysis-list').replaceChildren(el('article','Finish or stop the active operation before reading results.'));return;}const data=await api('/api/analysis');$('analysis-note').textContent=data.note;const list=$('analysis-list');list.replaceChildren();for(const g of data.groups){const card=el('article');card.append(el('h3',g.model_id+' · '+g.variant_id),el('span',(g.simulated?'SIMULATED · ':'')+g.execution_class,'badge'),el('p',g.test_id+' · '+g.scored+' scored · '+(g.exact_match_rate===null?'No exact score':(g.exact_match_rate*100).toFixed(1)+'% exact state matches')+' · median '+(g.median_pipeline_seconds===null?'—':g.median_pipeline_seconds.toFixed(3)+' s')),el('p',g.skipped+' skipped · '+g.infrastructure_errors+' errors · '+g.invalid_measurements+' invalid measurements','muted'));list.append(card);}if(!list.children.length)list.append(el('article','No recorded comparison groups yet.'));}
 on('refresh-analysis',loadAnalysis);
 if(!key)$('login').showModal();else poll();setInterval(poll,1200);

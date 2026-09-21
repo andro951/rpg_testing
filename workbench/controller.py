@@ -150,7 +150,8 @@ class Controller(ModelManager):
     def start(self,kind='preflight',payload=None):
         if not self.operation.acquire(blocking=False):raise RuntimeError('Another operation is active.')
         if self.restart_required:self.operation.release();raise RuntimeError('Source changed. Restart the workbench before continuing.')
-        self.state='checking' if kind=='preflight' else 'fixing' if kind=='fix' else 'running'
+        self.state='checking' if kind=='preflight' else 'fixing' if kind=='fix' else 'scanning' if kind=='scan' else 'running'
+        if kind=='scan':self.message='Scanning the selected models folder…'
         self.cancel_event.clear()
         def work():
             try:
@@ -223,7 +224,7 @@ class Controller(ModelManager):
                 raise ValueError('Confirm the currently selected models folder, not a different path')
             values['confirmed_empty_folder']=str(confirmation)
         self.settings.update(values);self.save_settings();self.version_cache=None;self.report=None
-        if 'model_root' in values and values['model_root']:self.scan_folder()
+        # Folder scanning is a separate background operation so saving a path returns promptly.
     @exclusive_edit
     def assign_model(self,mid,tier):
         if self.demo:raise ValueError('Demo model assignments are simulated and read-only.')

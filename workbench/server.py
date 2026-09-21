@@ -14,6 +14,7 @@ from urllib.parse import urlsplit,parse_qs
 from .controller import Controller
 from .domain import TIERS, read_json, write_json, safe_id, validate_test
 from .inventory import executable,command
+from .native_dialog import select_directory,select_llama_server
 
 class Forbidden(Exception):pass
 
@@ -93,19 +94,6 @@ class Handler(BaseHTTPRequestHandler):
                 if app.operation.locked():raise RuntimeError('Wait until the operation finishes before reading test files.')
                 return self.send(200,{'tests':[read_json(p) for p in sorted((app.root/'test_specs').glob('*.json'))],
                     'examples':[p.stem for p in sorted((app.root/'examples/test_specs').glob('*.json'))]})
-            if path=='/api/browse':
-                if app.operation.locked():raise RuntimeError('Wait until the operation finishes before browsing files.')
-                p=Path(q.get('path',[str(Path.home())])[0]).expanduser().resolve()
-                if not p.is_dir():raise ValueError('Folder not found')
-                entries=[]
-                for f in sorted(p.iterdir(),key=lambda p:(not p.is_dir(),p.name.lower())):
-                    if f.is_symlink() or f.name.startswith('.'):continue
-                    try:
-                        if f.is_dir() or f.suffix.lower() in ('.exe',) or f.name in ('llama-server',):
-                            entries.append({'name':f.name,'path':str(f),'directory':f.is_dir()})
-                    except OSError:continue
-                roots=[f'{chr(d)}:/' for d in range(65,91) if Path(f'{chr(d)}:/').is_dir()] if os.name=='nt' else ['/']
-                return self.send(200,{'path':str(p),'parent':str(p.parent),'entries':entries,'roots':roots})
             if path=='/api/pairing-key':
                 if not ipaddress.ip_address(self.client_address[0]).is_loopback:raise Forbidden('Display the pairing key on the host computer.')
                 return self.send(200,{'key':self.server.token})
@@ -126,6 +114,18 @@ class Handler(BaseHTTPRequestHandler):
             from .scoring import parse
             data=parse(self.rfile.read(size).decode()) if size else {}
             if not isinstance(data,dict):raise ValueError('Request body must be an object')
+            if path=='/api/picker/models':
+                if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                    raise ValueError('The native folder picker opens on the GPU host. Open the workbench on that computer, or type the host path in Worker setup.')
+                if app.operation.locked():raise RuntimeError('Finish or stop the active benchmark operation before changing the models folder.')
+                selected=select_directory(data.get('initial',''))
+                return self.send(200,{'cancelled':selected is None,'path':selected})
+            if path=='/api/picker/llama':
+                if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                    raise ValueError('The native file picker opens on the GPU host. Open the workbench on that computer, or type the host path in Worker setup.')
+                if app.operation.locked():raise RuntimeError('Finish or stop the active benchmark operation before changing the runtime path.')
+                selected=select_llama_server(data.get('initial',''))
+                return self.send(200,{'cancelled':selected is None,'path':selected})
             if path=='/api/preflight':
                 prep=data.get('preparation')
                 if prep and (type(prep.get('vram_gb'))is not int or prep['vram_gb'] not in (*TIERS,11) or not isinstance(prep.get('gpu_name'),str)):raise ValueError('Invalid preparation GPU')
