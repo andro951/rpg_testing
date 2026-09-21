@@ -61,7 +61,7 @@ def build(app, preparation=None, track_progress=True):
                 'gpu':gpu,'plan':{'pending':0,'complete':0,'model_loads':0,'groups':[]},
                 'note':'Completion cannot be trusted until corrupt result files are resolved.'},None
     update('Checking existing results',100,25,'Saved result files checked.')
-    models=app.with_known_pins(models)
+    models=app.with_known_artifacts(models)
     store=app.store
     plan=pending_plan(models,tests,target,store)
     folder_info=app.folder_info()
@@ -73,25 +73,22 @@ def build(app, preparation=None, track_progress=True):
     found=app.demo_models() if app.demo else scan_models(Path(path),models,scan_progress) if path else []
     update('Scanning model files',100,35,f'{len(found)} model variants discovered.')
     app.last_models=found;app.folder_scanned=bool(path)
-    # Changed existing files cannot be mistaken for the older artifact's completed work.
+    # Cheap metadata identity prevents ordinary file replacements from reusing older completion evidence.
+    # Full-file SHA-256 is deliberately not computed here; trusted source hashes are retained when already known.
     changed=False
-    hash_items=[item for item in found if item['catalogued'] and item['complete'] and not item['errors']]
-    hash_total=sum(item['size_bytes'] for item in hash_items);hash_done=0
-    update('Verifying model files',100 if not hash_items else 0,35,'No eligible model files need verification.' if not hash_items else f'0.00 / {hash_total/1e9:.2f} GB read')
-    for item_index,item in enumerate(hash_items,1):
-        base=hash_done
-        def hash_progress(done,total,name,base=base,item=item,item_index=item_index):
-            current=base+done
-            task_pct=100*done/max(1,total)
-            overall_pct=35+55*current/max(1,hash_total)
-            detail=f'Model {item_index}/{len(hash_items)} · {name} · {current/1e9:.2f} / {hash_total/1e9:.2f} GB'
-            update('Verifying model files',task_pct,overall_pct,detail)
-        pinned=app.fingerprint(item,hash_progress)
-        hash_done+=item['size_bytes']
+    identity_items=[item for item in found if item['catalogued'] and item['complete'] and not item['errors']]
+    update('Identifying model files',100 if not identity_items else 0,35,
+           'No eligible model files need identification.' if not identity_items else f'0 / {len(identity_items)} models')
+    for item_index,item in enumerate(identity_items,1):
+        identity=app.identify_artifact(item)
         for m in models:
-            if m['id']==item['id'] and m.get('sha256')!=pinned:
-                m['sha256']=pinned;changed=True
-    update('Verifying model files',100,90,f'{hash_done/1e9:.2f} GB verified across {len(hash_items)} model variants.')
+            if m['id']==item['id'] and m.get('artifact_identity')!=identity:
+                m['artifact_identity']=identity;changed=True
+        update('Identifying model files',100*item_index/max(1,len(identity_items)),
+               35+55*item_index/max(1,len(identity_items)),
+               f'Model {item_index}/{len(identity_items)} · {item["name"]}')
+    update('Identifying model files',100,90,
+           f'{len(identity_items)} model identities checked from filename, size, modification time and known source metadata.')
     if changed:plan=pending_plan(models,tests,target,store)
     grouped={}
     for item in found:grouped.setdefault(item['id'],[]).append(item)

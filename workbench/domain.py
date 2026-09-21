@@ -100,7 +100,7 @@ def experiment_spec(test: dict, variant: dict) -> dict:
 
 def case_id(model: dict, test: dict, variant: dict, repetition: int, target: dict) -> str:
     identity = {'engine': ENGINE_VERSION, 'workflow_code': code_fingerprint(), 'model': model['id'],
-                'artifact_pin': model.get('sha256', {}), 'experiment': experiment_spec(test, variant),
+                'artifact_pin': model.get('artifact_identity') or model.get('sha256', {}), 'experiment': experiment_spec(test, variant),
                 'repetition': repetition, 'target': target}
     return digest(identity)
 

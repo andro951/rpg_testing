@@ -18,7 +18,7 @@ import zipfile
 from datetime import datetime,timezone
 from pathlib import Path
 from .domain import ResultStore, TIERS, canonical, digest, read_json, safe_id, write_json, validate_test
-from .inventory import command, executable, file_hashes, scan_models
+from .inventory import command, executable, scan_models
 from .planning import validate_catalog
 from . import preflight
 from .workflows import execute, Cancelled
@@ -65,7 +65,7 @@ class Controller(ModelManager):
         self.pause_requested=False;self.stop_after_model=False;self.backend=None
         self.logs=[];self.pending_logs=[];self.completed_now=0;self.session_errors=0;self.current=None;self.restart_required=False
         self.started=None;self.finished=None;self.publisher=None;self.last_publish=0;self.version_cache=None
-        self.selftest_digest=None;self.verified_fingerprints={};self.on_shutdown=None;self.remote_info=None
+        self.selftest_digest=None;self.on_shutdown=None;self.remote_info=None
         for name in ('results','logs'):(self.data/name).mkdir(exist_ok=True)
         self.process_source_commit=self.source_commit()
         self.log('startup','Workbench started'+(' in SIMULATED DEMO mode' if demo else ''))
@@ -124,30 +124,33 @@ class Controller(ModelManager):
         except Exception as exc:version='unavailable: '+str(exc)
         if not version.startswith('unavailable'):self.version_cache=version
         return version
-    def fingerprint(self,item,progress=None):
-        if self.demo:return {'demo.gguf':'a'*64}
-        signature=[(str(Path(p).resolve()),Path(p).stat().st_size,Path(p).stat().st_mtime_ns) for p in item['paths']]
-        key=digest(signature)
-        if key in self.verified_fingerprints:
-            if progress:progress(item['size_bytes'],item['size_bytes'],item['name'])
-            return self.verified_fingerprints[key]
+    def identify_artifact(self,item):
+        if self.demo:
+            return {'version':1,'files':[{'name':'demo.gguf','size_bytes':item['size_bytes'],'mtime_ns':0}],
+                    'sha256':{'demo.gguf':'a'*64}}
+        catalog=item.get('catalog') or {}
+        files=[]
+        for raw in item['paths']:
+            path=Path(raw);stat=path.stat()
+            files.append({'name':path.name,'size_bytes':stat.st_size,'mtime_ns':stat.st_mtime_ns})
+        identity={'version':1,'files':files}
+        for key in ('repo_id','revision'):
+            if catalog.get(key):identity[key]=catalog[key]
+        if catalog.get('sha256'):identity['sha256']=copy.deepcopy(catalog['sha256'])
         saved=self.registry.get(item['id'],{})
-        if saved.get('signature')==signature and saved.get('sha256'):
-            hashes=saved['sha256'];self.verified_fingerprints[key]=hashes
-            if progress:progress(item['size_bytes'],item['size_bytes'],item['name'])
-            return hashes
-        hashes=file_hashes(item['paths'],progress);self.verified_fingerprints[key]=hashes
-        self.registry[item['id']]={'sha256':hashes,'signature':signature,'verified_at':now()}
-        write_json(self.registry_path,self.registry)
-        return hashes
-    def with_known_pins(self,models):
+        if saved.get('artifact_identity')!=identity:
+            self.registry[item['id']]={'artifact_identity':copy.deepcopy(identity),'observed_at':now()}
+            write_json(self.registry_path,self.registry)
+        return identity
+    def with_known_artifacts(self,models):
         effective=copy.deepcopy(models)
         for m in effective:
-            if m['id'] in self.registry:m['sha256']=self.registry[m['id']]['sha256']
-            elif not m.get('sha256'):
-                records=[r for r in self.store.all() if r.get('model_id')==m['id'] and r.get('artifact_hashes')]
-                pins={canonical(r['artifact_hashes']) for r in records}
-                if len(pins)==1:m['sha256']=json.loads(next(iter(pins)))
+            saved=self.registry.get(m['id'],{}).get('artifact_identity')
+            if saved:
+                m['artifact_identity']=copy.deepcopy(saved);continue
+            records=[r for r in self.store.all() if r.get('model_id')==m['id'] and r.get('artifact_identity')]
+            identities={canonical(r['artifact_identity']) for r in records}
+            if len(identities)==1:m['artifact_identity']=json.loads(next(iter(identities)))
         return effective
     def git_issues(self):
         if self.demo or not self.settings['sync_source']:return []
@@ -276,12 +279,10 @@ class Controller(ModelManager):
         models=self.catalog();existing=next((m for m in models if m['id']==mid),None)
         if existing is None:
             existing={'id':safe_id(mid),'base_model':item['name'],'files':item['files'],'quantization':item['quantization']};models.append(existing)
-        # VRAM assignment is metadata-only. Never hash multi-GB weights here: hashing belongs
-        # in explicit preflight, where long-running validation is expected and visible.
+        # VRAM assignment is metadata-only. Model identity is derived later from cheap file metadata.
         existing.update(required_vram_gb=tier,vram_status='user_assigned_unverified')
         validate_catalog(models);write_json(self.root/'models.json',models);self.report=None
-        # Keep the already-discovered card in sync immediately. A later preflight fingerprints
-        # the artifact and persists sha256 before benchmark planning/execution.
+        # Keep the already-discovered card in sync immediately. Preflight adds a cheap artifact identity.
         item.update(required_vram_gb=tier,vram_status='user_assigned_unverified',
                     catalogued=True,catalog=copy.deepcopy(existing))
         self.message='Assigned '+mid+' to '+str(tier)+' GB. Run preflight when you are ready.'

@@ -22,7 +22,7 @@ def summarize(records):
         target = r.get('target', {})
         # A different GGUF or edited test is NOT another sample of the same experiment.
         definition = experiment_spec(r.get('test_definition', {}), r.get('variant_definition', {}))
-        protocol = digest({'definition': definition, 'artifacts': r.get('artifact_hashes', {}),
+        protocol = digest({'definition': definition, 'artifacts': r.get('artifact_identity') or r.get('artifact_hashes', {}),
                            'implementation': r.get('provenance', {}).get('workflow_code'),
                            'context': r.get('load', {}).get('context'),
                            'measurement_policy': r.get('policy',r.get('measurement_policy')),

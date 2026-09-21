@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 from .domain import TIERS,write_json
-from .inventory import file_hashes,scan_models
+from .inventory import scan_models
 from .planning import validate_catalog
 from .workflows import Cancelled
 
@@ -37,8 +37,7 @@ class ModelManager:
             catalog=[m for m in catalog if m['id']!=mid]+[model]
             validate_catalog(catalog);write_json(self.root/'models.json',catalog)
             self.message='Downloading '+model['quantization']+' into '+str(root)
-            paths=download_model(model,root,self.cancel_event,self.log,token=self.settings.get('hf_token',''))
-            model['sha256']=file_hashes(paths);write_json(self.root/'models.json',catalog)
+            download_model(model,root,self.cancel_event,self.log,token=self.settings.get('hf_token',''))
             self.log('download','Verified '+mid)
         self.scan_folder();self.report=None
         self.message='Models installed and verified. Run preflight next.'
