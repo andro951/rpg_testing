@@ -1,0 +1,63 @@
+name: Apply tested workbench checkpoint
+on:
+  push:
+    branches: [main]
+    paths: ['.delivery/patch.json']
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify and apply exact file changes
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, pathlib, zlib
+          payload=json.loads(pathlib.Path('.delivery/patch.json').read_text())
+          raw=zlib.decompress(base64.b64decode(payload['data']))
+          assert hashlib.sha256(raw).hexdigest()==payload['sha256'], 'Checkpoint checksum mismatch'
+          files=json.loads(raw)
+          assert isinstance(files,list) and len(files)<=100
+          for entry in files:
+              p=pathlib.Path(entry['path'])
+              assert not p.is_absolute() and '..' not in p.parts and p.parts[0] not in ('.git','.github','.local')
+              current=hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
+              assert current==entry['before'], f'Concurrent edit in {p}; refusing to replace it'
+          for entry in files:
+              p=pathlib.Path(entry['path'])
+              if entry['content'] is None:
+                  p.unlink()
+              else:
+                  p.parent.mkdir(parents=True,exist_ok=True)
+                  p.write_bytes(entry['content'].encode('utf-8'))
+          pathlib.Path('.delivery/file-list.json').write_text(json.dumps([e['path'] for e in files]))
+          PY
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - name: Publish tested checkpoint without overwriting concurrent work
+        run: |
+          python - <<'PY'
+          import json,pathlib,subprocess
+          files=json.loads(pathlib.Path('.delivery/file-list.json').read_text())
+          git=lambda *args:subprocess.run(['git',*args],check=True)
+          git('config','user.name','RPG Workbench checkpoint')
+          git('config','user.email','workbench@users.noreply.github.com')
+          git('add','--',*files)
+          git('rm','--','.delivery/patch.json')
+          git('commit','-m','feat: apply unit-tested native workbench checkpoint')
+          git('push','origin','HEAD:main')
+          PY
+      - name: Archive resulting source
+        if: always()
+        run: git archive --format=zip HEAD -o repository-source.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkpoint-source
+          path: repository-source.zip
+          retention-days: 3
