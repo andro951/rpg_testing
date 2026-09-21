@@ -82,7 +82,7 @@ for(const [id,action] of [['pause','pause'],['resume','resume'],['stop-model','s
 on('prepare',()=>api('/api/preflight',{preparation:{gpu_name:$('target-name').value,vram_gb:Number($('target-tier').value)}}));
 on('export',()=>download('/api/export','rpg-testing-evidence.zip'));on('unity-script',()=>download('/api/unity-script?tier='+$('target-tier').value,'rpg-unity-job.sh'));
 on('refresh-tests',loadTests);on('refresh-results',loadResults);$('result-filter').addEventListener('input',renderResults);
-on('import-example',async()=>{await api('/api/test/import-example',{id:$('example-select').value});await loadTests();toast('Example added to test files.');});
+on('import-example',async()=>{await api('/api/test/import-example',{id:$('example-select').value});render(await api('/api/state'));await loadTests();toast('Example added to test files.');});
 on('new-test',()=>openEditor(testData[0]?{...testData[0],id:'new_test',name:'New test'}:{schema_version:2,id:'new_test',workflow:'steps',source:{},variants:[]}));
 on('save-test',async()=>{let test;try{test=JSON.parse($('test-json').value);}catch{throw Error('This is not valid JSON.');}await api('/api/test/save',{test});$('editor').close();await loadTests();toast('Test validated and saved.');});
 async function scanModelsInBackground(){await api('/api/models/scan',{});setPage('models');await poll();}
