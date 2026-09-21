@@ -87,7 +87,7 @@ def code_fingerprint():
     """Only experiment-affecting implementation, not CSS or laptop paths."""
     base=Path(__file__).parent
     return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
-                   for name in ('workflows.py','scoring.py','backends.py')})
+                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py')})
 
 
 def case_id(model: dict, test: dict, variant: dict, repetition: int, target: dict) -> str:

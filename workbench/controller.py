@@ -319,7 +319,13 @@ class Controller:
                     if p.is_file() and not p.is_symlink() and not p.name.startswith('.'):
                         z.write(p,p.relative_to(self.data).as_posix())
             from .analysis import summarize, csv_export
-            summary=summarize(self.store.all())
+            valid=[];corrupt=[]
+            for path in sorted(self.store.root.glob('*/*.json')):
+                try:valid.append(self.store.read(path))
+                except (ValueError,KeyError,TypeError) as exc:
+                    corrupt.append({'file':path.relative_to(self.data).as_posix(),'error':str(exc)})
+            summary=summarize(valid)
+            summary['corrupt_files']=corrupt
             z.writestr('summary.json',json.dumps(summary,indent=2))
             z.writestr('summary.csv',csv_export(summary))
             z.writestr('ABOUT.txt','SIMULATED DEMO\n' if self.demo else 'GPU-local benchmark evidence. See each result for provenance and unavailable metrics.\n')

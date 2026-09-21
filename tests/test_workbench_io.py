@@ -45,7 +45,7 @@ class GitTests(unittest.TestCase):
         self.remote=base/'remote.git';self.remote.mkdir();git(self.remote,'init','--bare')
         self.root=base/'repo';git(base,'clone',str(self.remote),str(self.root))
         git(self.root,'config','user.email','test@example.invalid');git(self.root,'config','user.name','Test')
-        (self.root/'.gitignore').write_text('.local/\n')
+        (self.root/'.gitignore').write_text((Path(__file__).resolve().parents[1]/'.gitignore').read_text())
         (self.root/'models.json').write_text('[]\n')
         git(self.root,'add','.');git(self.root,'commit','-m','init');git(self.root,'push','-u','origin','HEAD')
     def test_clean_pull(self):self.assertFalse(pull(self.root))
