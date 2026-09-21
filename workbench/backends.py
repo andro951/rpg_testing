@@ -108,7 +108,8 @@ class DemoBackend:
         instruction=messages[-1]['content'];event=source.get('new_information','')
         is_inventory='A2667' in event and 'received' in event.lower() and 'shipped' in event.lower()
         lower_event=event.lower()
-        ticket_container=source.get('tickets')
+        presented_state=source.get('initial_state',source)
+        ticket_container=presented_state.get('tickets') if isinstance(presented_state,dict) else None
         ticket_entries=(list(enumerate(ticket_container)) if isinstance(ticket_container,list)
                         else sorted(ticket_container.items(),key=lambda kv:int(kv[0])) if isinstance(ticket_container,dict)
                         else [])

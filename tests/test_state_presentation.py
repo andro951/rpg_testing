@@ -1,9 +1,10 @@
 import json
 import unittest
 from pathlib import Path
-from workbench.domain import read_json,validate_test
+from workbench.domain import read_json,validate_test,load_tests
 from workbench.presentation import indexed_arrays,render_source,presentation_mode
-from workbench.workflows import messages,evaluate
+from workbench.workflows import messages,evaluate,execute
+from workbench.backends import DemoBackend
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -44,5 +45,13 @@ class StatePresentationTests(unittest.TestCase):
         test=read_json(ROOT/'test_specs/array_patch_replace_004.json')
         test['variants'][0]['result']['required_ops']=['increment']
         with self.assertRaises(ValueError):validate_test(test)
+
+    def test_every_enabled_fixture_demo_path_is_exact(self):
+        for test in load_tests(ROOT/'test_specs'):
+            for variant in test['variants']:
+                if not variant.get('enabled',True):continue
+                with self.subTest(test=test['id'],variant=variant['id']):
+                    result=execute(test,variant,DemoBackend())
+                    self.assertTrue(result['score']['exact_match'],result['score'])
 
 if __name__=='__main__':unittest.main()
