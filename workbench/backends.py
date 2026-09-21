@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import socket
 import subprocess
 import threading
@@ -107,6 +108,15 @@ class DemoBackend:
         instruction=messages[-1]['content'];event=source.get('new_information','')
         is_inventory='A2667' in event and 'received' in event.lower() and 'shipped' in event.lower()
         lower_event=event.lower()
+        ticket_container=source.get('tickets')
+        ticket_entries=(list(enumerate(ticket_container)) if isinstance(ticket_container,list)
+                        else sorted(ticket_container.items(),key=lambda kv:int(kv[0])) if isinstance(ticket_container,dict)
+                        else [])
+        def ticket_key(ticket_id):
+            for key,item in ticket_entries:
+                if isinstance(item,dict) and item.get('ticket_id')==ticket_id:return str(key)
+            return None
+        ticket_ids=re.findall(r'SR-[0-9]+',event)
         is_coat_remove='takes off his coat and hangs it on the hook' in lower_event
         is_coat_add='brown leather coat is hanging' in lower_event and 'puts it on over his shirt' in lower_event
         is_time='minutes' in event and not is_inventory and not is_coat_remove and not is_coat_add
@@ -121,7 +131,22 @@ class DemoBackend:
         elif 'narrat' in instruction.lower():text='Tom waits in the kitchen. Exactly five minutes pass. The clock now reads 14:20.'
         else:
             semantic='list_add' in instruction or 'semantic' in instruction
-            if is_inventory:patch=[{'op':'set' if semantic else 'replace','path':'/inventory/on_hand_units','value':49}]
+            if 'status is now resolved' in lower_event and ticket_ids:
+                key=ticket_key(ticket_ids[0]);patch=[{'op':'replace','path':f'/tickets/{key}/status','value':'resolved'}]
+            elif 'removed from the active support queue' in lower_event and ticket_ids:
+                key=ticket_key(ticket_ids[0]);patch=[{'op':'remove','path':f'/tickets/{key}'}]
+            elif 'inserted immediately before ticket' in lower_event:
+                target=re.search(r'before ticket (SR-[0-9]+)',event,re.I);key=ticket_key(target.group(1)) if target else None
+                patch=[{'op':'add','path':f'/tickets/{key}','value':{'ticket_id':'SR-99991','status':'open','priority':'urgent','subject':'VPN access failed after credential rotation','customer_contact':'new.user@example.test'}}]
+            elif 'moved in the active queue' in lower_event and len(ticket_ids)>=2:
+                source_key=ticket_key(ticket_ids[0]);dest_key=ticket_key(ticket_ids[1])
+                patch=[{'op':'move','from':f'/tickets/{source_key}','path':f'/tickets/{dest_key}'}]
+            elif 'copy the complete current record' in lower_event and ticket_ids:
+                key=ticket_key(ticket_ids[0]);patch=[{'op':'copy','from':f'/tickets/{key}','path':'/review_samples/-'}]
+            elif 'precondition test before the change' in lower_event and ticket_ids:
+                key=ticket_key(ticket_ids[0]);patch=[{'op':'test','path':f'/tickets/{key}/status','value':'waiting_customer'},
+                                                     {'op':'replace','path':f'/tickets/{key}/status','value':'active'}]
+            elif is_inventory:patch=[{'op':'set' if semantic else 'replace','path':'/inventory/on_hand_units','value':49}]
             elif is_coat_remove:patch=([{'op':'list_remove','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'remove','path':'/household/members/evan_harper/clothing/4'}])
             elif is_coat_add:patch=([{'op':'list_add','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'add','path':'/household/members/evan_harper/clothing/-','value':'brown leather coat'}])
             elif is_time:patch=[{'op':'set' if semantic else 'replace','path':'/time','value':'14:20'}]

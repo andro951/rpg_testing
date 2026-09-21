@@ -25,7 +25,7 @@ class ResearchSpecTests(unittest.TestCase):
         self.assertIn('brown leather coat',before['household']['members']['evan_harper']['clothing'])
         self.assertNotIn('brown leather coat',expected['household']['members']['evan_harper']['clothing'])
         self.assertTrue(equal(apply(before,[{'op':'remove','path':path+'/4'}],'json_patch'),expected))
-        self.assertTrue(equal(apply(before,[{'op':'list_remove','path':path,'value':'brown leather coat'}],'semantic'),expected))
+        self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
 
     def test_household_coat_add_003_is_one_list_addition(self):
         test=read_json(ROOT/'test_specs/household_coat_add_003.json')
@@ -36,12 +36,35 @@ class ResearchSpecTests(unittest.TestCase):
         self.assertNotIn('brown leather coat',before['household']['members']['evan_harper']['clothing'])
         self.assertEqual(expected['household']['members']['evan_harper']['clothing'][-1],'brown leather coat')
         self.assertTrue(equal(apply(before,[{'op':'add','path':path+'/-','value':'brown leather coat'}],'json_patch'),expected))
-        self.assertTrue(equal(apply(before,[{'op':'list_add','path':path,'value':'brown leather coat'}],'semantic'),expected))
+        self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
 
     def test_coat_tests_are_exact_mirrors(self):
         remove=read_json(ROOT/'test_specs/household_coat_remove_002.json')
         add=read_json(ROOT/'test_specs/household_coat_add_003.json')
         self.assertTrue(equal(remove['expected_state'],add['source']['initial_state']))
         self.assertTrue(equal(add['expected_state'],remove['source']['initial_state']))
+
+    def test_core_research_specs_use_indexed_json_patch_not_semantic_patch(self):
+        for name in ['inventory_net_stock_001.json','household_coat_remove_002.json','household_coat_add_003.json']:
+            test=read_json(ROOT/'test_specs'/name);validate_test(test)
+            self.assertEqual(test['state_presentation'],'indexed_arrays')
+            self.assertTrue(all(v['state_presentation']=='indexed_arrays' for v in test['variants']))
+            self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
+
+    def test_100_item_array_patch_pair_specs(self):
+        cases={
+            'array_patch_replace_004.json':([{'op':'replace','path':'/tickets/73/status','value':'resolved'}],['replace']),
+            'array_patch_remove_005.json':([{'op':'remove','path':'/tickets/87'}],['remove']),
+            'array_patch_add_006.json':([{'op':'add','path':'/tickets/64','value':{'ticket_id':'SR-99991','status':'open','priority':'urgent','subject':'VPN access failed after credential rotation','customer_contact':'new.user@example.test'}}],['add']),
+            'array_patch_move_007.json':([{'op':'move','from':'/tickets/91','path':'/tickets/7'}],['move']),
+            'array_patch_copy_008.json':([{'op':'copy','from':'/tickets/62','path':'/review_samples/-'}],['copy']),
+            'array_patch_test_009.json':([{'op':'test','path':'/tickets/84/status','value':'waiting_customer'},{'op':'replace','path':'/tickets/84/status','value':'active'}],['test','replace']),
+        }
+        for name,(patch,ops) in cases.items():
+            test=read_json(ROOT/'test_specs'/name);validate_test(test)
+            self.assertEqual(len(test['source']['initial_state']['tickets']),100)
+            self.assertTrue(equal(apply(test['source']['initial_state'],patch,'json_patch'),test['expected_state']),name)
+            self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays'])
+            self.assertTrue(all(v['result']['required_ops']==ops for v in test['variants']))
 
 if __name__=='__main__':unittest.main()

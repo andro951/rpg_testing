@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 TIERS = (8, 12, 16, 24, 32, 40, 48, 80)
-ENGINE_VERSION = 'native-two-pass-2'
+ENGINE_VERSION = 'indexed-array-view-1'
 
 
 def canonical(value: Any) -> str:
@@ -88,7 +88,7 @@ def code_fingerprint():
     """Only experiment-affecting implementation, not CSS or laptop paths."""
     base=Path(__file__).parent
     return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
-                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
+                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py','presentation.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
 
 
 def experiment_spec(test: dict, variant: dict) -> dict:
@@ -180,6 +180,8 @@ def validate_test(test: dict) -> None:
         raise ValueError('repetitions must be positive')
     if not isinstance(test.get('source'), dict) or not isinstance(test.get('variants'), list) or not test['variants']:
         raise ValueError('Test needs source and nonempty variants')
+    if test.get('state_presentation','indexed_arrays') not in ('raw_json','indexed_arrays'):
+        raise ValueError('Unknown state presentation')
     if 'expected' in test['source'] or 'expected_state' in test['source']:
         raise ValueError('Ground truth must not be placed in source')
     schema = test.get('state_schema')
@@ -251,6 +253,8 @@ def validate_test(test: dict) -> None:
         variants.add(variant['id'])
         if variant.get('cache', 'default') not in ('default', 'on', 'off'):
             raise ValueError('Unknown cache mode')
+        if variant.get('state_presentation',test.get('state_presentation','indexed_arrays')) not in ('raw_json','indexed_arrays'):
+            raise ValueError('Unknown state presentation')
         known = set()
         steps(variant['steps'], known)
         result = variant.get('result', {})
@@ -258,6 +262,11 @@ def validate_test(test: dict) -> None:
             raise ValueError('Result references missing step')
         if result.get('representation', 'json_patch') not in ('json_patch', 'semantic', 'state', 'answers'):
             raise ValueError('Unknown result representation')
+        required_ops=result.get('required_ops')
+        if required_ops is not None:
+            allowed={'add','remove','replace','move','copy','test'}
+            if result.get('representation','json_patch')!='json_patch' or not isinstance(required_ops,list) or not required_ops or any(op not in allowed for op in required_ops):
+                raise ValueError('required_ops must be a nonempty list of RFC 6902 operations for json_patch results')
         for check in variant.get('checks', []):
             if check.get('step') not in known or check.get('operator') not in ('equals', 'contains', 'not_contains'):
                 raise ValueError('Invalid objective check')

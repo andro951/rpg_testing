@@ -10,6 +10,7 @@ import shutil
 import struct
 import subprocess
 from pathlib import Path
+from .presentation import presentation_mode, presentation_instruction, render_source_text
 from .domain import read_json, recommend_vram, digest
 
 
@@ -160,10 +161,12 @@ def automatic_context(tests: list[dict], metadata: dict) -> dict:
         return total
     longest=0
     for test in tests:
-        fixed=len(json.dumps(test['source'],ensure_ascii=False).encode('utf-8'))
-        fixed+=len(test.get('shared_prefix','').encode('utf-8'))+len(test.get('instructions','').encode('utf-8'))+256
-        branch=max((prompt_bytes(v['steps']) for v in test['variants'] if v.get('enabled',True)),default=0)
-        longest=max(longest,fixed+branch)
+        for variant in (v for v in test['variants'] if v.get('enabled',True)):
+            mode=presentation_mode(test,variant)
+            fixed=len(render_source_text(test['source'],mode).encode('utf-8'))
+            fixed+=len(test.get('shared_prefix','').encode('utf-8'))+len(test.get('instructions','').encode('utf-8'))
+            fixed+=len(presentation_instruction(mode).encode('utf-8'))+256
+            longest=max(longest,fixed+prompt_bytes(variant['steps']))
     desired=max(16384,2**math_ceil_log2(max(1,longest*2+8192)))
     # Bytes are only a planning estimate, not tokenizer output. A conservative estimate
     # exceeding native context must not falsely prove that the actual tokens cannot fit.
