@@ -181,18 +181,28 @@ def detect_gpus(run=command) -> list[dict]:
 
 
 def automatic_context(tests: list[dict], metadata: dict) -> dict:
-    """Internal estimate, not a user cap. Runtime guards check actual token counts."""
+    """Automatic finite allocation, including the explicitly shared cached prefix."""
     maximum=next((int(v) for k,v in metadata.items() if k.endswith('.context_length')),None)
     if not maximum or maximum<512:raise ValueError('Model context metadata is unavailable')
-    # A byte bound is conservative for typical byte-level tokenizers. Generated intermediate
-    # outputs cannot be predicted; leave headroom and detect exhaustion explicitly at runtime.
-    longest=max((len(json.dumps(t['source'],ensure_ascii=False).encode('utf-8'))+
-                 sum(len(str(s).encode('utf-8')) for v in t['variants'] for s in v['steps']) for t in tests),default=0)
+    def prompt_bytes(steps):
+        total=0
+        for step in steps:
+            if step.get('type')=='loop':total+=step['max_iterations']*prompt_bytes(step['steps'])
+            else:total+=len(step.get('prompt','').encode('utf-8'))+128
+        return total
+    longest=0
+    for test in tests:
+        fixed=len(json.dumps(test['source'],ensure_ascii=False).encode('utf-8'))
+        fixed+=len(test.get('shared_prefix','').encode('utf-8'))+len(test.get('instructions','').encode('utf-8'))+256
+        branch=max((prompt_bytes(v['steps']) for v in test['variants'] if v.get('enabled',True)),default=0)
+        longest=max(longest,fixed+branch)
     desired=max(4096,2**math_ceil_log2(max(1,longest*2+2048)))
+    # Bytes are only a planning estimate, not tokenizer output. A conservative estimate
+    # exceeding native context must not falsely prove that the actual tokens cannot fit.
     context=min(desired,maximum)
-    if longest>=maximum:raise ValueError('Source may exceed native context; exact runtime tokenization required')
     return {'allocated_tokens':context,'native_tokens':maximum,'input_estimate_bytes':longest,
-            'method':'conservative byte estimate plus headroom; exact runtime guard', 'output_cap':None}
+            'method':'conservative byte estimate including shared prefix plus headroom; exact native runtime guard',
+            'input_may_exceed_native_context':longest>=maximum,'output_cap':None}
 
 
 def math_ceil_log2(n: int) -> int:return (n-1).bit_length()

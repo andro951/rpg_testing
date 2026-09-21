@@ -110,6 +110,7 @@ class ResultStore:
 
     def read(self, path: Path) -> dict:
         record = read_json(path)
+        if not isinstance(record,dict):raise ValueError('Result must be a JSON object')
         checksum = record.pop('sha256', None)
         if checksum != digest(record):
             raise ValueError(f'Checksum mismatch: {path.name}')

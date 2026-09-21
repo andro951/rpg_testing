@@ -35,11 +35,25 @@ def build(app, preparation=None):
     backend_version=app.backend_version()
     target={'gpu_name':gpu['name'],'vram_gb':device_tier(gpu['total_gib']) or gpu['total_gib'],
             'backend':'demo' if app.demo else kind,'backend_version':backend_version,
-            'os':platform.system(),'cpu':platform.processor() or platform.machine(),'driver':gpu.get('driver')}
+            'os':platform.platform(),'python':platform.python_version(),'cpu':platform.processor() or platform.machine(),'driver':gpu.get('driver')}
+    # Pins are metadata, NOT completion tracking. Recover from checksummed results if needed.
+    for file in app.store.root.glob('*/*.json'):
+        try:app.store.read(file)
+        except (ValueError,KeyError,TypeError) as exc:
+            try:app.store.path(file.parent.name,file.stem)
+            except ValueError:
+                problems.append(issue('corrupt_filename','Invalid result filename: '+str(file)));continue
+            problems.append(issue('corrupt_'+file.stem,'Corrupt result: '+str(exc),'Delete corrupted result',
+                                  {'type':'delete_corrupt','model_id':file.parent.name,'case_id':file.stem}))
+    if any(i['id'].startswith('corrupt_') for i in problems):
+        return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'issues':problems,
+                'gpu':gpu,'plan':{'pending':0,'complete':0,'model_loads':0,'groups':[]},
+                'note':'Completion cannot be trusted until corrupt result files are resolved.'},None
     models=app.with_known_pins(models)
     store=app.store
     plan=pending_plan(models,tests,target,store)
-    folder_info=app.folder_info();path=folder_info.get('path')
+    folder_info=app.folder_info()
+    path=folder_info.get('path')
     inventory=[];inventory_error=None
     if not app.demo and kind=='lmstudio':
         lms=executable('lms',settings.get('lms_path',''))
@@ -51,6 +65,7 @@ def build(app, preparation=None):
             except Exception as exc:inventory_error=str(exc)
     found=app.demo_models() if app.demo else scan_models(Path(path),models,inventory) if path else []
     app.last_models=found
+    # Changed existing files cannot be mistaken for the older artifact's completed work.
     changed=False
     for item in found:
         if item['catalogued'] and item['complete'] and not item['errors']:
@@ -61,6 +76,7 @@ def build(app, preparation=None):
     if changed:plan=pending_plan(models,tests,target,store)
     grouped={}
     for item in found:grouped.setdefault(item['id'],[]).append(item)
+    # A missing folder or backend is irrelevant when no pending model needs it.
     if plan['pending']:
         if not path and not app.demo:
             problems.append(issue('folder',folder_info.get('issue') or 'Choose the active model folder.','Choose model folder',{'type':'choose_folder'},'needs_input'))

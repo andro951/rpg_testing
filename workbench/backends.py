@@ -13,10 +13,8 @@ from .domain import canonical
 from .inventory import command, executable
 from .workflows import Cancelled, Unsupported
 
-
 class BackendError(RuntimeError):
     pass
-
 
 class Transport:
     def __init__(self, base_url: str, token: str = '', timeout: float = 900):
@@ -26,7 +24,6 @@ class Transport:
         self.host,self.port=url.hostname,url.port or 80
         self.token,self.timeout=token,timeout
         self.connection=None
-
     def cancel(self):
         conn=self.connection
         if conn:
@@ -34,7 +31,6 @@ class Transport:
                 if conn.sock:conn.sock.shutdown(socket.SHUT_RDWR)
             except OSError:pass
             conn.close()
-
     def request(self,path,body=None,stream=False,cancel=None):
         conn=http.client.HTTPConnection(self.host,self.port,timeout=self.timeout)
         self.connection=conn
@@ -53,7 +49,9 @@ class Transport:
             while True:
                 if cancel and cancel.is_set():raise Cancelled('Cancelled')
                 line=response.readline()
-                if not line:break
+                if not line:
+                    if cancel and cancel.is_set():raise Cancelled('Cancelled')
+                    break
                 if not line.startswith(b'data:'):continue
                 data=line[5:].strip()
                 if data==b'[DONE]':break
@@ -84,7 +82,6 @@ class Transport:
         finally:
             conn.close();self.connection=None
 
-
 class LocalBackend:
     supports_schema=True
     def __init__(self,settings,gpu,log=lambda *args:None):
@@ -94,12 +91,9 @@ class LocalBackend:
         port=1234 if self.kind=='lmstudio' else 1235
         self.transport=Transport(f'http://127.0.0.1:{port}',settings.get('model_api_token',''))
         self.process=None;self.reader=None;self.owned_id=None;self.load_metadata={};self.context=None;self.version_info={}
-
     def cancel(self):self.transport.cancel()
-
     def inventory(self):
         return self.transport.request('/api/v1/models').get('models',[])
-
     def load(self,model,context,cancel=None):
         self.context=context['allocated_tokens']
         started=time.perf_counter();self.owned_id='rpg-workbench-'+model['id']
@@ -154,7 +148,7 @@ class LocalBackend:
             if not any(m.get('id')==self.owned_id for m in info.get('data',[])):
                 raise BackendError('Model identity mismatch')
             props=self.transport.request('/props')
-            actual=props.get('default_generation_settings',{}).get('n_ctx')
+            actual=props.get('default_generation_settings',{}).get('n_ctx') or props.get('default_generation_settings',{}).get('params',{}).get('n_ctx')
             if actual and actual!=self.context:raise BackendError('Backend changed the requested context allocation')
             self.load_metadata={'backend':'llamacpp','arguments':args,'context':context,'properties':props,
                                 'full_gpu_residency_verified':False}
@@ -167,13 +161,11 @@ class LocalBackend:
         self.load_metadata['health_exact_ready']=check['text'].strip()=='READY'
         if self.supports_cache:self.clear_cache()
         return self.load_metadata
-
     def clear_cache(self):
         if not self.supports_cache:raise Unsupported('LM Studio does not expose a verified cache reset in this adapter')
         result=self.transport.request('/slots/0?action=erase',{})
         if 'n_erased' not in result:raise Unsupported('Backend did not confirm slot erasure')
         return result
-
     def generate(self,messages,settings,schema,cache='default',cancel=None):
         if cache!='default' and not self.supports_cache:raise Unsupported('Use native llama.cpp for controlled caching')
         token_count=None
@@ -193,7 +185,6 @@ class LocalBackend:
         result['output_limit_policy']='no harness cap; finite backend context'
         result['request_parameters']={k:v for k,v in body.items() if k!='messages'}
         return result
-
     def unload(self):
         try:
             if self.process:
@@ -204,7 +195,6 @@ class LocalBackend:
             elif self.kind=='lmstudio' and self.owned_id:
                 self.transport.request('/api/v1/models/unload',{'instance_id':self.owned_id})
         finally:self.process=None;self.owned_id=None
-
 
 class DemoBackend:
     """Plumbing only, prominently labelled simulated; never research evidence."""

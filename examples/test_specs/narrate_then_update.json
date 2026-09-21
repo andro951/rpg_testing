@@ -1,0 +1,13 @@
+{
+  "schema_version":2,"id":"narrate_then_update","name":"Same model: narration followed by update","workflow":"steps","repetitions":1,
+  "source": {
+    "initial_state":{"time":"14:15","location":"Kitchen","characters":{"Tom":{"location":"Kitchen","clothing":["blue shirt","jeans"],"mood":"annoyed"},"Susie":{"location":"Bedroom","clothing":["red dress"],"mood":"happy"}},"doorLocked":true,"playerHasKey":false},
+    "new_information":"Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes.",
+    "player_input":"I wait exactly five minutes without doing anything else."
+  },
+  "expected_state":{"time":"14:20","location":"Kitchen","characters":{"Tom":{"location":"Kitchen","clothing":["blue shirt","jeans"],"mood":"annoyed"},"Susie":{"location":"Bedroom","clothing":["red dress"],"mood":"happy"}},"doorLocked":true,"playerHasKey":false},
+  "variants":[{"id":"narrative_then_patch","cache":"default","steps":[
+    {"id":"story","type":"generate","prompt":"Narrate the player waiting in the kitchen for exactly five minutes. Tom says \"The clock reads 14:20\". Nobody moves or changes anything else.","output":{"type":"text"},"sampling":{"temperature":0.8,"top_p":1,"seed":42}},
+    {"id":"patch","type":"generate","prompt":"Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown. Update from the source AND the generated scene.","output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42},"uses":["story"]}
+  ],"result":{"step":"patch","representation":"json_patch"},"checks":[{"name":"Clock phrase delivered","step":"story","operator":"contains","value":"14:20"}]}]
+}

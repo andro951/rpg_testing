@@ -1,0 +1,17 @@
+{
+  "schema_version": 2, "id": "verify_repair", "name": "Analyze, patch, verify and bounded repair", "workflow": "steps", "repetitions": 1,
+  "source": {
+    "initial_state": {"time":"14:15","location":"Kitchen","characters":{"Tom":{"location":"Kitchen","clothing":["blue shirt","jeans"],"mood":"annoyed"},"Susie":{"location":"Bedroom","clothing":["red dress"],"mood":"happy"}},"doorLocked":true,"playerHasKey":false},
+    "new_information":"Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes."
+  },
+  "expected_state": {"time":"14:20","location":"Kitchen","characters":{"Tom":{"location":"Kitchen","clothing":["blue shirt","jeans"],"mood":"annoyed"},"Susie":{"location":"Bedroom","clothing":["red dress"],"mood":"happy"}},"doorLocked":true,"playerHasKey":false},
+  "variants": [{"id":"two_repairs","cache":"default","steps":[
+    {"id":"analysis","type":"generate","prompt":"Describe only established changes.","output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42}},
+    {"id":"patch","type":"generate","prompt":"Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.","output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42},"uses":["analysis"]},
+    {"id":"correct","type":"generate","prompt":"Compare the proposed patch with the source. Is it completely correct with no missing or unsupported change? Return a JSON boolean.","output":{"type":"boolean"},"sampling":{"temperature":0,"top_p":1,"seed":42},"uses":["patch"]},
+    {"id":"repair_loop","type":"loop","max_iterations":2,"until":{"step":"correct","equals":true},"steps":[
+      {"id":"repair","type":"generate","prompt":"Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown. Correct any mistake in the prior patch.","output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42},"uses":["patch"],"assign":"patch"},
+      {"id":"review","type":"generate","prompt":"Is the corrected patch completely correct? Return a JSON boolean.","output":{"type":"boolean"},"sampling":{"temperature":0,"top_p":1,"seed":42},"uses":["patch"],"assign":"correct"}
+    ]}
+  ],"result":{"step":"patch","representation":"json_patch"}}]
+}
