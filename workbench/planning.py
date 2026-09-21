@@ -2,6 +2,7 @@
 from __future__ import annotations
 import copy
 from .domain import case_id, eligibility, safe_id, TIERS
+from .execution_policy import fallback_id
 
 
 def validate_catalog(models):
@@ -49,7 +50,10 @@ def pending_plan(models, tests, target, store):
                 for repetition in range(test.get('repetitions',1)):
                     cid=case_id(model,test,variant,repetition,target)
                     if store.done(model['id'],cid):
-                        done+=1;complete+=1
+                        record=store.read(store.path(model['id'],cid))
+                        if record['status']=='skipped' and record.get('recovery_eligible') and not store.done(model['id'],fallback_id(cid)):
+                            jobs.append({'case_id':cid,'model_id':model['id'],'test':test,'variant':variant,'repetition':repetition,'recovery_only':True})
+                        else:done+=1;complete+=1
                     else:
                         jobs.append({'case_id':cid,'model_id':model['id'],'test':test,'variant':variant,'repetition':repetition})
         groups.append({'model':copy.deepcopy(model),'reason':reason,'jobs':jobs,'complete':done})

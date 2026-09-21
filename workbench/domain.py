@@ -56,8 +56,9 @@ def safe_id(value: str) -> str:
     return value
 
 
-def device_tier(capacity: float) -> int | None:
-    """Round only known nominal capacities (ECC reporting), not arbitrary shortages."""
+def device_tier(capacity: float, gpu_name: str = "") -> int | None:
+    """Nominal tier only; actual free bytes still govern loading."""
+    if re.fullmatch(r'(?:NVIDIA\s+)?L4',gpu_name.strip(),re.I) and 21<=capacity<=24.48:return 24
     for tier in (8, 11, 12, 16, 24, 32, 40, 48, 80):
         if tier * .98 <= capacity <= tier * 1.02:
             return tier
@@ -87,11 +88,10 @@ def code_fingerprint():
     """Only experiment-affecting implementation, not CSS or laptop paths."""
     base=Path(__file__).parent
     return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
-                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py')})
+                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
 
 
 def experiment_spec(test: dict, variant: dict) -> dict:
-    """Only this variant and shared experimental fields, not neighboring variants/UI labels."""
     presentation = {'variants', 'repetitions', 'enabled', 'name', 'description'}
     return {'test': {k: v for k, v in test.items() if k not in presentation},
             'variant': {k: v for k, v in variant.items() if k not in {'enabled', 'name', 'description'}}}
@@ -121,7 +121,7 @@ class ResultStore:
         checksum = record.pop('sha256', None)
         if checksum != digest(record):
             raise ValueError(f'Checksum mismatch: {path.name}')
-        if record.get('status') not in ('completed', 'error', 'aborted'):
+        if record.get('status') not in ('completed', 'error', 'aborted', 'skipped'):
             raise ValueError(f'Unknown result status: {path.name}')
         if path.stem != record.get('case_id') or path.parent.name != record.get('model_id'):
             raise ValueError('Result identity does not match its filename')
@@ -130,7 +130,7 @@ class ResultStore:
 
     def done(self, model_id: str, cid: str) -> bool:
         path = self.path(model_id, cid)
-        return path.exists() and self.read(path)['status'] == 'completed'
+        return path.exists() and self.read(path)['status'] in ('completed', 'skipped')
 
     def save(self, record: dict) -> Path:
         record = dict(record)
@@ -140,13 +140,11 @@ class ResultStore:
             previous = self.read(path)
             if previous['status'] == 'completed':
                 raise ValueError('Refusing to overwrite a completed result; delete it to rerun')
-            # Keep earlier infrastructure/abort evidence in the authoritative file.
-            # Deleting the case still removes its completion state and all attempts.
             history = list(previous.pop('attempts', []))
             previous.pop('sha256', None)
             history.append(previous)
             record['attempts'] = history
-        if record['status'] not in ('completed', 'error', 'aborted'):
+        if record['status'] not in ('completed', 'error', 'aborted', 'skipped'):
             raise ValueError('Unknown status')
         record = {'status': record.pop('status'), **record}
         write_json(path, {**record, 'sha256': digest(record)})
@@ -250,6 +248,8 @@ def validate_test(test: dict) -> None:
         variants.add(variant['id'])
         if variant.get('cache', 'default') not in ('default', 'on', 'off'):
             raise ValueError('Unknown cache mode')
+        if type(variant.get('min_cached_tokens',1)) is not int or variant.get('min_cached_tokens',1)<1:
+            raise ValueError('min_cached_tokens must be a positive integer')
         known = set()
         steps(variant['steps'], known)
         result = variant.get('result', {})

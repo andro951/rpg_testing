@@ -20,12 +20,13 @@ def summarize(records):
             continue
         seen[key] = r
         target = r.get('target', {})
-        # A different GGUF or edited test is NOT another sample of the same experiment.
         definition = experiment_spec(r.get('test_definition', {}), r.get('variant_definition', {}))
         protocol = digest({'definition': definition, 'artifacts': r.get('artifact_hashes', {}),
                            'implementation': r.get('provenance', {}).get('workflow_code'),
                            'context': r.get('load', {}).get('context'),
-                           'measurement_policy': r.get('measurement_policy')})
+                           'measurement_policy': r.get('policy',r.get('measurement_policy')),
+                           'execution_class':r.get('execution_class','legacy_unverified'),
+                           'placement':{k:r.get('load',{}).get('placement',{}).get(k) for k in ('gpu_layers','total_layers','cpu_layers')}})
         bucket = (r['model_id'], r.get('test_id', 'unknown'), r.get('variant_id', 'unknown'),
                   protocol, canonical(target), bool(r.get('simulated')))
         groups.setdefault(bucket, []).append(r)
@@ -39,6 +40,7 @@ def summarize(records):
         prior = [a for r in items for a in r.get('attempts', [])]
         summaries.append({'model_id': model, 'test_id': test, 'variant_id': variant,
             'protocol_id': protocol, 'target': target, 'simulated': simulated,
+            'execution_class':items[0].get('execution_class','legacy_unverified'),'skipped':sum(r['status']=='skipped' for r in items),
             'completed': len(completed), 'infrastructure_errors': sum(r['status']=='error' for r in items),
             'aborted': sum(r['status']=='aborted' for r in items), 'prior_attempts': len(prior),
             'prior_infrastructure_errors': sum(a.get('status')=='error' for a in prior),
@@ -56,7 +58,7 @@ def summarize(records):
 
 def csv_export(summary):
     out = io.StringIO(newline='')
-    fields = ['model_id','test_id','variant_id','protocol_id','target','simulated','completed',
+    fields = ['model_id','test_id','variant_id','protocol_id','target','simulated','execution_class','skipped','completed',
               'infrastructure_errors','aborted','prior_attempts','prior_infrastructure_errors',
               'invalid_measurements','scored','exact_matches','exact_match_rate','timing_samples',
               'mean_pipeline_seconds','median_pipeline_seconds','p95_pipeline_seconds']
