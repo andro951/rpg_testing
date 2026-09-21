@@ -90,7 +90,7 @@ class EdgeTests(unittest.TestCase):
                 return super().generate(*a,**kw)
         with patch('workbench.demo_native.DemoNative',Slow):
             self.app.start('run');deadline=time.monotonic()+5
-            while (not self.app.current or self.app.current['stage']=='loading') and time.monotonic()<deadline:time.sleep(.01)
+            while (not self.app.current or not self.app.current.get('test')) and time.monotonic()<deadline:time.sleep(.01)
             self.app.control('stop');self.app.thread.join(5)
             self.assertFalse(self.app.operation.locked());self.assertEqual(self.app.state,'stopped')
             self.assertTrue(any(r['status']=='aborted' for r in self.app.store.all()))
