@@ -10,6 +10,15 @@ from .presentation import presentation_mode, presentation_instruction, render_so
 class Cancelled(Exception):pass
 class Unsupported(Exception):pass
 
+SEED_STRIDE=0x9E3779B1
+UINT32_MASK=0xFFFFFFFF
+
+def repetition_seed(base_seed,repetition):
+    """Distinct deterministic uint32 seed per repetition; repetition zero preserves legacy seed."""
+    if type(base_seed)is not int or not 0<=base_seed<=UINT32_MASK:raise ValueError('Seed must be uint32')
+    if type(repetition)is not int or repetition<0:raise ValueError('Repetition must be a nonnegative integer')
+    return (base_seed + repetition*SEED_STRIDE) & UINT32_MASK
+
 
 def output_schema(output):
     kind=output.get('type','text')
@@ -71,7 +80,7 @@ def evaluate(test,variant,values):
     return result_score
 
 
-def execute(test,variant,backend,cancel=None,on_stage=None):
+def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0):
     """No disk writes. Include all request work in pipeline time; score afterward."""
     from jsonschema import Draft202012Validator
     from jsonschema.exceptions import ValidationError
@@ -99,12 +108,13 @@ def execute(test,variant,backend,cancel=None,on_stage=None):
                 schema=output_schema(step.get('output',{'type':'text'}))
                 prompt=messages(test,step,values,variant)
                 settings={'temperature':0.0,'top_p':1.0,'top_k':0,'min_p':0.0,'seed':42,**step.get('sampling',{})}
+                base_seed=settings['seed'];settings['seed']=repetition_seed(base_seed,repetition)
                 try:call=backend.generate(prompt,settings,schema,cache,cancel)
                 except Exception as exc:
                     partial=getattr(exc,'partial_response',None)
                     if partial is not None:calls.append({'step':step['id'],'messages':prompt,'sampling':settings,**partial})
                     raise
-                calls.append({'step':step['id'],'iteration':iteration,'messages':prompt,'sampling':settings,'schema':schema,**call})
+                calls.append({'step':step['id'],'iteration':iteration,'messages':prompt,'sampling':settings,'base_seed':base_seed,'schema':schema,**call})
                 if call.get('finish_reason')!='stop':raise ValueError('Generation ended without EOS: '+str(call.get('finish_reason')))
                 value=call['text'] if schema is None else parse(call['text'])
                 if schema is not None:Draft202012Validator(schema).validate(value)
@@ -133,4 +143,5 @@ def execute(test,variant,backend,cancel=None,on_stage=None):
             'pipeline_seconds':elapsed,'scoring_seconds':time.perf_counter()-score_started,
             'cache_mode':cache,'cache_verified':cache_valid if cache!='default' else None,
             'measurement_valid':not (cache!='default' and not cache_valid),
-            'state_presentation':presentation_mode(test,variant)}
+            'state_presentation':presentation_mode(test,variant),
+            'repetition':repetition,'sampling_seed_policy':'base_seed_plus_repetition_times_0x9E3779B1_mod_2^32'}

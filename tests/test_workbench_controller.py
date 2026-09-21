@@ -32,6 +32,7 @@ class ControllerTests(unittest.TestCase):
         self.app.run();self.assertEqual(self.app.completed_now,expected)
         records=self.app.store.all();self.assertEqual(len(records),expected)
         self.assertTrue(all(r['simulated'] and r['score']['exact_match'] for r in records))
+        self.assertTrue(all(r['load']['seed_reproducibility']['status']=='simulated' for r in records))
         self.app.run();self.assertEqual(self.app.completed_now,0)
         self.assertEqual(self.app.report['plan']['pending'],0)
         self.assertEqual(self.app.report['plan']['complete'],expected)

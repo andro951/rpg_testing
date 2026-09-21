@@ -24,7 +24,7 @@ class Session:
         self.app,self.report,self.plan=app,report,plan
         self.backend_factory,self.monitor_factory=backend_factory,monitor_factory
         self.id=uuid.uuid4().hex;self.contexts={};self.expansions={};self.loads=[];self.monitor=None
-        self.deferred=[];self.counted=set()
+        self.deferred=[];self.counted=set();self.seed_checks={}
 
     def check_stop(self):
         if self.app.cancel_event.is_set():raise Cancelled('Stopped by user or scheduler')
@@ -84,6 +84,19 @@ class Session:
         self.monitor.start();self.app.monitor=self.monitor
         try:
             data=self.app.backend.load(model,context,self.app.cancel_event,layers=layers,execution_class=mode)
+            seed_key=(mid,mode,str(layers),context.get('allocated_tokens'))
+            if seed_key not in self.seed_checks:
+                self.app.current['stage']='seed_reproducibility_check'
+                try:seed_check=self.app.backend.seed_reproducibility_check(self.app.cancel_event)
+                except Cancelled:raise
+                except Exception as exc:
+                    seed_check={'policy':'seed-reproducibility-v1','status':'error','seed_behavior_verified':False,
+                                'same_seed_exact_match':None,'different_seed_changes_output':None,'error':str(exc)}
+                self.seed_checks[seed_key]=copy.deepcopy(seed_check)
+                self.app.log('seed_check',{'model_id':mid,'mode':mode,'context_tokens':context.get('allocated_tokens'),**seed_check})
+            else:seed_check=copy.deepcopy(self.seed_checks[seed_key])
+            data['seed_reproducibility']=copy.deepcopy(seed_check)
+            self.app.backend.load_metadata['seed_reproducibility']=copy.deepcopy(seed_check)
             entry={'model_id':mid,'pass':phase,'status':'loaded','mode':mode,'requested_layers':layers,'load':copy.deepcopy(data)}
             self.app.current['placement']=data.get('placement');self.loads.append(entry)
             self.app.log('load',entry);self.app.flush_logs()
@@ -114,7 +127,7 @@ class Session:
                     self.app.timing_active=True
                     with self.app.backend.budget(seconds):
                         result=monitored_execute(job['test'],job['variant'],self.app.backend,
-                            self.app.cancel_event,lambda step:self.app.current.update(stage=step),self.monitor)
+                            self.app.cancel_event,lambda step:self.app.current.update(stage=step),self.monitor,job['repetition'])
                     record.update(status='completed',**result);self.app.completed_now+=1
                 except Cancelled as exc:
                     record.update(status='aborted',error='Stopped',partial=getattr(exc,'partial',{}))

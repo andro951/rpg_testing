@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 TIERS = (8, 12, 16, 24, 32, 40, 48, 80)
-ENGINE_VERSION = 'indexed-array-view-1'
+ENGINE_VERSION = 'seeded-repetitions-1'
 
 
 def canonical(value: Any) -> str:
@@ -88,7 +88,7 @@ def code_fingerprint():
     """Only experiment-affecting implementation, not CSS or laptop paths."""
     base=Path(__file__).parent
     return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
-                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py','presentation.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
+                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py','presentation.py','seedcheck.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
 
 
 def experiment_spec(test: dict, variant: dict) -> dict:
@@ -238,8 +238,8 @@ def validate_test(test: dict) -> None:
                     raise ValueError('Invalid sampling range')
                 if type(settings.get('top_k',0)) is not int or settings.get('top_k',0)<0 or not 0<=settings.get('min_p',0)<=1 or settings.get('repeat_penalty',1)<=0:
                     raise ValueError('Invalid sampler parameter')
-                if type(settings.get('seed', 42)) is not int or settings.get('seed', 42) < 0:
-                    raise ValueError('Invalid seed')
+                if type(settings.get('seed', 42)) is not int or not 0 <= settings.get('seed', 42) <= 0xFFFFFFFF:
+                    raise ValueError('Seed must be an unsigned 32-bit integer')
             else:
                 raise ValueError('Unknown step type')
             known.add(sid)

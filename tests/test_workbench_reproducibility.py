@@ -8,6 +8,7 @@ from unittest.mock import patch
 from workbench.controller import Controller
 from workbench.domain import ResultStore, case_id, read_json, digest
 from workbench.analysis import summarize
+from workbench.workflows import execute,repetition_seed
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,6 +27,21 @@ class ReproducibilityTests(unittest.TestCase):
         t = copy.deepcopy(self.test); t['repetitions'] = 5
         self.assertEqual(self.identity(), self.identity(t))
         self.assertNotEqual(self.identity(rep=1), self.identity(rep=0))
+    def test_repetition_seed_schedule_is_distinct_deterministic_and_preserves_rep_zero(self):
+        base=42;seeds=[repetition_seed(base,i) for i in range(100)]
+        self.assertEqual(seeds[0],base);self.assertEqual(len(set(seeds)),100)
+        self.assertEqual(seeds,[repetition_seed(base,i) for i in range(100)])
+    def test_execute_offsets_step_seed_by_repetition(self):
+        class Capture:
+            supports_cache=True;supports_schema=True
+            def clear_cache(self):pass
+            def generate(self,messages,settings,schema,cache='default',cancel=None):
+                self.seed=settings['seed'];return {'text':'[{"op":"replace","path":"/time","value":"14:20"}]','finish_reason':'stop','cached_tokens':0}
+        b=Capture();v=self.test['variants'][0]
+        result=execute(self.test,v,b,repetition=3)
+        expected=repetition_seed(v['steps'][0]['sampling']['seed'],3)
+        self.assertEqual(b.seed,expected);self.assertEqual(result['calls'][0]['base_seed'],42)
+        self.assertEqual(result['calls'][0]['sampling']['seed'],expected)
     def test_neighboring_variant_does_not_invalidate(self):
         t = copy.deepcopy(self.test); t['variants'][1]['steps'][0]['prompt'] = 'different prompt'
         self.assertEqual(self.identity(), self.identity(t))

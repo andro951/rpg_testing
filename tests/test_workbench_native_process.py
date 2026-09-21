@@ -19,6 +19,13 @@ class ProcessTests(unittest.TestCase):
   self.assertEqual(metadata['placement']['status'],'full_gpu');self.assertFalse(metadata['health_exact_ready'])
   r=self.b.generate([{'role':'user','content':'Test'}],{'seed':42,'temperature':0},None)
   self.assertEqual(r['text'],'[]');self.b.unload();self.assertIsNotNone(process.poll())
+ def test_seed_reproducibility_diagnostic(self):
+  self.load();result=self.b.seed_reproducibility_check()
+  self.assertTrue(result['same_seed_exact_match'])
+  self.assertTrue(result['different_seed_changes_output'])
+  self.assertTrue(result['seed_behavior_verified'])
+  self.assertEqual(result['runs'][0]['digest'],result['runs'][1]['digest'])
+  self.assertNotEqual(result['runs'][0]['digest'],result['runs'][2]['digest'])
  def test_detected_cpu_placement_unloads_before_benchmark(self):
   with patch.dict(os.environ,{'STUB_LAYERS':'30/33'}):
    with self.assertRaises(CPUOffload) as cm:self.load()

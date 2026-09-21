@@ -18,7 +18,16 @@ class Handler(BaseHTTPRequestHandler):
   elif self.path.startswith('/slots/0'):self.send({'n_erased':0})
   elif self.path=='/v1/chat/completions':
    self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
-   content='Ready.' if 'READY' in str(body.get('messages')) else '[]'
+   messages=str(body.get('messages'))
+   if 'READY' in messages:content='Ready.'
+   elif 'SEED_REPRODUCIBILITY_CHECK' in messages:
+    seed=body.get('seed',-1)
+    content=('At Observatory '+str(seed)+', Mara found a sealed metal box beneath the broken telescope. '
+             'Wind pushed dust across the floor while she studied symbols scratched into its lid. '
+             'Before she touched the latch, an unexpected visitor named Ivo stepped from the stairwell. '
+             'He claimed the box had been waiting for someone who would choose not to open it. '
+             'Mara carried it outside unopened, and the dead observatory lights flickered behind them.')
+   else:content='[]'
    if 'WAIT_FOREVER' in str(body):time.sleep(10)
    chunks=[{'choices':[{'delta':{'content':content},'finish_reason':None}]},{'choices':[{'delta':{},'finish_reason':'stop'}]}]
    try:

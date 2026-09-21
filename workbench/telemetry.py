@@ -181,11 +181,11 @@ class GpuMonitor:
             self.provider = None
 
 
-def monitored_execute(test, variant, backend, cancel=None, on_stage=None, monitor=None):
+def monitored_execute(test, variant, backend, cancel=None, on_stage=None, monitor=None, repetition=0):
     from .workflows import execute
     if monitor: monitor.begin_case()
     try:
-        result = execute(test, variant, backend, cancel, on_stage)
+        result = execute(test, variant, backend, cancel, on_stage, repetition)
     except Exception as exc:
         if monitor:
             exc.partial = {**getattr(exc, 'partial', {}), 'gpu_memory': monitor.end_case()}

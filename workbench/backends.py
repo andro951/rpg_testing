@@ -99,6 +99,9 @@ class DemoBackend:
     def unload(self):pass
     def cancel(self):pass
     def clear_cache(self):self.counter=0
+    def seed_reproducibility_check(self,cancel=None):
+        from .seedcheck import simulated_seed_check
+        return simulated_seed_check()
     def generate(self,messages,settings,schema,cache='default',cancel=None):
         from .scoring import parse
         if cancel and cancel.is_set():raise Cancelled('Cancelled')

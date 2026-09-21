@@ -172,6 +172,10 @@ class NativeBackend:
             if isinstance(exc,RunFailure):exc.evidence={**self.load_metadata,**exc.evidence}
             self.unload();raise exc
 
+    def seed_reproducibility_check(self,cancel=None):
+        from .seedcheck import run_seed_check
+        return run_seed_check(self,cancel)
+
     def clear_cache(self):
         result=self.transport.request('/slots/0?action=erase',{})
         if type(result.get('n_erased')) is not int:raise Unsupported('Runtime did not confirm prompt-cache erasure')
