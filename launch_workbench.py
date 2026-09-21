@@ -11,6 +11,35 @@ import webbrowser
 from pathlib import Path
 
 
+def current_head(root):
+    try:
+        result=subprocess.run(['git','-C',str(root),'rev-parse','HEAD'],capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=10)
+        return result.stdout.strip() if result.returncode==0 else None
+    except (OSError,subprocess.SubprocessError):return None
+
+
+def reopen_existing_worker(root,args,data):
+    from workbench.backends import Transport
+    keyfile=data/'control.key'
+    if not keyfile.exists():raise RuntimeError('Another worker owns this repository, but its control key is missing.')
+    token=keyfile.read_text().strip();port=8766 if args.demo else 8765
+    def get_state():return Transport(f'http://127.0.0.1:{port}',token,timeout=5).request('/api/state')
+    info=get_state();head=current_head(root);loaded=info.get('process_source_commit')
+    if head and loaded!=head:
+        try:Transport(f'http://127.0.0.1:{port}',token,timeout=5).request('/api/restart',{})
+        except Exception as exc:raise RuntimeError('An older Workbench is still running. Close it once, then start Workbench again.') from exc
+        import time
+        deadline=time.monotonic()+20
+        while time.monotonic()<deadline:
+            time.sleep(.25)
+            try:
+                if get_state().get('process_source_commit')==head:break
+            except Exception:continue
+        else:raise RuntimeError('Workbench update was pulled, but the older worker did not restart. Close it once, then start Workbench again.')
+    if not args.no_browser:webbrowser.open(f'http://127.0.0.1:{port}/#key={token}')
+    return 0
+
+
 def child(root,args):
     from workbench.locking import HostLock, WorkerBusy
     data=root/'.local'/('demo' if args.demo else 'workbench')
@@ -38,13 +67,7 @@ def child(root,args):
             from workbench.server import serve
             return serve(root,demo=args.demo,port=8766 if args.demo else 8765,open_browser=not args.no_browser)
     except WorkerBusy:
-        keyfile=data/'control.key'
-        if not args.batch and keyfile.exists():
-            from workbench.backends import Transport
-            token=keyfile.read_text().strip();port=8766 if args.demo else 8765
-            Transport(f'http://127.0.0.1:{port}',token,timeout=5).request('/api/state')
-            if not args.no_browser:webbrowser.open(f'http://127.0.0.1:{port}/#key={token}')
-            return 0
+        if not args.batch:return reopen_existing_worker(root,args,data)
         raise
 
 
