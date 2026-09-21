@@ -9,6 +9,7 @@ import shutil
 import sys
 import tempfile
 import threading
+from unittest.mock import patch
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from workbench.controller import Controller
@@ -30,7 +31,7 @@ def main():
         server=WorkbenchServer(('127.0.0.1',0),app,'browser-test-key')
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
-            with sync_playwright() as p:
+            with patch('workbench.server.select_directory',return_value=str(project)),sync_playwright() as p:
                 executable=os.environ.get('CHROME_PATH') or shutil.which('chromium') or shutil.which('google-chrome')
                 kwargs={'executable_path':executable} if executable else {}
                 browser=p.chromium.launch(headless=True,args=['--no-sandbox'],**kwargs)
@@ -93,7 +94,10 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 with page.expect_download() as info:page.locator('#export').click()
                 assert info.value.suggested_filename.endswith('.zip')
                 page.locator('nav button[data-page="setup"]').click();page.locator('#browse-models').click()
-                expect(page.locator('#browser')).to_be_visible();page.locator('#browser .close-dialog').click()
+                expect(page.locator('#page-models')).to_be_visible(timeout=5000)
+                expect(page.locator('#alert')).not_to_be_visible()
+                expect(page.locator('#model-root')).to_have_value(str(project.resolve()))
+                page.locator('nav button[data-page="setup"]').click()
                 page.locator('#model-root').fill('/example/unsaved-model-folder')
                 page.locator('nav button[data-page="overview"]').click();page.wait_for_timeout(1500)
                 page.locator('nav button[data-page="setup"]').click()
@@ -104,7 +108,7 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'Horizontal overflow'
                 assert not errors,errors
                 browser.close()
-                print(('LOCAL HTTP BRIDGE; browser networking not exercised. ' if bridge else '')+'PASS: browser pairing, preflight, run, resume, deletion/rerun, models, stable dropdown, cached workflow import, export, host browsing, pairing display and responsive layout.')
+                print(('LOCAL HTTP BRIDGE; browser networking not exercised. ' if bridge else '')+'PASS: browser pairing, preflight, run, resume, deletion/rerun, models, stable dropdown, cached workflow import, export, native folder picker, nonblocking model scan, pairing display and responsive layout.')
         finally:
             app.control('stop')
             if app.thread:app.thread.join(5)

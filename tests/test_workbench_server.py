@@ -79,10 +79,24 @@ class ServerTests(unittest.TestCase):
     def test_import_example_and_prevent_overwrite(self):
         self.assertEqual(self.req('/api/test/import-example',{'id':'cached_questions'})[0],200)
         self.assertEqual(self.req('/api/test/import-example',{'id':'cached_questions'})[0],400)
-    def test_browse_is_host_side(self):
-        from urllib.parse import quote
-        status,body,_=self.req('/api/browse?path='+quote(str(self.root)))
+    def test_native_model_folder_picker_returns_host_path(self):
+        from unittest.mock import patch
+        with patch('workbench.server.select_directory',return_value=str(self.root)):
+            status,body,_=self.req('/api/picker/models',{'initial':''})
         self.assertEqual(status,200);self.assertEqual(Path(json.loads(body)['path']).resolve(),self.root.resolve())
+    def test_native_picker_is_not_opened_during_active_operation(self):
+        from unittest.mock import patch
+        self.app.operation.acquire()
+        try:
+            with patch('workbench.server.select_directory') as picker:
+                self.assertEqual(self.req('/api/picker/models',{'initial':''})[0],409)
+                picker.assert_not_called()
+        finally:self.app.operation.release()
+    def test_native_picker_cancel_is_not_an_error(self):
+        from unittest.mock import patch
+        with patch('workbench.server.select_directory',return_value=None):
+            status,body,_=self.req('/api/picker/models',{'initial':''})
+        self.assertEqual(status,200);self.assertTrue(json.loads(body)['cancelled'])
     def test_pairing_requires_existing_auth(self):
         self.assertEqual(self.req('/api/pairing-key',auth=False)[0],403)
         self.assertEqual(json.loads(self.req('/api/pairing-key')[1])['key'],'testing-key')

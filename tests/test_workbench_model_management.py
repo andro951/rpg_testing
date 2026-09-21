@@ -42,6 +42,8 @@ class ModelManagementTests(unittest.TestCase):
         self.assertEqual(app.settings['model_root'],'');self.assertEqual(app.settings['backend'],'llamacpp')
     def test_selected_empty_folder_needs_confirmation_and_persists(self):
         self.app.configure({'model_root':str(self.models)})
+        self.assertFalse(self.app.folder_scanned)
+        self.app.scan_folder()
         self.assertTrue(self.app.folder_scanned);self.assertEqual(self.app.last_models,[])
         self.assertNotEqual(self.app.settings['confirmed_empty_folder'],str(self.models))
         self.app.configure({'confirmed_empty_folder':str(self.models)})
@@ -60,9 +62,15 @@ class ModelManagementTests(unittest.TestCase):
     def test_existing_model_is_discovered_without_copy(self):
         path=self.models/'existing.gguf';path.write_bytes(DATA)
         self.app.configure({'model_root':str(self.models)})
+        self.app.scan_folder()
         self.assertEqual(len(self.app.last_models),1)
         self.assertEqual([Path(p).resolve() for p in self.app.last_models[0]['paths']],[path.resolve()])
         self.assertEqual(list(self.root.rglob('*.gguf')),[])
+    def test_saving_model_root_does_not_hold_settings_request_for_scan(self):
+        with patch.object(self.app,'scan_folder',side_effect=AssertionError('scan must be separate')):
+            self.app.configure({'model_root':str(self.models)})
+        self.assertEqual(self.app.settings['model_root'],str(self.models.resolve()))
+        self.assertFalse(self.app.folder_scanned)
     def test_manager_download_requires_folder(self):
         self.app.hub_detail=self.selection()
         with patch('workbench.downloads.download_model') as fn:

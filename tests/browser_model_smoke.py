@@ -11,6 +11,7 @@ import struct
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from unittest.mock import patch
@@ -36,6 +37,11 @@ def main():
         shutil.copytree(root/'test_specs',project/'test_specs');shutil.copytree(root/'examples',project/'examples')
         write_json(project/'models.json',[])
         app=Controller(project);app.selftest=lambda:None;app.configure({'sync_source':False})
+        real_scan=app.scan_folder
+        def slow_scan():
+            time.sleep(.75)
+            return real_scan()
+        app.scan_folder=slow_scan
         server=WorkbenchServer(('127.0.0.1',0),app,'model-browser-key')
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         def opener(*args,**kwargs):
@@ -53,7 +59,8 @@ def main():
                  patch('workbench.downloads.download_model',side_effect=fixture_download), \
                  patch('workbench.runtimes.RuntimeClient.releases',return_value=[release]), \
                  patch('workbench.runtimes.install',side_effect=fixture_runtime), \
-                 patch('workbench.native.capabilities',return_value={'version':'TEST FIXTURE'}),sync_playwright() as p:
+                 patch('workbench.native.capabilities',return_value={'version':'TEST FIXTURE'}), \
+                 patch('workbench.server.select_directory',return_value=str(models)),sync_playwright() as p:
                 exe=os.environ.get('CHROME_PATH') or shutil.which('chromium') or shutil.which('google-chrome')
                 browser=p.chromium.launch(headless=True,args=['--no-sandbox'],**({'executable_path':exe} if exe else {}))
                 page=browser.new_page(viewport={'width':1440,'height':1000});errors=[]
@@ -77,10 +84,12 @@ window.fetch=async(path,options={})=>{const r=await window.workerBridge(path,opt
                 else:page.goto(base+'/#key=model-browser-key')
                 expect(page.locator('#folder-onboarding')).to_be_visible()
                 assert app.settings['model_root']==''
-                page.locator('#onboarding-choose').click();expect(page.locator('#browser')).to_be_visible()
-                page.locator('#browse-path').fill(str(models));page.locator('#browse-go').click()
-                expect(page.locator('#browse-path')).to_have_value(str(models))
-                page.locator('#choose-folder').click();expect(page.locator('#empty-folder')).to_be_visible(timeout=10000)
+                page.locator('#onboarding-choose').click()
+                expect(page.locator('#page-models')).to_be_visible(timeout=5000)
+                expect(page.locator('#state-badge')).to_have_text('SCANNING',timeout=3000)
+                expect(page.locator('#alert')).not_to_be_visible()
+                expect(page.locator('#empty-folder')).to_be_visible(timeout=10000)
+                expect(page.locator('#model-root')).to_have_value(str(models.resolve()))
                 assert list(models.iterdir())==[], 'Selecting a folder must not trigger any download'
                 page.locator('#accept-empty').click();expect(page.locator('#empty-folder')).not_to_be_visible()
                 page.locator('#hub-query').fill('Example model');page.locator('#hub-search').click()
@@ -111,7 +120,7 @@ window.fetch=async(path,options={})=>{const r=await window.workerBridge(path,opt
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
                 assert not errors,errors
                 browser.close()
-                print('PASS: real browser + authenticated controller: folder consent, empty confirmation, Hub search, quant selection, verified fixture download to chosen folder, installed models, explicit runtime installation. External services are fixture-backed, not live downloads.')
+                print('PASS: real browser + authenticated controller: native folder picker, nonblocking scan, empty confirmation, Hub search, quant selection, verified fixture download to chosen folder, installed models, explicit runtime installation. External services are fixture-backed, not live downloads.')
         finally:
             app.control('stop')
             if app.thread:app.thread.join(5)
