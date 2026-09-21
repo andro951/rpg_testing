@@ -235,10 +235,12 @@ class Controller(ModelManager):
         models=self.catalog();existing=next((m for m in models if m['id']==mid),None)
         if existing is None:
             existing={'id':safe_id(mid),'base_model':item['name'],'files':item['files'],'quantization':item['quantization']};models.append(existing)
-        existing.update(required_vram_gb=tier,vram_status='user_assigned_unverified',sha256=self.fingerprint(item))
+        # VRAM assignment is metadata-only. Never hash multi-GB weights here: hashing belongs
+        # in explicit preflight, where long-running validation is expected and visible.
+        existing.update(required_vram_gb=tier,vram_status='user_assigned_unverified')
         validate_catalog(models);write_json(self.root/'models.json',models);self.report=None
-        # Keep the already-discovered card in sync with the catalog immediately. Assignment
-        # must not require a rescan or preflight just to display what the user selected.
+        # Keep the already-discovered card in sync immediately. A later preflight fingerprints
+        # the artifact and persists sha256 before benchmark planning/execution.
         item.update(required_vram_gb=tier,vram_status='user_assigned_unverified',
                     catalogued=True,catalog=copy.deepcopy(existing))
         self.message='Assigned '+mid+' to '+str(tier)+' GB. Run preflight when you are ready.'

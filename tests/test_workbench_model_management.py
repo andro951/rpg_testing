@@ -71,6 +71,19 @@ class ModelManagementTests(unittest.TestCase):
             self.app.configure({'model_root':str(self.models)})
         self.assertEqual(self.app.settings['model_root'],str(self.models.resolve()))
         self.assertFalse(self.app.folder_scanned)
+    def test_vram_assignment_never_hashes_model_weights(self):
+        for name in ('Alpha-Q4_K_M.gguf','Beta-Q4_K_M.gguf'):
+            (self.models/name).write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        first,second=self.app.last_models
+        with patch.object(self.app,'fingerprint',side_effect=AssertionError('VRAM assignment must not hash weights')):
+            self.app.assign_model(first['id'],8)
+            self.app.assign_model(second['id'],12)
+        self.assertEqual(first['required_vram_gb'],8)
+        self.assertEqual(second['required_vram_gb'],12)
+        saved={m['id']:m['required_vram_gb'] for m in self.app.catalog()}
+        self.assertEqual(saved,{first['id']:8,second['id']:12})
+
     def test_vram_assignment_updates_one_discovered_model_immediately(self):
         for name in ('Alpha-Q4_K_M.gguf','Beta-Q4_K_M.gguf'):
             (self.models/name).write_bytes(DATA)
