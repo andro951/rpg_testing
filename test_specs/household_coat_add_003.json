@@ -1,0 +1,270 @@
+{
+  "schema_version": 2,
+  "id": "household_coat_add_003",
+  "name": "Household clothing: put on coat",
+  "description": "Third real general state-update benchmark and mirror of test 002. The conversation names a brown leather coat before Evan puts it on; the only justified tracked change is appending that item to his clothing list.",
+  "provenance": {
+    "scenario": "Synthetic household state and conversation",
+    "note": "All people, employers, household details, and events are fictional benchmark data."
+  },
+  "workflow": "steps",
+  "repetitions": 1,
+  "source": {
+    "initial_state": {
+      "household": {
+        "household_id": "HARPER-001",
+        "home_profile": {
+          "city": "Hartford",
+          "state": "Connecticut",
+          "residence_type": "single-family home",
+          "pets": [
+            "Milo the cat"
+          ],
+          "primary_vehicle": "2019 Subaru Outback",
+          "usual_weekday_dinner_time": "18:30"
+        },
+        "members": {
+          "evan_harper": {
+            "full_name": "Evan Harper",
+            "age": 36,
+            "household_role": "husband",
+            "occupation": "civil engineer",
+            "employer": "North River Engineering",
+            "work_days": [
+              "Monday",
+              "Tuesday",
+              "Wednesday",
+              "Thursday",
+              "Friday"
+            ],
+            "phone_model": "Google Pixel 9",
+            "clothing": [
+              "white oxford shirt",
+              "charcoal wool trousers",
+              "brown leather belt",
+              "dark brown dress shoes"
+            ],
+            "carried_items": [
+              "wallet",
+              "house keys",
+              "phone"
+            ]
+          },
+          "laura_harper": {
+            "full_name": "Laura Harper",
+            "age": 35,
+            "household_role": "wife",
+            "occupation": "middle school science teacher",
+            "employer": "Riverview Middle School",
+            "phone_model": "iPhone 16",
+            "clothing": [
+              "green cardigan",
+              "black blouse",
+              "dark jeans",
+              "white sneakers"
+            ],
+            "carried_items": [
+              "phone"
+            ]
+          }
+        },
+        "relationship": {
+          "marital_status": "married",
+          "anniversary_month": "June"
+        }
+      }
+    },
+    "new_information": "It is a weekday morning and Evan Harper is getting ready to leave for work while talking with Laura near the entryway. Evan looks at the coat rack, where his brown leather coat is hanging. Laura says, \"It looks colder than yesterday.\" Evan tells her he should still be home around 5:30, and they talk for another moment about dinner. Before leaving, Evan takes the coat from the rack and puts it on over his shirt. He walks out through the front door, locks it behind him with his house key, and heads to work, still carrying his wallet, house keys, and phone. No tracked household or personal fact changes other than what Evan is currently wearing."
+  },
+  "expected_state": {
+    "household": {
+      "household_id": "HARPER-001",
+      "home_profile": {
+        "city": "Hartford",
+        "state": "Connecticut",
+        "residence_type": "single-family home",
+        "pets": [
+          "Milo the cat"
+        ],
+        "primary_vehicle": "2019 Subaru Outback",
+        "usual_weekday_dinner_time": "18:30"
+      },
+      "members": {
+        "evan_harper": {
+          "full_name": "Evan Harper",
+          "age": 36,
+          "household_role": "husband",
+          "occupation": "civil engineer",
+          "employer": "North River Engineering",
+          "work_days": [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday"
+          ],
+          "phone_model": "Google Pixel 9",
+          "clothing": [
+            "white oxford shirt",
+            "charcoal wool trousers",
+            "brown leather belt",
+            "dark brown dress shoes",
+            "brown leather coat"
+          ],
+          "carried_items": [
+            "wallet",
+            "house keys",
+            "phone"
+          ]
+        },
+        "laura_harper": {
+          "full_name": "Laura Harper",
+          "age": 35,
+          "household_role": "wife",
+          "occupation": "middle school science teacher",
+          "employer": "Riverview Middle School",
+          "phone_model": "iPhone 16",
+          "clothing": [
+            "green cardigan",
+            "black blouse",
+            "dark jeans",
+            "white sneakers"
+          ],
+          "carried_items": [
+            "phone"
+          ]
+        }
+      },
+      "relationship": {
+        "marital_status": "married",
+        "anniversary_month": "June"
+      }
+    }
+  },
+  "variants": [
+    {
+      "id": "direct_json_patch",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch"
+      }
+    },
+    {
+      "id": "analyze_json_patch",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "analysis",
+          "type": "generate",
+          "prompt": "Identify only state fields that are established to have changed. Distinguish completed actions from dialogue, discussion, plans, implications, movement that is not represented in the tracked state, and unchanged facts. Do not generate JSON yet.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        },
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the established state changes. Preserve all unchanged fields. Check the earlier analysis against the original evidence. To append an array item use add and /- at the end of the path. No markdown.",
+          "uses": [
+            "analysis"
+          ],
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch"
+      }
+    },
+    {
+      "id": "direct_semantic",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only a JSON array of semantic operations for exactly the established changes. Each operation has op, path, value. Use set to replace an existing scalar value, list_add to append one list item, and list_remove to remove one uniquely matching item. Preserve every unchanged field. No markdown.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "semantic"
+      }
+    },
+    {
+      "id": "analyze_semantic",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "analysis",
+          "type": "generate",
+          "prompt": "Identify only state fields that are established to have changed. Distinguish completed actions from dialogue, discussion, plans, implications, movement that is not represented in the tracked state, and unchanged facts. Do not generate JSON yet.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        },
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only a JSON array of semantic operations for exactly the established changes. Each operation has op, path, value. Use set, list_add, or list_remove as appropriate. Preserve all unchanged fields and check the earlier analysis against the original evidence. No markdown.",
+          "uses": [
+            "analysis"
+          ],
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "semantic"
+      }
+    }
+  ]
+}

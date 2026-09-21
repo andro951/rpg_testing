@@ -106,16 +106,26 @@ class DemoBackend:
         source=parse(messages[1]['content'].split('\nSOURCE\n',1)[1])
         instruction=messages[-1]['content'];event=source.get('new_information','')
         is_inventory='A2667' in event and 'received' in event.lower() and 'shipped' in event.lower()
-        is_time='minutes' in event and not is_inventory
+        lower_event=event.lower()
+        is_coat_remove='takes off his coat and hangs it on the hook' in lower_event
+        is_coat_add='brown leather coat is hanging' in lower_event and 'puts it on over his shirt' in lower_event
+        is_time='minutes' in event and not is_inventory and not is_coat_remove and not is_coat_add
         if schema and schema.get('type')=='boolean':
             text='true' if ('time' in instruction.lower() and is_time) or 'correct' in instruction.lower() else 'false'
         elif schema and schema.get('type')=='string':text='"14:20"'
         elif 'Describe' in instruction:
-            text='On-hand inventory changes from 42 to 49 units. Product metadata, reservations, reorder point, units on order, backorder status, supplier, bin location, and lifecycle status do not change.' if is_inventory else ('The time changes to 14:20.' if is_time else 'Tom adds a green jacket and does not move.')
+            if is_inventory:text='On-hand inventory changes from 42 to 49 units. Product metadata, reservations, reorder point, units on order, backorder status, supplier, bin location, and lifecycle status do not change.'
+            elif is_coat_remove:text="Evan removes the brown leather coat from his current clothing. His other tracked fields and Laura's state do not change."
+            elif is_coat_add:text="Evan adds the brown leather coat to his current clothing. His other tracked fields and Laura's state do not change."
+            else:text='The time changes to 14:20.' if is_time else 'Tom adds a green jacket and does not move.'
         elif 'narrat' in instruction.lower():text='Tom waits in the kitchen. Exactly five minutes pass. The clock now reads 14:20.'
         else:
             semantic='list_add' in instruction or 'semantic' in instruction
-            patch=([{'op':'set' if semantic else 'replace','path':'/inventory/on_hand_units','value':49}] if is_inventory else ([{'op':'set' if semantic else 'replace','path':'/time','value':'14:20'}] if is_time else [{'op':'list_add' if semantic else 'add','path':'/characters/Tom/clothing'+('' if semantic else '/-'),'value':'green jacket'}]))
+            if is_inventory:patch=[{'op':'set' if semantic else 'replace','path':'/inventory/on_hand_units','value':49}]
+            elif is_coat_remove:patch=([{'op':'list_remove','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'remove','path':'/household/members/evan_harper/clothing/4'}])
+            elif is_coat_add:patch=([{'op':'list_add','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'add','path':'/household/members/evan_harper/clothing/-','value':'brown leather coat'}])
+            elif is_time:patch=[{'op':'set' if semantic else 'replace','path':'/time','value':'14:20'}]
+            else:patch=[{'op':'list_add' if semantic else 'add','path':'/characters/Tom/clothing'+('' if semantic else '/-'),'value':'green jacket'}]
             text=canonical(patch)
         return {'text':text,'finish_reason':'stop','request_seconds':.02,'first_token_seconds':.01,
                 'usage':{},'timings':{},'cached_tokens':1024 if cache=='on' and self.counter>1 else 0,
