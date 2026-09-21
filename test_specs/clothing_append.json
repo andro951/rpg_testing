@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "id": "clothing_append",
+  "name": "Add a jacket; do not move",
+  "workflow": "steps",
+  "repetitions": 1,
+  "source": {
+    "initial_state": {"time":"14:15","location":"Kitchen","characters":{"Tom":{"location":"Kitchen","clothing":["blue shirt","jeans"],"mood":"annoyed"},"Susie":{"location":"Bedroom","clothing":["red dress"],"mood":"happy"}},"doorLocked":true,"playerHasKey":false},
+    "new_information": "Tom puts a green jacket over his blue shirt and keeps his jeans. He says he would like to go outside but stays in the kitchen. No tracked time passes. Nothing else changes."
+  },
+  "expected_state": {"time":"14:15","location":"Kitchen","characters":{"Tom":{"location":"Kitchen","clothing":["blue shirt","jeans","green jacket"],"mood":"annoyed"},"Susie":{"location":"Bedroom","clothing":["red dress"],"mood":"happy"}},"doorLocked":true,"playerHasKey":false},
+  "variants": [
+    {"id":"direct_json_patch","cache":"default","steps":[{"id":"patch","type":"generate","prompt":"Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.","output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42}}],"result":{"step":"patch","representation":"json_patch"}},
+    {"id":"analyze_json_patch","cache":"default","steps":[{"id":"analysis","type":"generate","prompt":"Describe the established state changes concisely. Do not generate JSON yet.","output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42}},{"id":"patch","type":"generate","prompt":"Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown. Check the earlier analysis against the original evidence.","uses":["analysis"],"output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42}}],"result":{"step":"patch","representation":"json_patch"}},
+    {"id":"direct_semantic","cache":"default","steps":[{"id":"patch","type":"generate","prompt":"Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown.","output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42}}],"result":{"step":"patch","representation":"semantic"}},
+    {"id":"analyze_semantic","cache":"default","steps":[{"id":"analysis","type":"generate","prompt":"Describe the established state changes concisely. Do not generate JSON yet.","output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42}},{"id":"patch","type":"generate","prompt":"Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown. Check the earlier analysis against the original evidence.","uses":["analysis"],"output":{"type":"text"},"sampling":{"temperature":0,"top_p":1,"seed":42}}],"result":{"step":"patch","representation":"semantic"}}
+  ]
+}
