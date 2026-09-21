@@ -98,7 +98,8 @@ class ControllerTests(unittest.TestCase):
         with patch('workbench.demo_native.DemoNative',Broken):self.app.run()
         records=self.app.store.all();self.assertEqual(len(records),configured_case_count(self.root/'test_specs'))
         self.assertTrue(all(r['status']=='completed' and not r['score']['valid'] for r in records))
-    def test_pins_from_results_no_weights(self):
+    def test_artifact_identity_from_results_needs_no_weights(self):
         self.app.run();m={'id':'demo-2b','files':['demo.gguf']}
-        self.assertEqual(self.app.with_known_pins([m])[0]['sha256'],{'demo.gguf':'a'*64})
+        identity=self.app.with_known_artifacts([m])[0]['artifact_identity']
+        self.assertEqual(identity['files'][0]['name'],'demo.gguf');self.assertEqual(identity['sha256'],{'demo.gguf':'a'*64})
 if __name__=='__main__':unittest.main()
