@@ -1,7 +1,7 @@
 import json
 import unittest
 from pathlib import Path
-from workbench.domain import read_json,validate_test,load_tests
+from workbench.domain import read_json,validate_test,load_tests as load_workflow_specs
 from workbench.presentation import indexed_arrays,render_source,presentation_mode
 from workbench.workflows import messages,evaluate,execute
 from workbench.backends import DemoBackend
@@ -47,7 +47,7 @@ class StatePresentationTests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_test(test)
 
     def test_every_enabled_fixture_demo_path_is_exact(self):
-        for test in load_tests(ROOT/'test_specs'):
+        for test in load_workflow_specs(ROOT/'test_specs'):
             for variant in test['variants']:
                 if not variant.get('enabled',True):continue
                 with self.subTest(test=test['id'],variant=variant['id']):
