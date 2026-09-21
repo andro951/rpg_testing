@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 TIERS = (8, 12, 16, 24, 32, 40, 48, 80)
-ENGINE_VERSION = 'workflows-2'
+ENGINE_VERSION = 'workflows-3'
 
 
 def canonical(value: Any) -> str:
@@ -32,7 +32,7 @@ def read_json(path: Path) -> Any:
     def bad(value):
         raise ValueError(f'Invalid JSON number: {value}')
     result = json.loads(path.read_text(encoding='utf-8-sig'), object_pairs_hook=pairs, parse_constant=bad)
-    canonical(result)  # Reject overflowing floats as well as NaN/Infinity literals.
+    canonical(result)
     return result
 
 
@@ -83,9 +83,15 @@ def recommend_vram(size_bytes: int) -> int | None:
     return next((tier for tier in TIERS if tier >= needed), None)
 
 
+def code_fingerprint():
+    """Only experiment-affecting implementation, not CSS or laptop paths."""
+    base=Path(__file__).parent
+    return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
+                   for name in ('workflows.py','scoring.py','backends.py')})
+
+
 def case_id(model: dict, test: dict, variant: dict, repetition: int, target: dict) -> str:
-    # Hostname, free memory, timestamps, paths and UI-only changes must not rerun cases.
-    identity = {'engine': ENGINE_VERSION, 'model': model['id'],
+    identity = {'engine': ENGINE_VERSION, 'workflow_code':code_fingerprint(), 'model': model['id'],
                 'artifact_pin': model.get('sha256', {}), 'test': test, 'variant': variant,
                 'repetition': repetition, 'target': target}
     return digest(identity)
@@ -134,6 +140,17 @@ class ResultStore:
         return [self.read(p) for p in sorted(self.root.glob('*/*.json'))]
 
 
+def local_schema(schema):
+    """Never resolve network/file references from a test definition."""
+    if isinstance(schema,dict):
+        for key,value in schema.items():
+            if key in ('$ref','$dynamicRef') and (not isinstance(value,str) or not value.startswith('#')):
+                raise ValueError('JSON schemas must use local # references only')
+            local_schema(value)
+    elif isinstance(schema,list):
+        for item in schema:local_schema(item)
+
+
 def validate_test(test: dict) -> None:
     from jsonschema import Draft202012Validator
     safe_id(test['id'])
@@ -150,6 +167,7 @@ def validate_test(test: dict) -> None:
         raise ValueError('Ground truth must not be placed in source')
     schema = test.get('state_schema')
     if schema:
+        local_schema(schema)
         Draft202012Validator.check_schema(schema)
         validator = Draft202012Validator(schema)
         validator.validate(test['source']['initial_state'])
@@ -161,14 +179,18 @@ def validate_test(test: dict) -> None:
             raise ValueError('Workflow needs steps')
         local = set()
         for s in items:
+            if set(s) - {'id','type','prompt','output','sampling','uses','when','assign','steps','max_iterations','until'}:
+                raise ValueError('Unknown step setting; context/output limits are automatic')
             sid = safe_id(s['id'])
-            if sid in local:
+            if sid in local or sid in known:
                 raise ValueError('Duplicate step ID')
             local.add(sid)
             when = s.get('when')
             if when and (when.get('step') not in known or 'equals' not in when):
                 raise ValueError('Condition references an unavailable step')
             if s.get('type') == 'loop':
+                if not isinstance(s.get('until'), dict) or 'equals' not in s['until']:
+                    raise ValueError('A loop requires an explicit until condition')
                 if type(s.get('max_iterations')) is not int or not 1 <= s['max_iterations'] <= 10:
                     raise ValueError('Loops require 1..10 iterations')
                 steps(s['steps'], known)
@@ -185,6 +207,7 @@ def validate_test(test: dict) -> None:
                 if output.get('type') == 'enum' and not output.get('values'):
                     raise ValueError('Enum requires choices')
                 if 'schema' in output:
+                    local_schema(output['schema'])
                     Draft202012Validator.check_schema(output['schema'])
                 settings = s.get('sampling', {})
                 if set(settings) - {'temperature', 'top_p', 'top_k', 'min_p', 'seed', 'repeat_penalty'}:
@@ -194,11 +217,16 @@ def validate_test(test: dict) -> None:
                         raise ValueError('Sampling settings must be finite numbers')
                 if settings.get('temperature', 0) < 0 or not 0 < settings.get('top_p', 1) <= 1:
                     raise ValueError('Invalid sampling range')
+                if type(settings.get('top_k',0)) is not int or settings.get('top_k',0)<0 or not 0<=settings.get('min_p',0)<=1 or settings.get('repeat_penalty',1)<=0:
+                    raise ValueError('Invalid sampler parameter')
                 if type(settings.get('seed', 42)) is not int or settings.get('seed', 42) < 0:
                     raise ValueError('Invalid seed')
             else:
                 raise ValueError('Unknown step type')
             known.add(sid)
+            if s.get('assign'):
+                if s['assign'] not in known:
+                    raise ValueError('assign can only replace an existing step output')
     for variant in test['variants']:
         safe_id(variant['id'])
         if variant['id'] in variants:
