@@ -65,6 +65,7 @@ class Controller(ModelManager):
         self.started=None;self.finished=None;self.publisher=None;self.last_publish=0;self.version_cache=None
         self.selftest_digest=None;self.verified_fingerprints={};self.on_shutdown=None;self.remote_info=None
         for name in ('results','logs'):(self.data/name).mkdir(exist_ok=True)
+        self.process_source_commit=self.source_commit()
         self.log('startup','Workbench started'+(' in SIMULATED DEMO mode' if demo else ''))
     def log(self,category,message):
         text=str(message)
@@ -290,7 +291,8 @@ class Controller(ModelManager):
                     'folder_scanned':self.folder_scanned,'restart_required':self.restart_required,
                     'settings':{k:v for k,v in self.settings.items() if not k.endswith(('token','secret'))},
                     'has_hf_token':bool(self.settings.get('hf_token')),'logs':copy.deepcopy(self.logs[-300:]),
-                    'remote':self.remote_info,'started_at':self.started,'finished_at':self.finished}
+                    'remote':self.remote_info,'started_at':self.started,'finished_at':self.finished,
+                    'process_source_commit':self.process_source_commit}
     @exclusive_edit
     def result_records(self):
         records=[]

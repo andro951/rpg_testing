@@ -25,6 +25,12 @@ class WorkbenchServer(ThreadingHTTPServer):
         if not host.is_loopback and host not in ipaddress.ip_network('100.64.0.0/10'):
             raise ValueError('Control server must bind to loopback or a Tailscale IPv4 address')
         self.app=app;self.token=token;self.remote_server=None;self.exit_requested=False;self.owner=self;self.update_coordinator=None
+        webroot=Path(__file__).parent/'web'
+        self.static_assets={
+            '/':(webroot/'index.html').read_bytes(),
+            '/app.js':(webroot/'app.js').read_bytes(),
+            '/style.css':(webroot/'style.css').read_bytes(),
+        }
         super().__init__(address,Handler)
     def enable_remote(self):
         if self.owner is not self:return self.owner.enable_remote()
@@ -82,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
             if path in ('/','/app.js','/style.css'):
                 name={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}[path]
                 kind={'/':'text/html; charset=utf-8','/app.js':'application/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[path]
-                return self.send(200,(Path(__file__).parent/'web'/name).read_bytes(),kind)
+                return self.send(200,self.server.static_assets[path],kind)
             self.authorize()
             if path=='/api/state':return self.send(200,app.snapshot())
             if path=='/api/results':return self.send(200,app.result_records())
