@@ -25,17 +25,23 @@ class ModelManagementTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.base=Path(self.temp.name);self.root=self.base/'repository';self.root.mkdir()
         self.models=self.base/'chosen-models';self.models.mkdir()
-        write_json(self.root/'models.json',[])
         self.app=Controller(self.root);self.app.configure({'sync_source':False})
     def selection(self):
         return group_variants({'id':'publisher/example','sha':'a'*40,'siblings':[{
             'rfilename':'Model-Q4_K_M.gguf','size':len(DATA),
             'lfs':{'sha256':hashlib.sha256(DATA).hexdigest(),'size':len(DATA)}}]},8)
     def test_first_launch_has_no_model_root_or_autodiscovery(self):
+        self.assertFalse((self.root/'models.json').exists());self.assertEqual(self.app.catalog(),[])
         self.assertEqual(self.app.settings['model_root'],'')
         self.assertIsNone(self.app.folder_info()['path'])
         self.assertFalse(self.app.folder_scanned)
         self.assertFalse((self.root/'models').exists())
+    def test_first_assignment_creates_machine_local_catalog(self):
+        (self.models/'Local-Q4_K_M.gguf').write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        self.assertEqual(len(self.app.last_models),1);self.assertFalse((self.root/'models.json').exists())
+        self.app.assign_model(self.app.last_models[0]['id'],8)
+        self.assertTrue((self.root/'models.json').is_file());self.assertEqual(len(self.app.catalog()),1)
     def test_old_settings_do_not_implicitly_authorize_directory(self):
         write_json(self.app.settings_path,{'backend':'lmstudio','model_root':str(self.models),'confirmed_empty_folder':str(self.models)})
         app=Controller(self.root)

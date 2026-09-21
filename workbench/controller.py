@@ -102,7 +102,9 @@ class Controller(ModelManager):
             with self.lock:del self.pending_logs[:len(items)]
     def catalog(self):
         if self.demo:return [{'id':'demo-2b','base_model':'SIMULATED','files':['demo.gguf'],'quantization':'SIMULATED','required_vram_gb':8,'sha256':{'demo.gguf':'a'*64}}]
-        models=read_json(self.root/'models.json');validate_catalog(models);return models
+        path=self.root/'models.json'
+        if not path.exists():return []
+        models=read_json(path);validate_catalog(models);return models
     def demo_models(self):
         return [{'id':'demo-2b','name':'Simulated 2B fixture model','files':['demo.gguf'],'paths':[],
                  'size_bytes':2*1024**3,'quantization':'SIMULATED','required_vram_gb':8,'recommended_vram_gb':8,
@@ -152,7 +154,7 @@ class Controller(ModelManager):
         from .gitops import inspect
         try:
             info=inspect(self.root)
-            if info['dirty']:return [preflight.issue('git_dirty','The source checkout has changes. Save catalog/test edits or resolve unrelated edits first.','Save and push catalog and test edits',{'type':'save_configuration'})]
+            if info['dirty']:return [preflight.issue('git_dirty','The source checkout has changes. Save test edits or resolve unrelated edits first.','Save and push test edits',{'type':'save_configuration'})]
         except Exception as exc:return [preflight.issue('git',str(exc)+' Use a Git clone for automatic sync, or disable Git in Worker setup.','Open Worker setup',{'type':'setup'})]
         return []
     def selftest(self):

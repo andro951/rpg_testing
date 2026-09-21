@@ -154,6 +154,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser()
     parser.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1])
     parser.add_argument('--worker',type=Path,default=Path('worker.local.json'))
+    parser.add_argument('--models',type=Path,help='Local model catalog JSON (default: <root>/models.json)')
     parser.add_argument('--worker-id',default='desktop')
     parser.add_argument('--output',type=Path,default=Path('.local/results'))
     parser.add_argument('--mock',action='store_true')
@@ -163,7 +164,10 @@ def main(argv=None):
     parser.add_argument('--model',action='append')
     args=parser.parse_args(argv)
     root=args.root.resolve()
-    models=read_json(root/'models.json');exp=read_json(root/'experiment.json')
+    models_path=args.models or root/'models.json'
+    if not models_path.is_absolute():models_path=(root/models_path).resolve()
+    if not models_path.is_file():parser.error('Local model catalog not found: '+str(models_path)+'. Configure models in Workbench or pass --models.')
+    models=read_json(models_path);exp=read_json(root/'experiment.json')
     fixtures=[read_json(p) for p in sorted((root/'fixtures').glob('*.json'))]
     validate_inputs(models,exp,fixtures)
     if args.model:

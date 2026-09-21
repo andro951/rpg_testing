@@ -1,6 +1,6 @@
 # Development rules
 
-- Keep models.json a models-only JSON array. Use required_vram_gb, not min_vram_gb. Memory budgets are estimates until measured under a recorded load configuration.
+- Treat root `models.json` as machine-local and Git-ignored. When present, keep it a models-only JSON array. Use required_vram_gb, not min_vram_gb. Memory budgets are estimates until measured under a recorded load configuration.
 - Do not put fixtures' expected states or example patches into model prompts.
 - A wrong model answer is a completed benchmark result, not an infrastructure retry. Never retry selectively to inflate accuracy.
 - Preserve immutable raw responses, exact experiment settings, model hashes and error records. Equivalent patches are graded by final state, not textual patch equality.

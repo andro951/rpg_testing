@@ -18,7 +18,7 @@ Update `main` with GitHub Desktop, open the repository folder, and double-click 
 4. **Preflight.** Resolve any listed issue using its specific action button. It checks only models needed for unfinished work. A completed model does not need to remain installed. Existing uncatalogued models have a VRAM dropdown and an **Accept recommended** action.
 5. **Run remaining tests.** Leave it running. No model-failure confirmation dialog will hold the rest of the queue hostage.
 
-This folder choice applies **only to model files and their partial downloads**. Tests stay in `test_specs/`. Results, logs and operational settings stay under `.local/workbench/` in the repository; runtime files use `.local/runtime/`. Credentials and weights are excluded from Git.
+This folder choice applies **only to model files and their partial downloads**. Model assignments are stored in a machine-local root `models.json`; a fresh checkout can discover GGUFs before that file exists, and the file is created only when local model metadata is saved. `models.json` is ignored by Git. Tests stay in `test_specs/`. Results, logs and operational settings stay under `.local/workbench/` in the repository; runtime files use `.local/runtime/`. Credentials and weights are excluded from Git.
 
 ## What happens while you are away
 

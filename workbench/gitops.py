@@ -30,13 +30,13 @@ def pull(root):
 
 def save_configuration(root):
     staged=git(root,'diff','--cached','--name-only').splitlines()
-    allowed=lambda p:p=='models.json' or (p.startswith('test_specs/') and p.endswith('.json') and len(Path(p).parts)==2)
+    allowed=lambda p:p.startswith('test_specs/') and p.endswith('.json') and len(Path(p).parts)==2
     if any(not allowed(p) for p in staged):raise RuntimeError('Unrelated files are staged; refusing to commit them.')
     files=git(root,'ls-files','--modified','--others','--exclude-standard').splitlines()
     files=[p for p in files if allowed(p)]
     if not files:return
     git(root,'add','--',*files)
-    git(root,'-c','user.name=RPG Workbench','-c','user.email=workbench@localhost','commit','-m','config: save model assignments and test definitions')
+    git(root,'-c','user.name=RPG Workbench','-c','user.email=workbench@localhost','commit','-m','config: save test definitions')
 
 
 class Publisher:

@@ -171,6 +171,17 @@ class AdditionalTests(unittest.TestCase):
         self.assertEqual(len(cm.exception.partial_calls),1)
         self.assertEqual(cm.exception.partial_calls[0]['stage'],'analysis')
 
+    def test_offline_plan_requires_machine_local_catalog(self):
+        import subprocess, shutil
+        with tempfile.TemporaryDirectory() as d:
+            target=Path(d)
+            for item in ['rpgbench','fixtures','experiment.json','requirements.txt','run_worker.py']:
+                src=ROOT/item
+                if src.is_dir():shutil.copytree(src,target/item,ignore=shutil.ignore_patterns('__pycache__'))
+                else:shutil.copy(src,target/item)
+            p=subprocess.run([os.sys.executable,str(target/'run_worker.py'),'--no-sync','--skip-self-tests','--plan'],capture_output=True,text=True)
+            self.assertNotEqual(p.returncode,0);self.assertIn('Local model catalog not found',p.stderr)
+
     def test_offline_plan_accepts_local_model_without_repo_id(self):
         import subprocess, shutil
         with tempfile.TemporaryDirectory() as d:
