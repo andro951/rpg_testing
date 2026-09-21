@@ -62,7 +62,7 @@ class AnalysisTests(unittest.TestCase):
     def test_validation_edge_cases(self):
         for text in ['[1e999]','[-1e999]']:
             with self.assertRaises(ValueError):parse_json(text)
-        models=read_json(ROOT/'models.json');exp=read_json(ROOT/'experiment.json')
+        models=read_json(ROOT/'tests/data/legacy_models.json');exp=read_json(ROOT/'experiment.json')
         fixtures=[read_json(p) for p in (ROOT/'fixtures').glob('*.json')]
         for field,value in [('top_p',0),('top_p',2),('pipelines',['direct_json_patch','direct_json_patch']),('seeds',[42,42])]:
             e=dict(exp);e[field]=value
@@ -70,7 +70,7 @@ class AnalysisTests(unittest.TestCase):
 
     def test_mocked_lmstudio_lifecycle_and_foreign_model_refusal(self):
         worker={'backend':'lmstudio','base_url':'http://127.0.0.1:1234/v1'}
-        model=read_json(ROOT/'models.json')[0];exp=read_json(ROOT/'experiment.json')
+        model=read_json(ROOT/'tests/data/legacy_models.json')[0];exp=read_json(ROOT/'experiment.json')
         binding={'model_key':'exact-key','files':model['files']}
         with tempfile.TemporaryDirectory() as d:
             backend=ManagedBackend(worker,Path(d),{'uuid':'GPU-test'})
@@ -89,7 +89,7 @@ class AnalysisTests(unittest.TestCase):
 
     def test_llama_child_preserves_scheduler_cuda_visibility(self):
         worker={'backend':'llama_cpp','base_url':'http://127.0.0.1:8080/v1'}
-        model=read_json(ROOT/'models.json')[0];exp=read_json(ROOT/'experiment.json')
+        model=read_json(ROOT/'tests/data/legacy_models.json')[0];exp=read_json(ROOT/'experiment.json')
         with tempfile.TemporaryDirectory() as d:
             backend=ManagedBackend(worker,Path(d),{'uuid':'GPU-test'})
             alias='rpgbench-'+model['id']

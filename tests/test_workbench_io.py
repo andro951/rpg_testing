@@ -49,14 +49,16 @@ class GitTests(unittest.TestCase):
         (self.root/'models.json').write_text('[]\n')
         git(self.root,'add','.');git(self.root,'commit','-m','init');git(self.root,'push','-u','origin','HEAD')
     def test_clean_pull(self):self.assertFalse(pull(self.root))
-    def test_dirty_pull_refused(self):
+    def test_machine_local_models_do_not_dirty_pull(self):
         (self.root/'models.json').write_text('[1]')
-        with self.assertRaises(RuntimeError):pull(self.root)
-        self.assertEqual((self.root/'models.json').read_text(),'[1]')
-    def test_save_only_config(self):
+        self.assertFalse(pull(self.root));self.assertEqual((self.root/'models.json').read_text(),'[1]')
+        self.assertEqual(git(self.root,'ls-files','--','models.json'),'')
+    def test_save_only_test_config(self):
         (self.root/'models.json').write_text('[1]');(self.root/'private.txt').write_text('private')
+        (self.root/'test_specs').mkdir();(self.root/'test_specs/local.json').write_text('{"ok":true}')
         save_configuration(self.root)
-        self.assertEqual(git(self.root,'show','HEAD:models.json'),'[1]')
+        self.assertEqual(git(self.root,'show','HEAD:test_specs/local.json'),'{"ok":true}')
+        self.assertEqual(git(self.root,'ls-files','--','models.json'),'');self.assertEqual((self.root/'models.json').read_text(),'[1]')
         self.assertIn('private.txt',git(self.root,'status','--porcelain'))
     def test_refuse_unrelated_staged(self):
         (self.root/'secret').write_text('secret');git(self.root,'add','secret')
