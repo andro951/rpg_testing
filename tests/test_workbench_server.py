@@ -78,7 +78,7 @@ class ServerTests(unittest.TestCase):
     def test_browse_is_host_side(self):
         from urllib.parse import quote
         status,body,_=self.req('/api/browse?path='+quote(str(self.root)))
-        self.assertEqual(status,200);self.assertEqual(json.loads(body)['path'],str(self.root))
+        self.assertEqual(status,200);self.assertEqual(Path(json.loads(body)['path']).resolve(),self.root.resolve())
     def test_pairing_requires_existing_auth(self):
         self.assertEqual(self.req('/api/pairing-key',auth=False)[0],403)
         self.assertEqual(json.loads(self.req('/api/pairing-key')[1])['key'],'testing-key')

@@ -4,7 +4,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from workbench.domain import load_tests,validate_test,read_json,digest
+from workbench.domain import load_tests as load_workflow_specs,validate_test,read_json,digest
 from workbench.backends import DemoBackend
 from workbench.workflows import execute,Unsupported,messages
 from workbench.analysis import summarize
@@ -14,7 +14,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 class ExtraTests(unittest.TestCase):
     def test_example_specs_all_valid(self):
-        tests=load_tests(ROOT/'examples/test_specs')
+        tests=load_workflow_specs(ROOT/'examples/test_specs')
         self.assertEqual(len(tests),3)
         for test in tests:
             for v in test['variants']:
