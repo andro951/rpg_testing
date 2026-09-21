@@ -4,7 +4,7 @@ This guide replaces earlier LM Studio instructions. The graphical workbench is `
 
 ## Storage and first launch
 
-The application starts without a model path. It never chooses a weights directory based on a conventional home/AppData/C-drive location. The host-side folder browser may open a convenient navigation location; merely browsing does not create a model directory or download anything. Select an existing absolute folder on the GPU machine.
+The application starts without a model path. It never chooses a weights directory based on a conventional home/AppData/C-drive location. On the GPU computer, **Choose models folder…** opens the operating system’s normal folder picker; merely opening or cancelling it creates nothing. The selected path is saved promptly, then a separate background scan discovers GGUFs. You can navigate to **Installed models** during that scan; the page shows `SCANNING` instead of blocking on the settings lock. When controlling remotely through Tailscale, the native picker would appear on the GPU host, so enter the known host path in Worker setup instead.
 
 That folder can already contain downloaded GGUFs. The scanner recursively inspects metadata and split-file groups without moving them. It ignores image projectors for these text-only experiments. If no models are found, a dialog asks whether the empty folder is intentional. Confirm it, or choose a different folder. Confirmation is tied to the normalized selected path; it cannot authorize another directory.
 
@@ -106,7 +106,7 @@ The UI shows these reports live once available. They are **backend-reported plac
 
 ## Tailscale and Unity
 
-Enable private Tailscale access on the desktop, display its pairing key locally, and open the displayed address from the laptop. Host browsing selects desktop folders, not laptop folders. Pairing/Host/Origin checks and loopback/private-interface binding protect the control API; no arbitrary-shell endpoint or public Funnel is provided. The desktop must be awake and the actual tailnet/firewall route must allow access.
+Enable private Tailscale access on the desktop, display its pairing key locally, and open the displayed address from the laptop. Native folder/file pickers open on the GPU host when the UI is used locally. A remote laptop should enter known GPU-host paths in Worker setup; browser file pickers are not used because they would select laptop files. Pairing/Host/Origin checks and loopback/private-interface binding protect the control API; no arbitrary-shell endpoint or public Funnel is provided. The desktop must be awake and the actual tailnet/firewall route must allow access.
 
 Unity uses its supported allocation workflow. Prepare persistent model storage, the repo, Python and compatible native runtime there, configure the models path, and download the generated Slurm script. It requests one GPU and uses the same batch controller inside the allocation. Confirm permitted partition/device constraints yourself; examples are not reservations or authorization.
 

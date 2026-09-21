@@ -12,7 +12,7 @@ Update `main` with GitHub Desktop, open the repository folder, and double-click 
 
 ## First-time setup
 
-1. **Choose your models folder.** It starts unset. Select an existing folder on the host; existing GGUFs are discovered in place. If empty, confirm **Use this empty folder**, or choose another. There is no automatic C-drive model location.
+1. **Choose your models folder.** It starts unset. On the GPU computer, **Choose models folder…** opens the operating system’s normal folder picker. The path is saved immediately and model scanning continues separately, so you can switch to **Installed models** while it scans. Existing GGUFs are discovered in place. If empty, confirm **Use this empty folder**, or choose another. There is no automatic C-drive model location.
 2. **Find models.** Search a name or enter a Hugging Face `publisher/repository`, view quantizations and file sizes, select variants and a VRAM tier, then approve their download. Recommendations are estimates, not measurements. Split GGUFs are handled as one variant. You may also download models manually into your chosen folder.
 3. **Native runtime.** Browse official llama.cpp releases and explicitly install a suitable GPU build, or locate an existing `llama-server`. Runtime archives and caches stay inside the repository, not in the models folder. An old GTX 1080 needs a compatible driver/build; the runtime labels and preflight checks help identify candidates but cannot promise compatibility before a real load.
 4. **Preflight.** Resolve any listed issue using its specific action button. It checks only models needed for unfinished work. A completed model does not need to remain installed. Existing uncatalogued models have a VRAM dropdown and an **Accept recommended** action.

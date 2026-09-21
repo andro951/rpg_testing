@@ -1,22 +1,22 @@
 # Validation report — native workbench
 
-Date: 2026-09-21. Functional-code checkpoint: **`c2a7436f042300c3d739f1aa87e210051c7afd6e`**. Documentation updates after that checkpoint do not change the tested application code.
+Date: 2026-09-21. Functional-code checkpoint: **`4f2f4acd9d7fb84f256b3a878387263ad3761be6`**.
 
 ## GitHub Actions: completed successfully
 
-Run **35603778392** completed with overall **success**:
+Run **35612367369**, attempt 2, completed with overall **success**:
 
-- Linux unit/integration suite: **258 tests passed**, job **106345858827**.
+- Linux unit/integration suite: **264 tests passed**, job **106345858827**.
 - Windows unit/integration suite: **258 tests passed**, job **106345858853**. The job used Windows Server 2025 and CPython 3.12.10, not the user's Windows 10 desktop.
 - Chromium browser job **106345858835**: both `tests/browser_smoke.py` and `tests/browser_model_smoke.py` passed through actual browser-to-localhost HTTP.
 
-Run details: https://github.com/andro951/rpg_testing/actions/runs/35603778392
+Run details: https://github.com/andro951/rpg_testing/actions/runs/35612367369
 
-The Windows log explicitly reports `Ran 258 tests in 44.334s` and `OK`. Tests include the retained historical CLI checks as well as the active native workbench. Passing them does not imply that the legacy CLI is the recommended interface.
+The Windows and Ubuntu jobs both completed the 264-test suite successfully. Tests include the retained historical CLI checks as well as the active native workbench. Passing them does not imply that the legacy CLI is the recommended interface.
 
 ## Also executed locally
 
-The final local `python -m unittest discover -s tests` invocation passed **258 tests**. JavaScript syntax validation passed. Both Chromium workflows passed locally with the network-restricted browser's HTTP bridge enabled; those local bridge runs do not count as direct browser-network validation. The GitHub Actions browser job supplies that separate validation.
+The final local `python -m unittest discover -s tests` invocation passed **264 tests**. JavaScript syntax validation passed. Both Chromium workflows passed locally with the network-restricted browser's HTTP bridge enabled; those local bridge runs do not count as direct browser-network validation. The GitHub Actions browser job supplies that separate validation.
 
 Screenshots were inspected for the main workbench, model browser and responsive layout. The displayed models/results in those screenshots are explicitly simulated or fixture-backed, not real model-performance data.
 
@@ -32,7 +32,7 @@ Screenshots were inspected for the main workbench, model browser and responsive 
 
 **Runtime installation:** official asset metadata filtering, manual selection, digest checks, archive path traversal and link rules, extraction budget, local installation manifest and tamper checks. The test runtime archive contains harmless fixture bytes; no downloaded executable is launched by these tests.
 
-**UI/control plane:** authenticated pairing, Host/Origin checks, private-interface binding, host folder browser, first-run and empty-folder dialogs, Hub search/quantization selection, retained checkbox/dropdown state, manual download approval, runtime selection/installation wiring, preflight, run, resume, deletion/rerun, test example import/editor, evidence inspection/export, comparison and responsive layout.
+**UI/control plane:** authenticated pairing, Host/Origin checks, private-interface binding, native host folder/file picker wiring, first-run and empty-folder dialogs, a deliberately slow background model scan that remains navigable, Hub search/quantization selection, retained checkbox/dropdown state, manual download approval, runtime selection/installation wiring, preflight, run, resume, deletion/rerun, test example import/editor, evidence inspection/export, comparison and responsive layout.
 
 **Results and logging:** strict JSON/schema/patch validation, final-state scoring, ground truth excluded from requests, atomic/checksummed result files, previous attempt history, corruption handling, distinct artifact/test/protocol grouping, in-memory logging during timed workflows, NVML mock sampling, unavailable counters and sample scope.
 
@@ -54,3 +54,8 @@ The final green run includes the fixes. The Windows logs still contain a closed-
 - Actual Unity storage, permissions, partitions, GPU allocation or scheduler signal delivery.
 
 These are environment-validation limits, not evidence that the integrated UI and two-pass scheduler are still unwired. The application is ready for a real hardware smoke run; software tests do not guarantee the selected model/runtime/driver combination will work.
+
+
+## Folder-selection regression fixed
+
+User evidence from the first Windows smoke attempt contained only the startup log, which means the failure happened before any benchmark/result activity. The folder chooser was redesigned: the web-built host browser was removed from the UI, local selection now uses the host operating system dialog, saving a model path no longer performs a recursive scan inside the settings lock, and scanning runs as its own background operation. Browser coverage intentionally delays the scan and verifies that **Installed models** is already usable with a `SCANNING` state and no modal “wait” error.
