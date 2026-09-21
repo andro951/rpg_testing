@@ -250,9 +250,11 @@ def validate_inputs(models: Any, experiment: Any, fixtures: list[dict]) -> None:
         raise ValueError("models.json must be a nonempty array containing only model records")
     ids = set()
     for m in models:
-        required = {"id", "base_model", "repo_id", "files", "quantization", "required_vram_gb", "vram_status"}
+        required = {"id", "base_model", "files", "quantization", "required_vram_gb", "vram_status"}
         if not isinstance(m, dict) or not required <= m.keys() or "min_vram_gb" in m:
             raise ValueError("Invalid model record")
+        if "repo_id" in m and (not isinstance(m["repo_id"], str) or not m["repo_id"]):
+            raise ValueError("repo_id must be nonempty text when present")
         if not re.fullmatch(r"[a-z0-9_-]+", m["id"]) or m["id"] in ids:
             raise ValueError("Model IDs must be unique safe identifiers")
         ids.add(m["id"])

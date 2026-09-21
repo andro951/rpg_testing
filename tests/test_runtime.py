@@ -28,7 +28,7 @@ class StubHandler(BaseHTTPRequestHandler):
 
 class RuntimeTests(unittest.TestCase):
     def setUp(self):
-        self.models=read_json(ROOT/'models.json')
+        self.models=read_json(ROOT/'tests/data/legacy_models.json')
         self.exp=read_json(ROOT/'experiment.json')
         self.fixtures=[read_json(p) for p in sorted((ROOT/'fixtures').glob('*.json'))]
         self.worker={'backend':'mock','backend_version':'mock-v1'}
@@ -171,14 +171,32 @@ class AdditionalTests(unittest.TestCase):
         self.assertEqual(len(cm.exception.partial_calls),1)
         self.assertEqual(cm.exception.partial_calls[0]['stage'],'analysis')
 
+    def test_offline_plan_accepts_local_model_without_repo_id(self):
+        import subprocess, shutil
+        with tempfile.TemporaryDirectory() as d:
+            target=Path(d)
+            for item in ['rpgbench','fixtures','experiment.json','requirements.txt','run_worker.py']:
+                src=ROOT/item
+                if src.is_dir():shutil.copytree(src,target/item,ignore=shutil.ignore_patterns('__pycache__'))
+                else:shutil.copy(src,target/item)
+            local={'id':'local-test','base_model':'Local GGUF','files':['Local-Q4_K_M.gguf'],
+                   'quantization':'Q4_K_M','required_vram_gb':8,'vram_status':'user_assigned_unverified'}
+            (target/'models.json').write_text(json.dumps([local]),encoding='utf-8')
+            p=subprocess.run([os.sys.executable,str(target/'run_worker.py'),'--no-sync','--skip-self-tests','--plan'],
+                             capture_output=True,text=True)
+            self.assertEqual(p.returncode,0,p.stderr)
+            plan=json.loads(p.stdout)
+            self.assertEqual(plan[0]['model'],'local-test')
+
     def test_bootstrap_lock_and_offline_plan(self):
         import subprocess, shutil
         with tempfile.TemporaryDirectory() as d:
             target=Path(d)
-            for item in ['rpgbench','fixtures','models.json','experiment.json','requirements.txt','run_worker.py']:
+            for item in ['rpgbench','fixtures','experiment.json','requirements.txt','run_worker.py']:
                 src=ROOT/item
                 if src.is_dir():shutil.copytree(src,target/item,ignore=shutil.ignore_patterns('__pycache__'))
                 else:shutil.copy(src,target/item)
+            shutil.copy(ROOT/'tests/data/legacy_models.json',target/'models.json')
             p=subprocess.run([os.sys.executable,str(target/'run_worker.py'),'--no-sync','--skip-self-tests','--plan'],capture_output=True,text=True)
             self.assertEqual(p.returncode,0,p.stderr)
             self.assertFalse((target/'.local/worker.lock').exists())

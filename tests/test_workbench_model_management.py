@@ -98,6 +98,17 @@ class ModelManagementTests(unittest.TestCase):
         self.assertEqual(first['required_vram_gb'],8);self.assertEqual(second['required_vram_gb'],12)
         saved={m['id']:m['required_vram_gb'] for m in self.app.catalog()}
         self.assertEqual(saved,{first['id']:8,second['id']:12})
+    def test_many_local_8gb_assignments_do_not_change_legacy_fixture_catalog(self):
+        for i in range(6):
+            (self.models/f'Local-{i}-Q4_K_M.gguf').write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        for model in list(self.app.last_models):
+            self.app.assign_model(model['id'],8)
+        self.assertEqual(len(self.app.catalog()),6)
+        legacy=read_json(ROOT/'tests/data/legacy_models.json')
+        self.assertEqual(len(legacy),3)
+        self.assertTrue(all(m['required_vram_gb']==8 for m in legacy))
+
     def test_manager_download_requires_folder(self):
         self.app.hub_detail=self.selection()
         with patch('workbench.downloads.download_model') as fn:

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class CoreTests(unittest.TestCase):
     def setUp(self):
-        self.models = read_json(ROOT / 'models.json')
+        self.models = read_json(ROOT / 'tests/data/legacy_models.json')
         self.exp = read_json(ROOT / 'experiment.json')
         self.fixtures = [read_json(p) for p in sorted((ROOT/'fixtures').glob('*.json'))]
 
@@ -21,6 +21,12 @@ class CoreTests(unittest.TestCase):
         for f in self.fixtures:
             for kind, p in f['example_patches'].items():
                 self.assertTrue(score(f, canonical(p), kind)['exact_match'])
+
+    def test_local_model_record_does_not_require_repo_id(self):
+        local=dict(self.models[0])
+        local.pop('repo_id',None)
+        local.update(id='local-discovered-model',base_model='Local discovered GGUF',files=['local.gguf'])
+        validate_inputs([local],self.exp,self.fixtures)
 
     def test_strict_booleans(self):
         self.assertFalse(equal(True, 1))
