@@ -1,43 +1,34 @@
-# Planned changes — implementation ledger
+# Requirement ledger — native workbench
 
-The planning-only hold was lifted by Isaac's explicit implementation request. The browser-workbench overhaul has been implemented and tested as software. This file now tracks requirement coverage and outstanding environment validation. Earlier planning wording remains in Git history.
+Status updated 2026-09-21. This records implemented behavior after the authorized native-only overhaul. The earlier planning-only hold is no longer active. Research roadmap documents remain separate and unchanged by this implementation.
 
-## Implemented
+## Implemented in the active application
 
-- **GUI-first operation:** Windows double-click launchers, browser control panel, separate simulated demo, no normal terminal commands or manual worker JSON.
-- **Model discovery:** read recognized LM Studio current-folder settings, detect GGUFs/shards/metadata, inventory model keys, local paths, hardware and backend versions; UI fallback/empty-folder confirmation.
-- **VRAM assignments:** models-only JSON catalog, dropdown and one-click conservative recommendation, unknown models shown as unassigned. Requirements remain estimates, not measured constants.
-- **Adjacent-tier policy:** 8→12, 12→16, 16→24, 24→32, 32→40, 40→48, 48→80; 80 only at 80. An 11 GB GPU may run assigned 8 GB variants but not 12 GB variants. GPU identity remains distinct.
-- **Self-contained test files:** generic step interpreter, per-step settings, source and ground truth separated, conditions, typed outputs, explicit bounded loops, declared scoring and repetitions. The new UI does not use experiment.json.
-- **Cached workflows:** larger shared prefix and cache-on/off examples, conditional yes/no then value, native llama.cpp cache reset/reuse evidence; unsupported LM Studio cache control is blocked.
-- **Verification/repair and narrative examples:** imported from the UI; same loaded model serves steps, separate temperatures, intermediates retained.
-- **Pending-first preflight:** shared planner with real runs, completed cases need no installed model files, unit/smoke checks, artifact/software/path/hardware readiness, readable execution plan. No benchmark answers during preflight.
-- **Manual fixes:** action-specific buttons, one explicit approval per repair, recheck afterward. Known downloads/server start/config save/corrupt-result deletion supported. No silent repair chain, driver change or destructive Git reset.
-- **Automatic context:** no UI/test context or output-cap field; internal allocation and finite native limit recorded, native tokenizer guard, no arbitrary 512-token cap.
-- **Results:** shallow per-model files, status first, atomic/checksummed writes, no completion tracker, wrong answers completed, errors/aborts pending, delete/rerun, corrupt evidence inspection/export.
-- **Readiness probe:** after each model load and before measured cases; exact READY compliance recorded separately from liveness.
-- **Logging:** in-memory diagnostics during measured workflows, writes/Git outside those intervals, separate logs directory, ZIP download with raw results and CSV/JSON summaries.
-- **Remote controls:** authenticated private Tailscale browser UI with host-side browsing, normal controls, explicit enable/disable, pairing key. No public bind or inference across the laptop network path.
-- **Pause/stop/resume:** pause after case, stop after model, cancel now, restart-safe authoritative result files, no extra GUI-only benchmark logic.
-- **Git transport:** optional conservative source sync and result publication, narrow staging, no multi-worker distributed scheduler complexity.
-- **Unity:** preparation profile check, generated Slurm script for supported OnDemand workflow, same batch controller within allocation, no login-node GPU run.
+- Native llama.cpp only; no active LM Studio runtime, model keys or settings-directory lookup. Historical CLI files remain archived for reproduction, not used by the GUI.
+- Models folder initially unset, explicit host-side selection, scan pre-existing GGUFs in place, empty-folder confirmation, normalized path handling. Only models/partials use that path; tests/results/logs/runtime stay with the repository.
+- In-app Hugging Face GGUF search, immutable revision details, quantization/shard grouping, file sizes, heuristic recommendations, multi-selection, explicit approved downloads, range resume, hashes and safe file installation. Manual model download remains supported.
+- Explicit official native-runtime release browser/installation, platform/architecture filtering, archive validation and installation manifest. No automatic driver installation or hidden runtime upgrades.
+- Models-only JSON catalog with required_vram_gb; UI assignments and estimates; assigned/adjacent tier policy with the 11/12 asymmetry.
+- Preflight shared with execution, pending cases calculated before model requirements, completed models need no weight files, corrupt results surfaced, manual issue-specific repair actions. Native help/device/API readiness and real load qualification remain separate stages.
+- Unattended primary full-GPU pass; automatic record/unload/skip on placement or memory failure; smallest-first deferred recovery; one full-GPU retry then bounded hybrid layer trials. No execution-time confirmation popups.
+- Separate full_gpu and cpu_offloaded records and analysis groups; failed qualification is not scored as a wrong semantic answer. Unknown placement is not trusted. CPU utilization/CPU-mapped files alone are not offload detection.
+- Generous automatic finite context planning, no UI/test output or context cap, native token/template guard, bounded context-expansion/reload retry with earlier attempts preserved.
+- Owned native-process liveness, model identity checks, streaming evidence, time watchdogs, process cleanup, cancellation and user-requested pause/stop controls.
+- NVML sampling connected to controller, results and live UI, with explicit sampled-total-device scope and unavailable-state handling.
+- Self-contained step tests, per-step settings/types, conditional questions, explicit bounded loops, direct/semantic patches, analyze-then-patch, cache evidence, and imported repair/narrative examples.
+- Status-first atomic/checksummed result files, no completion tracker, terminal skips and interrupted attempts, delete/rerun and recovery-only resume. Raw evidence remains inspectable/exportable even when another result is corrupt.
+- Browser-first setup, private Tailscale control, host folder/executable browsing, test JSON editing, result inspection/deletion, comparison and ZIP/CSV/JSON export.
+- Buffered logs and Git writes outside workflow timing; credential redaction; narrow Git publication. Source-update supervisor restarts and resumes an explicitly requested Run without requiring a new click, bounded against repeated updates.
+- Unity job generation, one-GPU allocation guard, documented constraint examples, advance scheduler signal forwarding and batch cleanup. No promise of bypassing university setup/access.
 
-## Validation completed
+## Validation and remaining boundaries
 
-Full committed-source CI passed 179 tests on Windows and 179 on Linux, plus a real Chromium browser workflow. See [TEST_REPORT.md](TEST_REPORT.md) for the exact commit/run and [WORKBENCH_GUIDE.md](WORKBENCH_GUIDE.md) for behavior.
+TEST_REPORT.md identifies the actual test run and counts. Real-browser tests exercise unchanged UI code and authenticated endpoints; Hub assets and inference are fixture-backed for repeatability. Real model/GPU performance has not been measured here.
 
-## Still requires actual environment validation
+Actual GTX 1080 driver/runtime compatibility, live model downloads and license gates, your Tailscale/firewall route, and an actual Unity allocation must be checked on their target systems. These are environment-validation requirements, not a claim that the controls or scheduler are unfinished.
 
-1. Real GTX 1080 / installed Windows LM Studio smoke, actual model/runtime compatibility and active-directory settings recognition.
-2. Real Tailscale route/firewall and initial graphical launcher behavior on the user's Windows 10 session.
-3. Actual Unity permissions, storage, executable paths, scheduler constraints and allocated-GPU run.
-4. Native cache evidence on the selected llama-server build.
-5. Real latency/quality results. Demo output is not evidence of model performance.
+Layer-placement verification is based on backend diagnostics. NVML is sampled device-wide usage. Neither independently proves Windows residency/page-fault behavior or exact model-only VRAM. The runtime can differ by release, architecture and drivers; missing cache evidence is marked unverified rather than invented.
 
-## Explicit limitations / follow-on work
+Watchdog/context/recovery policies are finite and recorded. Runs do not silently modify test prompts, substitute quantizations, reduce context to a hidden minimum, or reroll incorrect answers. Very long valid workflows may exceed the operational safety deadlines; such events retain their actual reason and partial evidence.
 
-Peak-VRAM sampling and independent proof of full GPU residency are not implemented; output fields are unavailable/unverified. VRAM assignments/recommendations must not be described as measurements. Automatic context estimation is conservative, finite and not a promise that every generated continuation will fit. Backend-internal logging/defaults cannot all be controlled by the harness.
-
-A preparation check on one machine cannot certify another machine's installation or future allocation. Dependencies, Git/account credentials, university access and a compatible native engine remain prerequisites; the UI does not silently install drivers or obtain authorization. Controlled cache tests are native-only. External LLM-as-judge orchestration is not part of this implementation. The two default fixtures and three examples are smoke tests, not a final scientific dataset.
-
-The legacy CLI prototype remains only for historical compatibility; its older limits/settings are not used by the new browser workbench. Do not confuse those files with the new test_specs-based runner.
+The default three tests and optional examples are infrastructure/research starting points. External model-as-judge orchestration, a global multi-worker claim service, full remote Unity account provisioning and independent OS paging instrumentation are not included in this agreed native/local implementation pass.

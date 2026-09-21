@@ -1,9 +1,9 @@
-# Browser workbench overhaul — software handoff
+# Native workbench handoff
 
-The browser UI, controller, discovery, preflight/manual repairs, generic workflows, file-based resume, evidence export, private remote-control support and launchers are implemented and pushed to main.
+The active workbench is native llama.cpp only. First-launch model-folder consent, existing-GGUF discovery, in-app Hub quantization selection/download, explicit native-runtime installation, unattended primary/recovery execution, generous context recovery, file-based resume, telemetry, results/comparison and private browser control are integrated.
 
-Code commit `13554b40d1337dc02d92696233b019c2a4886c5c` passed all GitHub Actions jobs in run `35556535167`: 179 unit/smoke tests on Windows, 179 on Linux, and the real Chromium browser workflow. This documentation checkpoint adds no runtime changes.
+The root README is the starting point. Start Workbench.vbs opens the actual worker; Start Demo.vbs provides simulated interface testing without weights/GPU. Old LM Studio/worker.local.json instructions apply only to retained historical code and must not be used for the active UI.
 
-Start with **Start Demo.vbs**, then **Start Workbench.vbs**. See the root README and WORKBENCH_GUIDE.md. The old worker.local.json/experiment.json instructions apply only to the retained CLI prototype.
+TEST_REPORT.md records executed tests and exact CI evidence. Passing software tests is not a real GTX 1080 or Unity inference result. Backend-reported placement and sampled device memory have explicitly documented limits; missing counters are not invented.
 
-Actual GPU inference, the user's LM Studio installation, the Tailscale route and Unity allocation remain untested here. Peak VRAM is unavailable and full GPU residency is unverified. See TEST_REPORT.md for evidence and PLANNED_CHANGES.md for coverage and limits.
+WORKBENCH_GUIDE.md describes setup, unattended behavior, storage, limits and Unity preparation. PLANNED_CHANGES.md is the requirement ledger. The research roadmap and user-added inventory benchmark remain intact.

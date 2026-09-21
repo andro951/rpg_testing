@@ -1,71 +1,63 @@
-# RPG Testing Workbench
+# RPG Testing Workbench — native llama.cpp
 
-A browser-controlled benchmark for **original JSON state + new information → state update**. The worker and model run on the GPU computer. A laptop can control the worker through Tailscale; inference remains on the GPU host.
+A browser-controlled benchmark for **original JSON state + new information → structured state update**. The model and harness run on the GPU computer; your laptop is a private remote control through Tailscale.
 
-## Start without a terminal
+**The active workbench no longer uses LM Studio.** It runs its own `llama-server`, browses Hugging Face model repositories, installs selected GGUF variants, and handles a full-GPU primary pass followed by an automatic recovery pass when needed. Setup can ask questions; a running experiment never waits for a repair popup.
 
-Update the `main` branch using GitHub Desktop, open the repository folder, then double-click:
+## Open it without a terminal
 
-- **`Start Workbench.vbs`** — actual worker and browser controls.
-- **`Start Demo.vbs`** — the same interface with an explicitly simulated model. No GPU or weights are required; this checks the interface, not model quality.
+Update `main` with GitHub Desktop, open the repository folder, and double-click **Start Workbench.vbs**. Python 3.10+ must already be installed. The graphical bootstrap asks permission before creating its private Python environment and installing missing requirements. Git is required by the harness's own tests and Git synchronization. No drivers are installed.
 
-Python 3.10+ must already be installed. The graphical bootstrap asks permission before creating a private Python environment and installing missing requirements. LM Studio, its compatible runtime, and downloaded models remain prerequisites for actual inference. Git is needed for repository self-tests and source/result synchronization.
+**Start Demo.vbs** opens the same interface with a simulated model and no hardware requirement. It cannot install real models or runtimes. The current default suite has three tests with four variants each: **12 simulated cases**. Run preflight, run, then run again to verify that completed cases are skipped. These outputs are not measurements of model quality or GPU speed.
 
-On a fresh clone, the demo has two tests × four variants = **eight cases**. Click **Run preflight**, then **Run remaining tests**. Run again to confirm completed cases are skipped. Inspect a result, delete it, and run again to see exactly that case scheduled.
+## First-time setup
 
-## Normal workflow
+1. **Choose your models folder.** It starts unset. Select an existing folder on the host; existing GGUFs are discovered in place. If empty, confirm **Use this empty folder**, or choose another. There is no automatic C-drive model location.
+2. **Find models.** Search a name or enter a Hugging Face `publisher/repository`, view quantizations and file sizes, select variants and a VRAM tier, then approve their download. Recommendations are estimates, not measurements. Split GGUFs are handled as one variant. You may also download models manually into your chosen folder.
+3. **Native runtime.** Browse official llama.cpp releases and explicitly install a suitable GPU build, or locate an existing `llama-server`. Runtime archives and caches stay inside the repository, not in the models folder. An old GTX 1080 needs a compatible driver/build; the runtime labels and preflight checks help identify candidates but cannot promise compatibility before a real load.
+4. **Preflight.** Resolve any listed issue using its specific action button. It checks only models needed for unfinished work. A completed model does not need to remain installed. Existing uncatalogued models have a VRAM dropdown and an **Accept recommended** action.
+5. **Run remaining tests.** Leave it running. No model-failure confirmation dialog will hold the rest of the queue hostage.
 
-Open **Models** and run a scan/preflight. The worker reads recognized LM Studio settings for the current model folder rather than guessing a default weights directory. An unknown or empty folder is surfaced through the UI. New GGUF variants get a VRAM dropdown and an **Accept recommended … GB** button. No manual model-key/path bindings are required.
+This folder choice applies **only to model files and their partial downloads**. Tests stay in `test_specs/`. Results, logs and operational settings stay under `.local/workbench/` in the repository; runtime files use `.local/runtime/`. Credentials and weights are excluded from Git.
 
-Click **Run preflight**. Each repairable issue has a specific action, such as **Start LM Studio server**, **Download …**, or **Save and push catalog and test edits**. Every repair needs approval. Checks do not perform a chain of fixes silently.
+## What happens while you are away
 
-Click **Run remaining tests**. The worker rechecks readiness, groups unfinished cases by model, loads and probes that model, runs its cases, saves each result, then advances. Controls include **Pause after case**, **Resume**, **Stop after model**, and **Stop now**.
+**Primary pass:** load a model with all layers requested on GPU and automatic fitting disabled. Inspect the backend's placement report and readiness probe. If CPU model placement or GPU-memory failure occurs, record the failed qualification, unload, and proceed to the next model. Unknown placement is not called full GPU.
 
-Use **Results** to inspect raw evidence or delete a result for rerunning. **Download all logs & results** exports result JSON, logs, and summary CSV/JSON. Disk-heavy inspection/export waits until the active operation finishes or stops.
+**Recovery pass:** after primary work finishes, revisit memory-related skips, smallest downloaded footprint first. Retry full GPU, then try a bounded sequence of hybrid placements. Hybrid results have separate identities and `execution_class: cpu_offloaded`; they are not pooled with full-GPU results. Unrelated model/runtime errors do not enter an endless retry loop.
 
-## Included capabilities
+**Safety deadlines:** a load has a 180-second budget, a full-GPU workflow 600 seconds, and a hybrid workflow 300 seconds. These are operational watchdogs, not output-token caps. A stalled workflow is recorded and its owned process is stopped. Hybrid layer trials are bounded to four; automatic context expansions to two. The policy is recorded with results.
 
-The generic workflow interpreter supports direct standard JSON Patch and semantic patches; analysis followed by patch generation; typed/JSON-schema output; conditional follow-up questions; shared-prefix cache-on/off comparisons; bounded verification/repair loops; and narration followed by state updating with the same loaded model.
+**Context:** generous automatic allocation includes the shared prefix, source, prompts and workflow structure. There is no context slider or artificial output-token cap. Native context is finite. If capacity is exhausted, the attempt is preserved and the worker retries from the beginning with a larger allocation when possible. Extra context consumes memory, so successful GPU fit is still required.
 
-All experimental settings live in `test_specs/*.json`. The UI contains a validating editor and import buttons for examples under `examples/test_specs/`. There are no temperature/seed/context/output controls for an ad hoc run. `models.json` remains a models-only catalog with `required_vram_gb`.
+You can explicitly **Pause after case**, **Resume**, **Stop after model**, or **Stop now**. Completed files survive interruption. A bad JSON answer is a completed model result, not a reason to reroll until it passes.
 
-Scheduling uses the assigned hardware tier plus one adjacent tier, not every larger GPU. An 11 GB GPU is an opportunistic comparison for 8 GB models and never satisfies a 12 GB assignment. VRAM recommendations are estimates. Context is allocated automatically and recorded. No arbitrary 512-token response cap is imposed.
+## Results and visibility
 
-**Controlled cache tests require native llama.cpp.** This LM Studio adapter does not claim controllable, verifiable cache reuse; preflight blocks those variants there. Ordinary LM Studio workflows can still make multiple calls and request constrained JSON. Native cache experiments retain backend reuse evidence; absent evidence invalidates the cache measurement.
+Overview shows the current pass, execution class, reported GPU/CPU layer counts, and available whole-device memory samples. Layer reports do not prove that Windows will never page GPU allocations. CPU utilization, a host-pinned buffer, or a CPU-mapped model file alone is not proof of CPU model-layer execution.
 
-## Laptop control
+**Results** exposes raw prompts, responses, scores, attempts, timings and provenance. Delete a case file to make that case pending again. A failed primary qualification and a later hybrid result are separate records. Recovery interrupted before completion resumes as recovery work.
 
-Start the workbench on the desktop. In **Worker setup**, click **Enable private Tailscale access**, then **Show pairing key on this host**. Open the displayed address on the laptop and enter that key. Normal controls, including the folder browser, operate on the desktop.
+**Comparison** separates model files, test definitions, context configurations, hardware, software and execution classes. **Download all logs & results** exports JSON evidence, logs and CSV/JSON summaries. Application logging and Git writes occur outside timed workflows. GPU telemetry is sampled in memory through NVML; it is a sampled total-device peak, not exact model-only memory accounting.
 
-The desktop must stay awake with the worker running. The service binds only to loopback and the explicitly enabled Tailscale address, uses a pairing key and same-origin checks, and offers no arbitrary-command endpoint. Do not add public port forwarding. Firewall and tailnet permissions must permit the connection.
+## Tests and caching
 
-## Unity
+All experimental settings live in `test_specs/*.json`, with a validating editor in the UI. The defaults cover a time change, a clothing-array append without movement, and the retail inventory test. Examples can be imported for large shared-prefix cache-on/off questions, conditional follow-ups, verification/repair, and narration followed by state updating using the same model.
 
-Use **Prepare for a different GPU** and download the generated Unity job script. Submit it through supported Unity OnDemand Job Composer after preparing the repository, Python environment, native `llama-server`, and model files on Unity storage. It runs the same controller inside a Slurm allocation and refuses GPU batch operation on a login node.
+Native llama.cpp exposes the cache controls. The harness clears the slot and records reuse evidence. Missing or inconsistent cached-token counters mark a cache measurement unverified; keeping a chat open is not accepted as proof. The interface does not use `experiment.json` or require a hand-written `worker.local.json`.
 
-A preparation check on the laptop cannot certify another machine's filesystem, drivers, authorization or future GPU. The allocated worker rechecks readiness. Review partition/constraint examples against the resources actually available to your account.
+## Laptop and Unity
 
-## Evidence and synchronization
+On the desktop, open **Worker setup → Enable private Tailscale access** and display the pairing key. Open the displayed address on the laptop and pair that browser. These controls operate the desktop; inference remains on loopback. Keep the desktop awake. Tailnet permissions and the host firewall still apply. No public listener, port forwarding or Funnel is enabled.
 
-Results are individual checksummed files with `status` first:
+Unity support is intentionally practical rather than a promise of zero setup: put the repo, Python environment, native runtime and models on permitted storage, select the models folder there, then submit the generated job with Unity OnDemand/Slurm. Preparation checks on the laptop cannot certify a remote installation. The job requests a GPU and forwards scheduler warning/termination signals so the worker can stop and retain evidence. Actual cluster authorization and runtime compatibility must be checked on Unity.
 
-```text
-.local/workbench/results/<model-id>/<case-id>.json
-.local/workbench/logs/<timestamp>-<id>.json
-```
+## Git behavior and validation
 
-Completed incorrect/invalid answers remain completed experiments. Errors and aborted cases remain pending. Completion comes from files, not a tracker database. Deleting a result schedules it again. Artifact fingerprint metadata is cached separately, not used as a completion tracker.
+Optional source synchronization pulls before a real run. When code changes, the supervisor restarts with the new source and resumes the explicitly requested Run; automatic restart chains are bounded. No hot-reloading experimental code during a measurement. Optional result publishing uses a worker-specific branch, narrow staging, and no force reset or automatic stash.
 
-Source is pulled conservatively before real runs when enabled. Changed source requires **Restart workbench** so the new code runs in a fresh process. Optional publication sends only result/log directories to a separate worker branch, outside measured workflows. No force-reset, automatic stash or broad `git add .` occurs.
+Only synthetic safe-for-work data belongs in this public repository. Do not publish private saves, real patient/student records, explicit content or credentials.
 
-This repository is public. **Only synthetic safe-for-work fixtures and outputs belong here.** Never publish API credentials, private saves, real patient/student records, explicit content or model weights.
+See [TEST_REPORT.md](docs/TEST_REPORT.md) for actual test evidence, [WORKBENCH_GUIDE.md](docs/WORKBENCH_GUIDE.md) for operation details, and [PLANNED_CHANGES.md](docs/PLANNED_CHANGES.md) for requirement coverage and validation limits. UI/subprocess fixtures are not real GPU inference.
 
-## Validation
-
-The full committed suite passed **179 tests on Windows and 179 on Linux**, plus a real Chromium browser workflow in GitHub Actions. See [TEST_REPORT](docs/TEST_REPORT.md) for the tested commit and evidence, [WORKBENCH_GUIDE](docs/WORKBENCH_GUIDE.md) for usage, and [PLANNED_CHANGES](docs/PLANNED_CHANGES.md) for requirement coverage.
-
-No real GPU model inference was available during this implementation. Actual GTX 1080/LM Studio loading, real Tailscale connectivity, and Unity allocation must still be tested on those systems. Peak VRAM is explicitly unavailable and complete GPU residency is unverified. Simulated results are never model-quality or throughput evidence.
-
-## Legacy prototype
-
-`run_worker.py`, `rpgbench/`, `fixtures/` and `experiment.json` remain for historical reproduction. **The new browser workbench does not use `worker.local.json` or `experiment.json`.** Use the new launchers and `test_specs/`.
+The old `rpgbench/`, `run_worker.py`, `fixtures/`, and `experiment.json` are retained only for historical reproduction. The active UI is `workbench/` and native-only.
