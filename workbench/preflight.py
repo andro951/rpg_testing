@@ -35,7 +35,10 @@ def build(app, preparation=None):
     backend_version=app.backend_version()
     target={'gpu_name':gpu['name'],'vram_gb':device_tier(gpu['total_gib']) or gpu['total_gib'],
             'backend':'demo' if app.demo else kind,'backend_version':backend_version,
-            'os':platform.platform(),'python':platform.python_version(),'cpu':platform.processor() or platform.machine(),'driver':gpu.get('driver')}
+            'os':platform.platform(),'python':platform.python_version(),'cpu':platform.processor() or platform.machine(),'driver':gpu.get('driver'),
+            # Context allocation uses the whole enabled suite, never just what remains.
+            # The recipe is computable without model files so completed models remain optional.
+            'context_recipe':automatic_context(tests, {'planning.context_length':2**63-1})['allocated_tokens']}
     # Pins are metadata, NOT completion tracking. Recover from checksummed results if needed.
     for file in app.store.root.glob('*/*.json'):
         try:app.store.read(file)
@@ -125,8 +128,7 @@ def build(app, preparation=None):
             if not model['complete'] or model['errors']:
                 problems.append(issue('invalid_'+mid,'Incomplete/invalid model '+mid+': '+str(model['missing_shards']+model['errors'])));continue
             try:
-                unique={j['test']['id']:j['test'] for j in group['jobs']}
-                group['context']=automatic_context(list(unique.values()),model['metadata'])
+                group['context']=automatic_context(tests,model['metadata'])
             except ValueError as exc:problems.append(issue('context_'+mid,str(exc)));continue
             if not preparation and not app.demo and model['size_bytes']/2**30>=gpu.get('free_gib',0):
                 problems.append(issue('memory_'+mid,'Free VRAM is smaller than the model weights, before runtime overhead. Free GPU memory before loading '+mid+'.'))

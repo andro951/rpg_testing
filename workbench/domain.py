@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 TIERS = (8, 12, 16, 24, 32, 40, 48, 80)
-ENGINE_VERSION = 'workflows-3'
+ENGINE_VERSION = 'workflows-4'
 
 
 def canonical(value: Any) -> str:
@@ -90,9 +90,16 @@ def code_fingerprint():
                    for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py')})
 
 
+def experiment_spec(test: dict, variant: dict) -> dict:
+    """Only this variant and shared experimental fields, not neighboring variants/UI labels."""
+    presentation = {'variants', 'repetitions', 'enabled', 'name', 'description'}
+    return {'test': {k: v for k, v in test.items() if k not in presentation},
+            'variant': {k: v for k, v in variant.items() if k not in {'enabled', 'name', 'description'}}}
+
+
 def case_id(model: dict, test: dict, variant: dict, repetition: int, target: dict) -> str:
-    identity = {'engine': ENGINE_VERSION, 'workflow_code':code_fingerprint(), 'model': model['id'],
-                'artifact_pin': model.get('sha256', {}), 'test': test, 'variant': variant,
+    identity = {'engine': ENGINE_VERSION, 'workflow_code': code_fingerprint(), 'model': model['id'],
+                'artifact_pin': model.get('sha256', {}), 'experiment': experiment_spec(test, variant),
                 'repetition': repetition, 'target': target}
     return digest(identity)
 
@@ -129,8 +136,16 @@ class ResultStore:
         record = dict(record)
         record.pop('sha256', None)
         path = self.path(record['model_id'], record['case_id'])
-        if path.exists() and self.read(path)['status'] == 'completed':
-            raise ValueError('Refusing to overwrite a completed result; delete it to rerun')
+        if path.exists():
+            previous = self.read(path)
+            if previous['status'] == 'completed':
+                raise ValueError('Refusing to overwrite a completed result; delete it to rerun')
+            # Keep earlier infrastructure/abort evidence in the authoritative file.
+            # Deleting the case still removes its completion state and all attempts.
+            history = list(previous.pop('attempts', []))
+            previous.pop('sha256', None)
+            history.append(previous)
+            record['attempts'] = history
         if record['status'] not in ('completed', 'error', 'aborted'):
             raise ValueError('Unknown status')
         record = {'status': record.pop('status'), **record}
