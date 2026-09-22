@@ -23,7 +23,12 @@ def main():
         project=Path(temp)
         shutil.copytree(root/'test_specs',project/'test_specs')
         shutil.copytree(root/'examples',project/'examples')
-        app=Controller(project,True);app.selftest=lambda:None
+        app=Controller(project,True);unit_test_calls=[]
+        def fake_selftest():
+            unit_test_calls.append(True)
+            app.message='Workbench unit/smoke tests passed.'
+            app.finish_progress('unit_tests','Unit tests complete',app.message)
+        app.selftest=fake_selftest
         base_tests=[json.loads(p.read_text()) for p in sorted((project/'test_specs').glob('*.json'))]
         base_tests=[t for t in base_tests if t.get('enabled',True)]
         base_test_count=len(base_tests)
@@ -59,7 +64,10 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 else:page.goto(base+'/#key=browser-test-key')
                 expect(page.locator('#connection')).to_contain_text('Connected')
                 page.locator('#preflight').click();expect(page.locator('#readiness')).to_have_text('Ready',timeout=15000)
+                assert unit_test_calls==[], 'Preflight must not run Workbench unit/smoke tests'
                 expect(page.locator('#task-percent')).to_have_text('100.0%');expect(page.locator('#overall-percent')).to_have_text('100.0%')
+                page.locator('#unit-tests').click();expect(page.locator('#message')).to_contain_text('unit/smoke tests passed',timeout=5000)
+                assert len(unit_test_calls)==1, 'Run Unit Tests button must invoke the harness suite exactly once'
                 expect(page.locator('#pending')).to_have_text(str(base_case_count))
                 assert not app.store.all(),'Preflight must not run inference'
                 page.locator('#run').click();expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)
@@ -110,7 +118,7 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'Horizontal overflow'
                 assert not errors,errors
                 browser.close()
-                print(('LOCAL HTTP BRIDGE; browser networking not exercised. ' if bridge else '')+'PASS: browser pairing, preflight, run, resume, deletion/rerun, models, stable dropdown, cached workflow import, export, native folder picker, nonblocking model scan, pairing display and responsive layout.')
+                print(('LOCAL HTTP BRIDGE; browser networking not exercised. ' if bridge else '')+'PASS: browser pairing, preflight separated from explicit unit tests, run, resume, deletion/rerun, models, stable dropdown, cached workflow import, export, native folder picker, nonblocking model scan, pairing display and responsive layout.')
         finally:
             app.control('stop')
             if app.thread:app.thread.join(5)

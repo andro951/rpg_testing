@@ -96,10 +96,16 @@ class ControllerTests(unittest.TestCase):
     def test_preparation_cannot_claim_gpu_ready(self):
         report=self.app.check({'gpu_name':'A100','vram_gb':80})
         self.assertTrue(report['preparation_only']);self.assertFalse(report['ready'])
-    def test_selftests_failure_prevents_run(self):
+    def test_preflight_and_benchmark_run_do_not_invoke_unit_tests(self):
+        def fail():raise AssertionError('unit tests must be explicit, not part of preflight/run')
+        self.app.selftest=fail
+        self.assertTrue(self.app.check()['ready'])
+        self.app.run()
+        self.assertTrue(self.app.store.all())
+    def test_explicit_unit_test_action_failure_is_separate(self):
         def fail():raise RuntimeError('selftest failed')
         self.app.selftest=fail
-        self.app.start('run');self.app.thread.join(3)
+        self.app.start('unit_tests');self.app.thread.join(3)
         self.assertEqual(self.app.state,'error');self.assertEqual(self.app.store.all(),[])
     def test_cancel_can_interrupt_workflow(self):
         self.app.cancel_event.set()

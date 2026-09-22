@@ -140,6 +140,7 @@ class Handler(BaseHTTPRequestHandler):
                         '/api/runtime/list':'runtime_list','/api/runtime/install':'runtime_install','/api/models/scan':'scan'}
             if path in operations:
                 app.start(operations[path],data);return self.send(202,{'started':True})
+            if path=='/api/unit-tests':app.start('unit_tests');return self.send(202,{'started':True})
             if path=='/api/run':app.start('run');return self.send(202,{'started':True})
             if path=='/api/fix':app.start('fix',data);return self.send(202,{'started':True})
             if path=='/api/control':app.control(data['action']);return self.send(200,{'ok':True})

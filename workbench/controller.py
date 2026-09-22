@@ -65,7 +65,7 @@ class Controller(ModelManager):
         self.pause_requested=False;self.stop_after_model=False;self.backend=None
         self.logs=[];self.pending_logs=[];self.completed_now=0;self.session_errors=0;self.current=None;self.restart_required=False
         self.started=None;self.finished=None;self.publisher=None;self.last_publish=0;self.version_cache=None
-        self.selftest_digest=None;self.on_shutdown=None;self.remote_info=None
+        self.on_shutdown=None;self.remote_info=None
         for name in ('results','logs','preflight_reports'):(self.data/name).mkdir(exist_ok=True)
         self.process_source_commit=self.source_commit()
         self.log('startup','Workbench started'+(' in SIMULATED DEMO mode' if demo else ''))
@@ -173,24 +173,18 @@ class Controller(ModelManager):
         except Exception as exc:return [preflight.issue('git',str(exc)+' Use a Git clone for automatic sync, or disable Git in Worker setup.','Open Worker setup',{'type':'setup'})]
         return []
     def selftest(self):
-        self.set_progress('preflight','Harness self-tests',10,2,'Checking the workbench code before touching model files.')
-        paths=sorted((self.root/'workbench').glob('*.py'))+sorted((self.root/'tests').glob('test*.py'))
-        signature=digest({str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths})
-        if signature==self.selftest_digest:
-            self.set_progress('preflight','Harness self-tests',100,10,'Already verified in this workbench session.')
-            return
-        self.log('preflight','Running harness unit/smoke tests (no real GPU inference).')
+        self.message='Running Workbench unit/smoke tests.'
+        self.set_progress('unit_tests','Running unit/smoke tests',5,5,'Validating the Workbench harness. No model inference is performed.')
+        self.log('unit_tests','Running harness unit/smoke tests (no real GPU inference).')
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
-        self.set_progress('preflight','Harness self-tests',35,5,'Running the unit/smoke suite. This is a coarse estimate.')
         result=subprocess.run([sys.executable,'-m','unittest','discover','-s','tests'],cwd=self.root,capture_output=True,text=True,timeout=180,**flags)
-        self.set_progress('preflight','Harness self-tests',100,10,'Harness tests completed.')
-        self.log('selftest',result.stdout+result.stderr)
-        if result.returncode:raise RuntimeError('Harness self-tests failed; inspect Logs. No benchmark was run.')
-        self.selftest_digest=signature
+        self.log('unit_tests',result.stdout+result.stderr)
+        if result.returncode:raise RuntimeError('Workbench unit/smoke tests failed; inspect Logs.')
+        self.message='Workbench unit/smoke tests passed.'
+        self.finish_progress('unit_tests','Unit tests complete',self.message)
     def check(self,preparation=None):
         self.message='Checking files, pending work, and backend readiness.'
         self.set_progress('preflight','Starting preflight',0,0,'Preparing readiness checks.')
-        self.selftest()
         report,plan=preflight.build(self,preparation,track_progress=True)
         self.report,self.plan=report,plan
         self.record_preflight(report)
@@ -201,7 +195,7 @@ class Controller(ModelManager):
     def start(self,kind='preflight',payload=None):
         if not self.operation.acquire(blocking=False):raise RuntimeError('Another operation is active.')
         if self.restart_required:self.operation.release();raise RuntimeError('Source changed. Restart the workbench before continuing.')
-        self.state='checking' if kind=='preflight' else 'fixing' if kind=='fix' else 'scanning' if kind=='scan' else 'running'
+        self.state='checking' if kind=='preflight' else 'testing' if kind=='unit_tests' else 'fixing' if kind=='fix' else 'scanning' if kind=='scan' else 'running'
         if kind=='scan':
             self.message='Scanning the selected models folder…'
             self.set_progress('scan','Scanning model folder',0,0,'Discovering GGUF files.')
@@ -209,6 +203,7 @@ class Controller(ModelManager):
         def work():
             try:
                 if kind=='preflight':self.check((payload or {}).get('preparation'))
+                elif kind=='unit_tests':self.selftest()
                 elif kind=='fix':self.fix(payload);self.check()
                 elif kind=='run':self.run()
                 elif kind=='hub_search':self.search_hub(payload)
