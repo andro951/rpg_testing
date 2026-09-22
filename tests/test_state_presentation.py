@@ -38,9 +38,12 @@ class StatePresentationTests(unittest.TestCase):
         self.assertIn('Please return only the JSON Patch array.',user)
         self.assertNotIn('SOURCE',user);self.assertNotIn('Nobody moves',user);self.assertNotIn('Nothing else in the tracked state changes',user)
         self.assertNotIn('"new_information"',user)
-    def test_default_presentation_is_indexed_arrays(self):
+    def test_time_only_uses_normal_raw_json(self):
         test=read_json(ROOT/'test_specs/time_only.json')
-        self.assertEqual(presentation_mode(test,{}),'indexed_arrays')
+        self.assertEqual(presentation_mode(test,{}),'raw_json')
+
+    def test_default_presentation_is_indexed_arrays(self):
+        self.assertEqual(presentation_mode({'source':{}},{}),'indexed_arrays')
 
     def test_required_operation_is_part_of_task_success(self):
         test={'source':{'initial_state':{'x':1}},'expected_state':{'x':2}}

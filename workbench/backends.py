@@ -131,7 +131,7 @@ class DemoBackend:
         if schema and schema.get('type')=='boolean':
             text='true' if ('time' in instruction.lower() and is_time) or 'correct' in instruction.lower() else 'false'
         elif schema and schema.get('type')=='string':text='"14:20"'
-        elif 'Describe' in instruction:
+        elif 'Describe' in instruction or 'briefly tell me what needs to change' in instruction.lower():
             if is_inventory:text='On-hand inventory changes from 42 to 49 units. Product metadata, reservations, reorder point, units on order, backorder status, supplier, bin location, and lifecycle status do not change.'
             elif is_coat_remove:text="Evan removes the brown leather coat from his current clothing. His other tracked fields and Laura's state do not change."
             elif is_coat_add:text="Evan adds the brown leather coat to his current clothing. His other tracked fields and Laura's state do not change."
