@@ -81,6 +81,13 @@ class NativeBackend:
         # The server default is 3, which hides that evidence on current builds.
         if '--log-verbosity' in help_text or '--verbosity' in help_text or '-lv' in help_text:
             args += ['--log-verbosity','4']
+        # Current llama.cpp gates POST /slots/{id}?action=erase behind
+        # --slot-save-path even though erase itself writes no slot file.
+        # Keep that directory private to the Workbench runtime cache.
+        if '--slot-save-path' in help_text:
+            slot_path=Path(self.settings.get('runtime_cache',Path.cwd()/'.local/runtime-cache'))/'slots'
+            slot_path.mkdir(parents=True,exist_ok=True)
+            args += ['--slot-save-path',str(slot_path.resolve())]
         for flag in ('--jinja','--no-webui','--no-mmproj','--op-offload','--kv-offload'):
             if flag in help_text:args.append(flag)
         for flag in ('--n-cpu-moe','--n-cpu-ffn'):

@@ -6,7 +6,7 @@ from workbench.execution_policy import CPUOffload,RuntimeStall
 ROOT=Path(__file__).resolve().parents[1]
 class ProcessTests(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+  self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.tmp_path=Path(self.tmp.name)
   self.b=NativeBackend({'backend':'llamacpp','llama_path':sys.executable,'runtime_cache':self.tmp.name},{'uuid':'GPU-SIMULATED'})
   self.addCleanup(self.b.unload)
   def args(exe,model,context,help_text,layers='all'):
@@ -18,9 +18,13 @@ class ProcessTests(unittest.TestCase):
   backend=NativeBackend({'backend':'llamacpp','llama_path':'llama-server'},{'uuid':'GPU-SIMULATED'})
   backend.owned_id='test'
   args=backend.launch_arguments('llama-server',{'paths':['model.gguf']},{'allocated_tokens':8192},
-      '--log-verbosity N --jinja --no-webui --no-mmproj --op-offload --kv-offload')
+      '--log-verbosity N --slot-save-path PATH --jinja --no-webui --no-mmproj --op-offload --kv-offload')
   self.assertIn('--log-verbosity',args)
   self.assertEqual(args[args.index('--log-verbosity')+1],'4')
+  self.assertIn('--slot-save-path',args)
+  slot_path=Path(args[args.index('--slot-save-path')+1])
+  self.assertTrue(slot_path.is_dir())
+  self.assertEqual(slot_path,self.tmp_path/'slots')
  def test_owned_process_load_probe_generation_unload(self):
   metadata=self.load();process=self.b.process
   self.assertEqual(metadata['placement']['status'],'full_gpu');self.assertFalse(metadata['health_exact_ready'])

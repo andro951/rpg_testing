@@ -44,7 +44,7 @@ Overview shows the current pass, execution class, reported GPU/CPU layer counts,
 
 All experimental settings live in `test_specs/*.json`, with a validating editor in the UI. The defaults cover a time change, a clothing-array append without movement, and the retail inventory test. Examples can be imported for large shared-prefix cache-on/off questions, conditional follow-ups, verification/repair, and narration followed by state updating using the same model.
 
-Native llama.cpp exposes the cache controls. The harness clears the slot and records reuse evidence. Missing or inconsistent cached-token counters mark a cache measurement unverified; keeping a chat open is not accepted as proof. The interface does not use `experiment.json` or require a hand-written `worker.local.json`.
+Native llama.cpp exposes the cache controls. The harness starts the server with a Workbench-owned slot path under `.local/runtime-cache/slots`, clears the slot between required measurements, and records reuse evidence. Missing or inconsistent cached-token counters mark a cache measurement unverified; keeping a chat open is not accepted as proof. The interface does not use `experiment.json` or require a hand-written `worker.local.json`.
 
 ## Laptop and Unity
 
