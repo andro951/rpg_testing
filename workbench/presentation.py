@@ -28,16 +28,15 @@ def render_source(source: dict, mode: str):
 
 
 def render_source_text(source: dict, mode: str) -> str:
-    # Do not sort keys: indexed-array keys must stay in numeric insertion order (0,1,2,...,10,...).
-    return json.dumps(render_source(source,mode),ensure_ascii=False,separators=(',',':'),allow_nan=False)
+    # Keep insertion order so indexed-array keys stay 0,1,2,...,10,... and make
+    # the model-facing state as readable as JSON a person would normally paste.
+    return json.dumps(render_source(source,mode),ensure_ascii=False,indent=2,allow_nan=False)
 
 
 def presentation_instruction(mode: str) -> str:
     if mode=='raw_json':
-        return 'SOURCE is ordinary JSON. Arrays are shown with normal square-bracket JSON syntax.'
+        return ''
     if mode=='indexed_arrays':
-        return ('SOURCE is an indexed view of ordinary JSON. Every original JSON array is displayed as a JSON object '
-                'whose string keys are the real zero-based array indexes. Use those visible numeric keys directly as '
-                'the corresponding RFC 6902 array indexes in JSON Pointer paths. The authoritative state still contains '
-                'real arrays, so add, remove, move and copy use normal RFC 6902 array semantics.')
+        return ("For this version, arrays in Current State are shown as objects with their zero-based indexes as keys. "
+                "They're still arrays in the actual state, so use those numbers as array indexes in JSON Patch paths.")
     raise ValueError('Unknown state presentation: '+str(mode))

@@ -19,13 +19,25 @@ class StatePresentationTests(unittest.TestCase):
         test=read_json(ROOT/'test_specs/array_patch_replace_004.json')
         raw=messages(test,test['variants'][0]['steps'][0],{},test['variants'][0])
         indexed=messages(test,test['variants'][1]['steps'][0],{},test['variants'][1])
-        raw_source=json.loads(raw[1]['content'].split('\nSOURCE\n',1)[1])
-        indexed_source=json.loads(indexed[1]['content'].split('\nSOURCE\n',1)[1])
-        self.assertIsInstance(raw_source['initial_state']['tickets'],list)
-        self.assertIsInstance(indexed_source['initial_state']['tickets'],dict)
-        self.assertEqual(indexed_source['initial_state']['tickets']['73'],raw_source['initial_state']['tickets'][73])
+        def state(msg):
+            text=msg[1]['content'].split('Current State:\n',1)[1].split('\n\nNew Information:\n',1)[0]
+            return json.loads(text)
+        raw_source=state(raw);indexed_source=state(indexed)
+        self.assertIsInstance(raw_source['tickets'],list)
+        self.assertIsInstance(indexed_source['tickets'],dict)
+        self.assertEqual(indexed_source['tickets']['73'],raw_source['tickets'][73])
         self.assertNotIn('expected_state',raw[1]['content']);self.assertNotIn('expected_state',indexed[1]['content'])
 
+    def test_time_only_direct_prompt_is_conversational_pretty_and_minimal(self):
+        test=read_json(ROOT/'test_specs/time_only.json');variant=test['variants'][0]
+        prompt=messages(test,variant['steps'][0],{},variant)
+        self.assertEqual(prompt[0],{'role':'system','content':'You help update an existing JSON state when new information is provided.'})
+        self.assertEqual(len(prompt),2);user=prompt[1]['content']
+        self.assertTrue(user.startswith('I need you to write a JSON Patch to update the existing state with the new information.\n\nCurrent State:\n{\n  "time": "14:15",'))
+        self.assertIn('\n\nNew Information:\nExactly five minutes pass.\n\n',user)
+        self.assertIn('Please return only the JSON Patch array.',user)
+        self.assertNotIn('SOURCE',user);self.assertNotIn('Nobody moves',user);self.assertNotIn('Nothing else in the tracked state changes',user)
+        self.assertNotIn('"new_information"',user)
     def test_default_presentation_is_indexed_arrays(self):
         test=read_json(ROOT/'test_specs/time_only.json')
         self.assertEqual(presentation_mode(test,{}),'indexed_arrays')
