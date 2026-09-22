@@ -24,7 +24,7 @@ class ProcessTests(unittest.TestCase):
   self.assertIn('--slot-save-path',args)
   slot_path=Path(args[args.index('--slot-save-path')+1])
   self.assertTrue(slot_path.is_dir())
-  self.assertEqual(slot_path,self.tmp_path/'slots')
+  self.assertEqual(slot_path.resolve(),(self.tmp_path/'slots').resolve())
  def test_owned_process_load_probe_generation_unload(self):
   metadata=self.load();process=self.b.process
   self.assertEqual(metadata['placement']['status'],'full_gpu');self.assertFalse(metadata['health_exact_ready'])
