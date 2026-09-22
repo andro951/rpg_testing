@@ -66,7 +66,7 @@ class Controller(ModelManager):
         self.logs=[];self.pending_logs=[];self.completed_now=0;self.session_errors=0;self.current=None;self.restart_required=False
         self.started=None;self.finished=None;self.publisher=None;self.last_publish=0;self.version_cache=None
         self.selftest_digest=None;self.on_shutdown=None;self.remote_info=None
-        for name in ('results','logs'):(self.data/name).mkdir(exist_ok=True)
+        for name in ('results','logs','preflight_reports'):(self.data/name).mkdir(exist_ok=True)
         self.process_source_commit=self.source_commit()
         self.log('startup','Workbench started'+(' in SIMULATED DEMO mode' if demo else ''))
     def set_progress(self,phase,task,task_percent=None,overall_percent=None,detail='',active=True):
@@ -100,6 +100,17 @@ class Controller(ModelManager):
             stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
             write_json(self.data/'logs'/(stamp+'.json'),items)
             with self.lock:del self.pending_logs[:len(items)]
+    def record_preflight(self,report):
+        stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
+        record={'time':now(),'ready':bool(report.get('ready')),'prepared':bool(report.get('prepared')),
+                'preparation_only':bool(report.get('preparation_only')),'issues':copy.deepcopy(report.get('issues',[])),
+                'plan':copy.deepcopy(report.get('plan',{})),'gpu':copy.deepcopy(report.get('gpu')),
+                'folder':copy.deepcopy(report.get('folder')),'note':report.get('note')}
+        write_json(self.data/'preflight_reports'/(stamp+'.json'),record)
+        if record['issues']:
+            for item in record['issues']:self.log('preflight_issue',json.dumps(item,sort_keys=True,ensure_ascii=False))
+        else:self.log('preflight_issue','none')
+        return record
     def catalog(self):
         if self.demo:return [{'id':'demo-2b','base_model':'SIMULATED','files':['demo.gguf'],'quantization':'SIMULATED','required_vram_gb':8,'sha256':{'demo.gguf':'a'*64}}]
         path=self.root/'models.json'
@@ -181,6 +192,7 @@ class Controller(ModelManager):
         self.selftest()
         report,plan=preflight.build(self,preparation,track_progress=True)
         self.report,self.plan=report,plan
+        self.record_preflight(report)
         self.message='Preparation checks passed; actual GPU checks remain.' if report['prepared'] else 'Ready.' if report['ready'] else 'Preflight found issues. Use the individual action buttons.'
         self.log('preflight',self.message)
         self.finish_progress('preflight','Preflight complete',self.message)
@@ -301,7 +313,10 @@ class Controller(ModelManager):
             if pull(self.root):
                 self.restart_required=True;raise RuntimeError('Source changed before the run. Restart with the new version before starting tests.')
         report=self.check()
-        if not report['ready']:self.state='idle';return
+        if not report['ready']:
+            self.log('run_blocked',json.dumps({'issue_ids':[i.get('id') for i in report.get('issues',[])],
+                                               'issues':report.get('issues',[])},sort_keys=True,ensure_ascii=False))
+            self.flush_logs();self.state='idle';return
         self.state='running';self.completed_now=0;self.session_errors=0;self.started=now();self.finished=None
         self.set_progress('run','Starting benchmark run',0,0,'Preparing the first pending model and case.')
         self.pause_requested=False;self.stop_after_model=False;self.resume_event.set()
@@ -361,7 +376,7 @@ class Controller(ModelManager):
     def export(self):
         self.flush_logs();out=io.BytesIO()
         with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
-            for folder in ('results','logs'):
+            for folder in ('results','logs','preflight_reports'):
                 for p in sorted((self.data/folder).rglob('*')):
                     if p.is_file() and not p.is_symlink() and not p.name.startswith('.'):
                         z.write(p,p.relative_to(self.data).as_posix())
@@ -373,6 +388,12 @@ class Controller(ModelManager):
                     corrupt.append({'file':path.relative_to(self.data).as_posix(),'error':str(exc)})
             summary=summarize(valid)
             summary['corrupt_files']=corrupt
+            reports=[]
+            for path in sorted((self.data/'preflight_reports').glob('*.json')):
+                try:reports.append(read_json(path))
+                except (ValueError,OSError,TypeError) as exc:reports.append({'file':path.name,'error':str(exc)})
+            summary['preflight_reports']=reports
+            summary['latest_preflight']=reports[-1] if reports else None
             z.writestr('summary.json',json.dumps(summary,indent=2))
             z.writestr('summary.csv',csv_export(summary))
             z.writestr('ABOUT.txt','SIMULATED DEMO\n' if self.demo else 'GPU-local benchmark evidence. See each result for provenance and unavailable metrics.\n')

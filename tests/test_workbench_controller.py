@@ -74,6 +74,25 @@ class ControllerTests(unittest.TestCase):
         shutil.rmtree(self.app.data/'results');report=self.app.check()
         self.assertIn('folder_results',[i['id'] for i in report['issues']])
         self.app.fix({'issue_id':'folder_results'});self.assertTrue((self.app.data/'results').is_dir())
+    def test_blocked_preflight_issues_are_recorded_in_evidence(self):
+        shutil.rmtree(self.app.data/'logs')
+        report=self.app.check()
+        self.assertFalse(report['ready']);self.assertIn('folder_logs',[i['id'] for i in report['issues']])
+        z=zipfile.ZipFile(io.BytesIO(self.app.export()))
+        report_files=[n for n in z.namelist() if n.startswith('preflight_reports/') and n.endswith('.json')]
+        self.assertTrue(report_files)
+        saved=json.loads(z.read(report_files[-1]));self.assertIn('folder_logs',[i['id'] for i in saved['issues']])
+        summary=json.loads(z.read('summary.json'))
+        self.assertIn('folder_logs',[i['id'] for i in summary['latest_preflight']['issues']])
+        logs=b'\n'.join(z.read(n) for n in z.namelist() if n.startswith('logs/') and n.endswith('.json'))
+        self.assertIn(b'preflight_issue',logs);self.assertIn(b'folder_logs',logs)
+    def test_run_blocked_logs_issue_details(self):
+        shutil.rmtree(self.app.data/'logs')
+        self.app.run();self.assertEqual(self.app.store.all(),[])
+        z=zipfile.ZipFile(io.BytesIO(self.app.export()))
+        logs=b'\n'.join(z.read(n) for n in z.namelist() if n.startswith('logs/') and n.endswith('.json'))
+        self.assertIn(b'run_blocked',logs);self.assertIn(b'folder_logs',logs)
+
     def test_preparation_cannot_claim_gpu_ready(self):
         report=self.app.check({'gpu_name':'A100','vram_gb':80})
         self.assertTrue(report['preparation_only']);self.assertFalse(report['ready'])
