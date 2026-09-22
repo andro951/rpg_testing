@@ -8,7 +8,7 @@ A browser-controlled benchmark for **original JSON state + new information → s
 
 Update `main` with GitHub Desktop, open the repository folder, and double-click **Start Workbench.vbs**. Python 3.10+ must already be installed. The graphical bootstrap asks permission before creating its private Python environment and installing missing requirements. Git is required by the harness's own tests and Git synchronization. No drivers are installed.
 
-**Start Demo.vbs** opens the same interface with a simulated model and no hardware requirement. It cannot install real models or runtimes. The current enabled suite contains **54 simulated cases**, including 28 prompt-wording calibration cases. Run preflight, run, then run again to verify that completed cases are skipped. These outputs are not measurements of model quality or GPU speed.
+**Start Demo.vbs** opens the same interface with a simulated model and no hardware requirement. It cannot install real models or runtimes. The current enabled suite contains **110 simulated cases**, including 84 prompt-wording calibration cases (4 tasks × 7 prompt variants × 3 deterministic repetitions). Run preflight, run, then run again to verify that completed cases are skipped. These outputs are not measurements of model quality or GPU speed.
 
 ## First-time setup
 

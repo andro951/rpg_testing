@@ -75,6 +75,7 @@ class ResearchSpecTests(unittest.TestCase):
         for name in names:
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
             self.assertEqual(test['timeout_seconds'],60)
+            self.assertEqual(test['repetitions'],3)
             self.assertEqual([v['id'] for v in test['variants']],expected_ids)
             self.assertEqual(len(changes(test['source']['initial_state'],test['expected_state'])),1)
             self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
