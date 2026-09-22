@@ -37,7 +37,7 @@ $('folder-note').textContent=s.report?.folder?.path?('Active folder: '+s.report.
 renderModels();$('log-view').textContent=s.logs.map(l=>l.time+' ['+l.category+'] '+l.message).join('\n');$('remote-url').textContent=s.remote?.url||'';
 if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=s.settings.publish_results; }
 renderHub();renderRuntimes();renderRunControls();folderPrompts();
-const scope=s.report?.selection;$('run-scope').textContent=scope?('Scope: '+scope.model_id+' · '+(scope.test_id||'all enabled tests')+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
+const scope=s.report?.selection;let scopeTests='all enabled tests';if(scope?.test_id)scopeTests=scope.test_id;else if(scope?.test_ids)scopeTests=scope.test_ids.length+' selected test(s)';$('run-scope').textContent=scope?('Scope: '+scope.model_id+' · '+scopeTests+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
 }
 let modelRenderSignature='',modelVramDrafts=new Map();
 async function saveModelVram(model,tier){
@@ -164,55 +164,75 @@ on('runtime-locate',async()=>{setPage('setup');await chooseLlamaServer();});
 async function loadAnalysis(){if(state?.busy){$('analysis-list').replaceChildren(el('article','Finish or stop the active operation before reading results.'));return;}const data=await api('/api/analysis');$('analysis-note').textContent=data.note;const list=$('analysis-list');list.replaceChildren();for(const g of data.groups){const card=el('article');card.append(el('h3',g.model_id+' · '+g.variant_id),el('span',(g.simulated?'SIMULATED · ':'')+g.execution_class,'badge'),el('p',g.test_id+' · '+g.scored+' scored · '+(g.exact_match_rate===null?'No exact score':(g.exact_match_rate*100).toFixed(1)+'% exact state matches')+' · median '+(g.median_pipeline_seconds===null?'—':g.median_pipeline_seconds.toFixed(3)+' s')),el('p',g.timeouts+' timeouts · '+g.skipped+' skipped · '+g.infrastructure_errors+' errors · '+g.invalid_measurements+' invalid measurements','muted'));list.append(card);}if(!list.children.length)list.append(el('article','No recorded comparison groups yet.'));}
 on('refresh-analysis',loadAnalysis);
 // Targeted runs filter the queue, never the saved experiment definitions.
-let runOptions=null,runOptionsLoading=false,runOptionsValid=false,targetSubmitting=false;
+let runOptions=null,runOptionsLoading=false,runOptionsValid=false,targetSubmitting=false,oneModelSelectedTests=null;
 function fillRunSelect(id,items,placeholder,label){
  const select=$(id),previous=select.value;
  select.replaceChildren(new Option(placeholder,''),...items.map(item=>new Option(label(item),item.id)));
  select.value=items.some(item=>item.id===previous)?previous:'';
 }
 function selectedRunTest(){return runOptions?.tests.find(t=>t.id===$('individual-test').value);}
+function selectedOneModelTests(){
+ const tests=runOptions?.tests||[];
+ return tests.filter(test=>oneModelSelectedTests?.has(test.id));
+}
 function renderRunVariants(){
  const test=selectedRunTest();
  fillRunSelect('individual-variant',test?.variants||[],'All enabled variants',v=>v.name);
+}
+function renderOneModelTests(){
+ const tests=runOptions?.tests||[],list=$('one-model-tests');list.replaceChildren();
+ for(const test of tests){
+  const row=el('div',undefined,'row one-model-test');
+  const label=el('label',undefined,'check'),box=document.createElement('input');box.type='checkbox';box.dataset.testId=test.id;
+  box.checked=!!oneModelSelectedTests?.has(test.id);
+  box.addEventListener('change',()=>{if(box.checked)oneModelSelectedTests.add(test.id);else oneModelSelectedTests.delete(test.id);renderRunControls();});
+  label.append(box,el('span',test.name));
+  row.append(label,el('p',test.variants.length+' variants × '+test.repetitions+' repetitions = '+test.variants.length*test.repetitions+' cases · '+test.timeout_seconds+' s limit','muted'));
+  list.append(row);
+ }
+ if(!tests.length)list.append(el('p','No enabled tests. Add or enable a test in Test definitions.','muted'));
 }
 async function loadRunOptions(){
  if(runOptionsLoading)return;
  if(state?.busy){renderRunControls();return;}
  runOptionsLoading=true;runOptionsValid=false;renderRunControls();
  try{
+  const previous=oneModelSelectedTests;
   runOptions=await api('/api/run-options');
+  if(previous===null)oneModelSelectedTests=new Set(runOptions.tests.map(test=>test.id));
+  else oneModelSelectedTests=new Set([...previous].filter(id=>runOptions.tests.some(test=>test.id===id)));
   const modelLabel=m=>m.name+' · '+m.quantization+' · '+(m.required_vram_gb===null?'VRAM unassigned':m.required_vram_gb+' GB');
   fillRunSelect('individual-model',runOptions.models,'Choose a model…',modelLabel);
   fillRunSelect('one-model-model',runOptions.models,'Choose a model…',modelLabel);
   fillRunSelect('individual-test',runOptions.tests,'Choose a test…',t=>t.name);
-  renderRunVariants();
-  const list=$('one-model-tests');list.replaceChildren();
-  for(const test of runOptions.tests){const row=el('div',undefined,'row');row.append(el('b',test.name),el('p',test.variants.length+' variants × '+test.repetitions+' repetitions = '+test.variants.length*test.repetitions+' cases · '+test.timeout_seconds+' s limit','muted'));list.append(row);}
-  if(!runOptions.tests.length)list.append(el('p','No enabled tests. Add or enable a test in Test definitions.','muted'));
-  runOptionsValid=true;
+  renderRunVariants();renderOneModelTests();runOptionsValid=true;
  }finally{runOptionsLoading=false;renderRunControls();}
 }
 function renderRunControls(){
  const busy=!!state?.busy||!!state?.restart_required||runOptionsLoading||targetSubmitting;
- const models=runOptions?.models||[],tests=runOptions?.tests||[],test=selectedRunTest();
+ const models=runOptions?.models||[],tests=runOptions?.tests||[],test=selectedRunTest(),selectedTests=selectedOneModelTests();
  const individualModel=models.find(m=>m.id===$('individual-model').value),oneModel=models.find(m=>m.id===$('one-model-model').value);
  const variantValid=!$('individual-variant').value||test?.variants.some(v=>v.id===$('individual-variant').value);
  const individualReady=runOptionsValid&&individualModel&&test&&variantValid;
- const modelReady=runOptionsValid&&oneModel&&tests.length;
+ const modelReady=runOptionsValid&&oneModel&&selectedTests.length>0;
  for(const action of ['check','run']){$('individual-'+action).disabled=busy||!individualReady;$('one-model-'+action).disabled=busy||!modelReady;}
  for(const id of ['individual-model','individual-test','individual-variant','one-model-model'])$(id).disabled=busy||!runOptionsValid;
  for(const id of ['individual-refresh','one-model-refresh'])$(id).disabled=busy;
+ document.querySelectorAll('#one-model-tests input[type=checkbox]').forEach(box=>box.disabled=busy||!runOptionsValid);
+ $('one-model-toggle-tests').disabled=busy||!runOptionsValid||!tests.length;
+ $('one-model-toggle-tests').textContent=selectedTests.length?'Deselect all':'Select all';
  let notice=runOptionsLoading?'Loading models and tests…':!runOptionsValid?'Refresh choices when the current operation is finished.':!models.length?'No enabled catalogued models. Rescan and assign VRAM in Installed models.':!tests.length?'No enabled test definitions. Add or enable a test in Test definitions.':null;
  const count=test?test.repetitions*($('individual-variant').value?1:test.variants.length):0;
  $('individual-summary').textContent=notice|| (individualReady?count+' configured case(s) on '+individualModel.name+' · '+test.timeout_seconds+' s limit each. Only pending cases will run.':'Choose a model and test to see the scope.');
- const total=tests.reduce((n,t)=>n+t.repetitions*t.variants.length,0);
- $('one-model-summary').textContent=notice|| (modelReady?tests.length+' test definition(s), '+total+' configured case(s) on '+oneModel.name+'. Only pending cases will run.':'Choose a model to see the scope.');
+ const total=selectedTests.reduce((n,t)=>n+t.repetitions*t.variants.length,0);
+ $('one-model-summary').textContent=notice|| (modelReady?selectedTests.length+' selected test definition(s), '+total+' configured case(s) on '+oneModel.name+'. Only pending cases will run.':oneModel&&!selectedTests.length?'Select at least one test.':'Choose a model to see the scope.');
 }
 async function startTargetedRun(mode,operation){
  const individual=mode==='individual';
  const selection={model_id:$(individual?'individual-model':'one-model-model').value};
  if(!selection.model_id)throw Error('Choose a model.');
  if(individual){selection.test_id=$('individual-test').value;if(!selection.test_id)throw Error('Choose a test.');if($('individual-variant').value)selection.variant_id=$('individual-variant').value;}
+ else{selection.test_ids=selectedOneModelTests().map(test=>test.id);if(!selection.test_ids.length)throw Error('Select at least one test.');}
  targetSubmitting=true;renderRunControls();
  try{await api('/api/'+operation,{selection});setPage('overview');await poll();}
  finally{targetSubmitting=false;renderRunControls();}
@@ -222,6 +242,11 @@ for(const mode of ['individual','one-model']){
  on(mode+'-check',()=>startTargetedRun(mode,'preflight'));
  on(mode+'-run',()=>startTargetedRun(mode,'run'));
 }
+on('one-model-toggle-tests',()=>{
+ const tests=runOptions?.tests||[];
+ oneModelSelectedTests=oneModelSelectedTests?.size?new Set():new Set(tests.map(test=>test.id));
+ renderOneModelTests();renderRunControls();
+});
 for(const id of ['individual-model','one-model-model','individual-variant'])$(id).addEventListener('change',renderRunControls);
 $('individual-test').addEventListener('change',()=>{$('individual-variant').value='';renderRunVariants();renderRunControls();});
 
