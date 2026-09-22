@@ -112,8 +112,8 @@ class DemoBackend:
             source=parse(prompt.split('\nSOURCE\n',1)[1])
             event=source.get('new_information','')
         else:
-            state_text=prompt.split('Current State:\n',1)[1].split('\n\nNew Information:\n',1)[0]
-            event_text=prompt.split('\n\nNew Information:\n',1)[1]
+            actual=prompt.rsplit('Current State:\n',1)[1]
+            state_text,event_text=actual.split('\n\nNew Information:\n',1)
             event=event_text.split('\n\n',1)[0]
             source={'initial_state':parse(state_text),'new_information':event}
         instruction=messages[-1]['content']
@@ -134,8 +134,8 @@ class DemoBackend:
         is_coat_remove='takes off his coat and hangs it on the hook' in lower_event
         is_coat_add='brown leather coat is hanging' in lower_event and 'puts it on over his shirt' in lower_event
         is_time='minutes' in event and not is_inventory and not is_coat_remove and not is_coat_add
-        is_door_unlock='unlocks the front door' in lower_event
-        is_relaxed='is now relaxed' in lower_event
+        is_door_unlock=lower_event.strip()=='tom unlocks the front door.'
+        is_relaxed=lower_event.strip()=='tom is now relaxed.'
         if schema and schema.get('type')=='boolean':
             text='true' if ('time' in instruction.lower() and is_time) or 'correct' in instruction.lower() else 'false'
         elif schema and schema.get('type')=='string':text='"14:20"'
