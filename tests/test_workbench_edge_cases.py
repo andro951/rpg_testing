@@ -76,7 +76,8 @@ class EdgeTests(unittest.TestCase):
             while self.app.state!='paused' and time.monotonic()<deadline:time.sleep(.01)
             self.assertEqual(self.app.state,'paused')
             count=len(self.app.store.all());time.sleep(.15);self.assertEqual(len(self.app.store.all()),count)
-            self.app.control('resume');self.app.thread.join(10)
+            self.app.control('resume');self.app.thread.join(30)
+            self.assertFalse(self.app.thread.is_alive(),'Resumed demo run did not finish')
             self.assertFalse(self.app.operation.locked());self.assertEqual(self.app.report['plan']['pending'],0)
     def test_stop_now_records_aborted_without_deadlock(self):
         class Slow(DemoBackend):
