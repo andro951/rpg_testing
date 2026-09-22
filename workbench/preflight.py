@@ -115,7 +115,7 @@ def build(app, preparation=None, track_progress=True):
         if not app.demo:
             exe=executable('llama-server',settings.get('llama_path',''))
             if not exe:
-                problems.append(issue('backend','Native llama.cpp is missing. Install an official runtime or select an existing executable.','Install / select runtime',{'type':'runtime'}))
+                problems.append(issue('backend','Native llama.cpp is missing.','Install llama.cpp',{'type':'runtime_install'}))
             else:
                 try:
                     from .native import capabilities
@@ -150,5 +150,5 @@ def build(app, preparation=None, track_progress=True):
     report={'ready':not problems and not preparation,'prepared':not problems and bool(preparation),
             'preparation_only':bool(preparation),'issues':problems,'plan':public_plan(plan),'gpu':gpu,
             'folder':folder_info,'inventory_warning':inventory_error,
-            'note':'Preparation checks cannot certify a future allocation, driver, or remote installation.' if preparation else 'Live preflight passed; model readiness is checked after each load.'}
+            'note':'Preparation checks cannot certify a future allocation, driver, or remote installation.' if preparation else ('Live preflight blocked; resolve the listed issues.' if problems else 'Live preflight passed; model readiness is checked after each load.')}
     return report,plan

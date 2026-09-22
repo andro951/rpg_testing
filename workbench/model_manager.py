@@ -41,6 +41,15 @@ class ModelManager:
             self.log('download','Verified '+mid)
         self.scan_folder();self.report=None
         self.message='Models installed and verified. Run preflight next.'
+    def repair_runtime(self,gpu_name=''):
+        if self.demo:raise ValueError('Demo mode never installs runtimes. Open the normal Workbench launcher.')
+        from .runtimes import RuntimeClient,automatic_bundle
+        self.runtime_options=RuntimeClient().releases()
+        choice=automatic_bundle(self.runtime_options,gpu_name)
+        self.log('runtime','User approved automatic runtime repair; selected '+choice['tag']+' / '+choice['name'])
+        self.message='Installing official llama.cpp runtime: '+choice['name']
+        self.install_runtime({'id':choice['id']})
+        return choice
     def list_runtimes(self):
         from .runtimes import RuntimeClient
         self.runtime_options=RuntimeClient().releases();self.message='Select an official build to install it.'

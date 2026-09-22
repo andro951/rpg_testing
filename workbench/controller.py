@@ -102,7 +102,8 @@ class Controller(ModelManager):
             with self.lock:del self.pending_logs[:len(items)]
     def record_preflight(self,report):
         stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
-        record={'time':now(),'ready':bool(report.get('ready')),'prepared':bool(report.get('prepared')),
+        report['report_id']=stamp
+        record={'id':stamp,'time':now(),'ready':bool(report.get('ready')),'prepared':bool(report.get('prepared')),
                 'preparation_only':bool(report.get('preparation_only')),'issues':copy.deepcopy(report.get('issues',[])),
                 'plan':copy.deepcopy(report.get('plan',{})),'gpu':copy.deepcopy(report.get('gpu')),
                 'folder':copy.deepcopy(report.get('folder')),'note':report.get('note')}
@@ -235,6 +236,7 @@ class Controller(ModelManager):
             from .downloads import download_model
             model=next(m for m in self.catalog() if m['id']==a['model_id'])
             download_model(model,Path(self.folder_info()['path']),self.cancel_event,self.log,token=self.settings.get('hf_token',''))
+        elif kind=='runtime_install':self.repair_runtime((self.report.get('gpu') or {}).get('name',''))
         elif kind=='delete_corrupt':
             path=self.store.path(a['model_id'],a['case_id'])
             if path.exists():path.unlink()

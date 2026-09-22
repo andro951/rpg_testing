@@ -172,6 +172,18 @@ class ModelManagementTests(unittest.TestCase):
                  {'id':'second','repo_id':'second/model','revision':'b'*40,'files':['model.gguf'],'required_vram_gb':8}]
         found=scan_models(self.models,catalog)
         self.assertEqual([x['id'] for x in found],['first','second']);self.assertFalse(any(x['errors'] for x in found))
+    def test_preflight_runtime_repair_selects_official_candidate(self):
+        choices=[{'id':'cuda13','tag':'b2','name':'llama-win-cuda-cu13-x64.zip','note':'CUDA 13','prerelease':False},
+                 {'id':'cuda12','tag':'b2','name':'llama-win-cuda-cu12-x64.zip','note':'CUDA 12 candidate','prerelease':False}]
+        self.app.report={'gpu':{'name':'NVIDIA GeForce GTX 1080'},'issues':[{
+            'id':'backend','label':'Install llama.cpp','action':{'type':'runtime_install'}}]}
+        exe=str(self.root/'.local/runtime/b2/llama-server.exe')
+        with patch('workbench.runtimes.RuntimeClient.releases',return_value=choices),\
+             patch('workbench.runtimes.install',return_value=exe) as install,\
+             patch('workbench.native.capabilities',return_value={'version':'fixture'}):
+            self.app.fix({'issue_id':'backend'})
+        self.assertEqual(install.call_args.args[0]['id'],'cuda12')
+        self.assertEqual(self.app.settings['llama_path'],exe)
     def test_runtime_repair_requires_server_issued_selection(self):
         with patch('workbench.runtimes.install') as install:
             with self.assertRaises(ValueError):self.app.install_runtime({'id':'arbitrary-url'})

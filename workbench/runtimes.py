@@ -69,6 +69,23 @@ def bundles(releases,system=None,machine=None):
     return result
 
 
+def automatic_bundle(options,gpu_name=''):
+    if not options:raise ValueError('No compatible official llama.cpp GPU runtime release was found for this operating system.')
+    older=bool(re.search(r'(?i)(?:GTX\\s*10\\d0|PASCAL|TESLA\\s+P(?:4|6|40|100))',gpu_name or ''))
+    def rank(item):
+        text=(item.get('name','')+' '+item.get('note','')).lower()
+        cuda12=bool(re.search(r'(?:cuda[^0-9]*12|cu12)',text))
+        cuda13=bool(re.search(r'(?:cuda[^0-9]*13|cu13)',text))
+        vulkan='vulkan' in text
+        if cuda12:return 0
+        if vulkan:return 1 if older else 2
+        if cuda13:return 4 if older else 1
+        if 'cuda' in text:return 2
+        return 3
+    indexed=list(enumerate(options))
+    return min(indexed,key=lambda pair:(bool(pair[1].get('prerelease')),rank(pair[1]),pair[0]))[1]
+
+
 def member_path(root,name):
     if '\x00' in name or '\\' in name or ':' in name or name.startswith('/') or '..' in PurePosixPath(name).parts:
         raise ValueError('Unsafe runtime archive path')

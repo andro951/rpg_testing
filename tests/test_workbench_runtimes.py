@@ -1,11 +1,18 @@
 import hashlib,io,json,tarfile,tempfile,threading,unittest,zipfile
 from pathlib import Path
-from workbench.runtimes import bundles,extract_archive,install
+from workbench.runtimes import automatic_bundle,bundles,extract_archive,install
 
 class RuntimeTests(unittest.TestCase):
  def test_host_gpu_only(self):
   a=[{'id':i,'name':n,'size':10,'browser_download_url':'https://github.com/ggml-org/llama.cpp/releases/download/b1/'+n} for i,n in enumerate(['llama-b1-bin-win-cuda-12.4-x64.zip','cudart-llama-bin-win-cu12.4-x64.zip','llama-b1-bin-win-cpu-x64.zip','llama-b1-bin-ubuntu-vulkan-x64.tar.gz'])]
   b=bundles([{'tag_name':'b1','assets':a}],'Windows','AMD64');self.assertEqual(len(b),1);self.assertEqual(len(b[0]['assets']),2)
+ def test_automatic_bundle_prefers_cuda12_for_gtx1080(self):
+  choices=[{'id':'13','name':'llama-win-cuda-cu13-x64.zip','note':'CUDA 13','prerelease':False},
+           {'id':'vk','name':'llama-win-vulkan-x64.zip','note':'Vulkan GPU build','prerelease':False},
+           {'id':'12','name':'llama-win-cuda-cu12-x64.zip','note':'CUDA 12 candidate','prerelease':False}]
+  self.assertEqual(automatic_bundle(choices,'NVIDIA GeForce GTX 1080')['id'],'12')
+ def test_automatic_bundle_rejects_empty_results(self):
+  with self.assertRaises(ValueError):automatic_bundle([],'GTX 1080')
  def test_bad_archive_paths(self):
   for name in ['../bad','/etc/file','C:/x','a\\b']:
    with tempfile.TemporaryDirectory() as d:

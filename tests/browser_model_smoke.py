@@ -32,6 +32,8 @@ def main():
         'siblings':[{'rfilename':f'Model-{q}.gguf','size':len(data),'lfs':{'sha256':h,'size':len(data)}} for q in ('Q5_K_M','Q4_K_M')]},8)
     release={'id':'runtime-fixture','tag':'test-build','name':'SIMULATED-native-runtime.zip','size_bytes':20,
              'note':'Fake runtime fixture for browser wiring; no binary is executed.','assets':[]}
+    def assert_dialog_runtime(dialog):
+        assert 'llama.cpp is required' in dialog.message,dialog.message
     with tempfile.TemporaryDirectory() as temp:
         project=Path(temp)/'repository';project.mkdir();models=Path(temp)/'chosen-models';models.mkdir()
         shutil.copytree(root/'test_specs',project/'test_specs');shutil.copytree(root/'examples',project/'examples')
@@ -60,6 +62,7 @@ def main():
                  patch('workbench.runtimes.RuntimeClient.releases',return_value=[release]), \
                  patch('workbench.runtimes.install',side_effect=fixture_runtime), \
                  patch('workbench.native.capabilities',return_value={'version':'TEST FIXTURE'}), \
+                 patch('workbench.preflight.detect_gpus',return_value=[{'name':'NVIDIA GeForce GTX 1080','uuid':'fixture','total_gib':8,'free_gib':8,'driver':'fixture'}]), \
                  patch('workbench.server.select_directory',return_value=str(models)),sync_playwright() as p:
                 exe=os.environ.get('CHROME_PATH') or shutil.which('chromium') or shutil.which('google-chrome')
                 browser=p.chromium.launch(headless=True,args=['--no-sandbox'],**({'executable_path':exe} if exe else {}))
@@ -125,12 +128,14 @@ window.fetch=async(path,options={})=>{const r=await window.workerBridge(path,opt
                 expect(first).to_contain_text('VRAM: 8 GB assigned',timeout=5000)
                 expect(first_select).to_have_value('8');expect(second_select).to_have_value('8')
                 expect(second_select).to_be_enabled();expect(page.locator('#state-badge')).to_have_text('IDLE')
-                page.locator('nav button[data-page="runtime"]').click();page.locator('#runtime-list').click()
-                expect(page.locator('#runtime-select option')).to_have_count(1,timeout=10000)
-                assert app.settings['llama_path']=='', 'Listing runtimes must not install one'
-                page.once('dialog',lambda d:d.accept());page.locator('#runtime-install').click()
+                assert app.settings['llama_path']==''
+                page.locator('nav button[data-page="overview"]').click()
+                page.once('dialog',lambda d:(assert_dialog_runtime(d),d.accept()))
+                page.locator('#preflight').click()
+                page.locator('nav button[data-page="runtime"]').click()
                 expect(page.locator('#runtime-installed')).to_contain_text('llama-server',timeout=10000)
                 assert Path(app.settings['llama_path']).is_relative_to(project)
+                assert app.report is not None and not any(i['id']=='backend' for i in app.report['issues']), app.report['issues']
                 screenshot=os.environ.get('WORKBENCH_MODEL_SCREENSHOT')
                 page.locator('nav button[data-page="find"]').click()
                 if screenshot:page.screenshot(path=screenshot,full_page=True)
@@ -138,7 +143,7 @@ window.fetch=async(path,options={})=>{const r=await window.workerBridge(path,opt
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
                 assert not errors,errors
                 browser.close()
-                print('PASS: real browser + authenticated controller: native folder picker, nonblocking scan, empty confirmation, Hub search, quant selection, verified fixture download to chosen folder, installed models, explicit runtime installation. External services are fixture-backed, not live downloads.')
+                print('PASS: real browser + authenticated controller: native folder picker, nonblocking scan, empty confirmation, Hub search, quant selection, verified fixture download to chosen folder, installed models, preflight-confirmed automatic runtime repair and re-preflight. External services are fixture-backed, not live downloads.')
         finally:
             app.control('stop')
             if app.thread:app.thread.join(5)
