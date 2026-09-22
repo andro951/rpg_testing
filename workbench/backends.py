@@ -113,6 +113,8 @@ class DemoBackend:
         event=event_text.split('\n\n',1)[0]
         source={'initial_state':parse(state_text),'new_information':event}
         instruction=messages[-1]['content']
+        if len(messages)==2 and 'Current State:\n' in instruction:
+            instruction=instruction.rsplit('\n\n',1)[-1]
         is_inventory='A2667' in event and 'received' in event.lower() and 'shipped' in event.lower()
         lower_event=event.lower()
         presented_state=source.get('initial_state',source)
