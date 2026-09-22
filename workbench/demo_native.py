@@ -11,4 +11,4 @@ class DemoNative(DemoBackend):
                                   execution_class=execution_class)
         return self.load_metadata
     @contextlib.contextmanager
-    def budget(self,seconds):yield
+    def budget(self,seconds,terminate_process=True):yield

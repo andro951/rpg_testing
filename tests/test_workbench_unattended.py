@@ -92,6 +92,26 @@ class UnattendedTests(unittest.TestCase):
         records=self.app.store.all();self.assertEqual(len(records),3)
         self.assertTrue(all(r['status']=='completed' and not r['score']['valid'] for r in records))
         self.assertEqual(len([e for e in self.events if e[0]=='load']),3)
+    def test_case_timeout_preserves_partial_is_terminal_and_continues(self):
+        group=self.plan['groups'][0];second=copy.deepcopy(group['jobs'][0])
+        second['case_id']='b'*64;second['variant']=copy.deepcopy(second['variant']);second['variant']['id']='second'
+        group['jobs'].append(second);self.plan['pending']+=1
+        Fake=self.factory(lambda *a:None);original=Fake.generate;calls={}
+        def timeout_once(b,*a,**k):
+            calls[b.mid]=calls.get(b.mid,0)+1
+            if b.mid=='large' and calls[b.mid]==1:
+                exc=RuntimeStall('Operational watchdog expired',{'timeout_seconds':60})
+                exc.partial_response={'text':'partial answer','reasoning_text':'','finish_reason':None,
+                                      'usage':{},'timings':{},'raw_chunks':[],'incomplete':True,'request_seconds':60}
+                raise exc
+            return original(b,*a,**k)
+        with patch.object(Fake,'generate',timeout_once):Session(self.app,self.report,self.plan,Fake).run()
+        large=[r for r in self.app.store.all() if r['model_id']=='large']
+        self.assertEqual(len(large),2);timed=next(r for r in large if r.get('timed_out'))
+        self.assertEqual(timed['status'],'completed');self.assertFalse(timed['score']['exact_match'])
+        self.assertEqual(timed['calls'][0]['text'],'partial answer');self.assertEqual(timed['timeout_seconds'],60)
+        self.assertEqual(calls['large'],2)
+        self.assertEqual(pending_plan(self.models,[self.test],self.target,self.app.store)['pending'],0)
     def test_context_expands_once_and_preserves_attempt(self):
         Fake=self.factory(lambda *a:None);original=Fake.generate;called=set()
         def grow(b,*a,**k):

@@ -50,16 +50,20 @@ class NativeBackend:
         self.load_metadata={};self.version_info={};self.lines=[];self.timed_out=False
         self.requested_layers='all';self.execution_class='full_gpu';self.progress=lambda task,pct,detail='':None
 
-    def cancel(self):
+    def cancel_request(self):
         self.transport.cancel()
+
+    def cancel(self):
+        self.cancel_request()
         if self.process and self.process.poll() is None:
             self.process.terminate()
 
     @contextlib.contextmanager
-    def budget(self,seconds):
+    def budget(self,seconds,terminate_process=True):
         self.timed_out=False
         def expire():
-            self.timed_out=True;self.cancel()
+            self.timed_out=True
+            self.cancel() if terminate_process else self.cancel_request()
         timer=threading.Timer(seconds,expire);timer.daemon=True;timer.start()
         try:
             yield
@@ -68,6 +72,7 @@ class NativeBackend:
             if self.timed_out:
                 error=RuntimeStall('Operational watchdog expired',{'timeout_seconds':seconds})
                 error.partial=getattr(exc,'partial',{})
+                error.partial_response=getattr(exc,'partial_response',{})
                 raise error from exc
             raise
         finally:timer.cancel()

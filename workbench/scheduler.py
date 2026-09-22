@@ -9,9 +9,8 @@ import contextlib
 import platform
 import uuid
 from datetime import datetime, timezone
-from .execution_policy import (RunFailure, DoesNotFit, ContextCapacity, POLICY_VERSION,
-    PRIMARY_CASE_SECONDS, RECOVERY_CASE_SECONDS, MAX_CONTEXT_EXPANSIONS, fallback_id,
-    next_context, recovery_layers)
+from .execution_policy import (RunFailure, DoesNotFit, ContextCapacity, RuntimeStall, POLICY_VERSION,
+    MAX_CONTEXT_EXPANSIONS, fallback_id, next_context, recovery_layers)
 from .telemetry import GpuMonitor, monitored_execute
 from .workflows import Cancelled
 
@@ -126,8 +125,8 @@ class Session:
                     'stage':'starting','pass':phase,'execution_class':mode,
                     'placement':self.app.backend.load_metadata.get('placement')}
                 record=self.base_record(group,job,mode)
-                seconds=PRIMARY_CASE_SECONDS if mode=='full_gpu' else RECOVERY_CASE_SECONDS
-                record['watchdog_seconds']=seconds
+                seconds=job['test']['timeout_seconds']
+                record['timeout_seconds']=seconds;record['watchdog_seconds']=seconds
                 try:
                     # One timer includes ALL calls, branches and review passes in this workflow.
                     self.app.timing_active=True
@@ -137,13 +136,38 @@ class Session:
                         self.app.current.update(stage=info['step'])
                         self.app.set_progress('run','Running benchmark case',info['percent'],self.app.run_overall_percent(),
                                               case_label+' · '+str(info['step']))
-                    with self.app.backend.budget(seconds):
+                    with self.app.backend.budget(seconds,terminate_process=False):
                         result=monitored_execute(job['test'],job['variant'],self.app.backend,
                             self.app.cancel_event,lambda step:self.app.current.update(stage=step),self.monitor,job['repetition'],case_progress)
                     record.update(status='completed',**result);self.app.completed_now+=1
                 except Cancelled as exc:
                     record.update(status='aborted',error='Stopped',partial=getattr(exc,'partial',{}))
                     self.app.timing_active=False;self.save(record);raise
+                except RuntimeStall as exc:
+                    self.app.timing_active=False
+                    partial=copy.deepcopy(getattr(exc,'partial',{}) or {})
+                    record.update(status='completed',reason='case_timeout',error=str(exc),timed_out=True,
+                                  partial=partial,calls=copy.deepcopy(partial.get('calls',[])),
+                                  outputs=copy.deepcopy(partial.get('outputs',{})),
+                                  step_events=copy.deepcopy(partial.get('step_events',[])),
+                                  pipeline_seconds=partial.get('pipeline_seconds',seconds),
+                                  measurement_valid=True,
+                                  score={'valid':False,'exact_match':False,
+                                         'error':f'Timed out after {seconds} seconds',
+                                         'note':'Generation was cut off at the test time limit; partial output is preserved.'})
+                    self.app.completed_now+=1;self.save(record)
+                    try:self.app.backend.clear_cache()
+                    except Cancelled:raise
+                    except Exception:
+                        try:self.load(group,mode,layers,phase)
+                        except DoesNotFit as failed:
+                            remaining=jobs[index+1:]
+                            self.skip(group,remaining,failed,mode,recoverable=mode=='full_gpu')
+                            return remaining if mode=='full_gpu' else []
+                        except Cancelled:raise
+                        except Exception as failed:
+                            self.skip(group,jobs[index+1:],failed,mode);return []
+                    break
                 except ContextCapacity as exc:
                     self.app.timing_active=False
                     record.update(status='error',reason=exc.reason,error=str(exc),partial=getattr(exc,'partial',{}),measurement_valid=False)

@@ -178,6 +178,8 @@ def validate_test(test: dict) -> None:
             raise ValueError(f'{prohibited} is automatic, not a test setting')
     if type(test.get('repetitions', 1)) is not int or test.get('repetitions', 1) < 1:
         raise ValueError('repetitions must be positive')
+    if type(test.get('timeout_seconds')) is not int or test['timeout_seconds'] < 1:
+        raise ValueError('timeout_seconds must be a positive integer')
     if not isinstance(test.get('source'), dict) or not isinstance(test.get('variants'), list) or not test['variants']:
         raise ValueError('Test needs source and nonempty variants')
     if test.get('state_presentation','indexed_arrays') not in ('raw_json','indexed_arrays'):
