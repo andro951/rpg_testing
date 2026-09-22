@@ -54,6 +54,8 @@ class DomainTests(unittest.TestCase):
     def test_invalid_prompt_style(self):
         t=tiny_test();t['variants'][0]['prompt_style']='mystery'
         with self.assertRaises(ValueError):validate_test(t)
+        t=tiny_test();t['variants'][0]['new_information_override']=42
+        with self.assertRaises(ValueError):validate_test(t)
     def test_identity(self):
         t=tiny_test();m={'id':'qwen','sha256':{'x':'abc'}};a=case_id(m,t,t['variants'][0],0,{'gpu':'1080'})
         self.assertNotEqual(a,case_id(m,t,t['variants'][0],1,{'gpu':'1080'}))

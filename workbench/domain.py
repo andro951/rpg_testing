@@ -258,6 +258,8 @@ def validate_test(test: dict) -> None:
             raise ValueError('Unknown cache mode')
         if variant.get('prompt_style','conversational_v2') not in PROMPT_STYLES:
             raise ValueError('Unknown prompt style')
+        if 'new_information_override' in variant and not isinstance(variant['new_information_override'],str):
+            raise ValueError('new_information_override must be text')
         if variant.get('state_presentation',test.get('state_presentation','indexed_arrays')) not in ('raw_json','indexed_arrays'):
             raise ValueError('Unknown state presentation')
         known = set()
