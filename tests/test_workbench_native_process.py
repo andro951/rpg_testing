@@ -15,7 +15,7 @@ class ProcessTests(unittest.TestCase):
   self.cap=patch('workbench.native.capabilities',return_value={'help':'','version':'SIMULATED STUB'});self.cap.start();self.addCleanup(self.cap.stop)
  def load(self):return self.b.load({'id':'integration-stub','paths':['not-used.gguf']},{'allocated_tokens':8192,'native_tokens':65536})
  def test_launch_requests_trace_verbosity_for_placement_evidence(self):
-  backend=NativeBackend({'backend':'llamacpp','llama_path':'llama-server'},{'uuid':'GPU-SIMULATED'})
+  backend=NativeBackend({'backend':'llamacpp','llama_path':'llama-server','runtime_cache':str(self.tmp_path)},{'uuid':'GPU-SIMULATED'})
   backend.owned_id='test'
   args=backend.launch_arguments('llama-server',{'paths':['model.gguf']},{'allocated_tokens':8192},
       '--log-verbosity N --slot-save-path PATH --jinja --no-webui --no-mmproj --op-offload --kv-offload')
