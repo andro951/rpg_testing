@@ -1,7 +1,7 @@
 import os,sys,tempfile,threading,time,unittest
 from pathlib import Path
 from unittest.mock import patch
-from workbench.native import NativeBackend
+from workbench.native import NativeBackend,capabilities
 from workbench.execution_policy import CPUOffload,RuntimeStall
 ROOT=Path(__file__).resolve().parents[1]
 class ProcessTests(unittest.TestCase):
@@ -18,13 +18,22 @@ class ProcessTests(unittest.TestCase):
   backend=NativeBackend({'backend':'llamacpp','llama_path':'llama-server','runtime_cache':str(self.tmp_path)},{'uuid':'GPU-SIMULATED'})
   backend.owned_id='test'
   args=backend.launch_arguments('llama-server',{'paths':['model.gguf']},{'allocated_tokens':8192},
-      '--log-verbosity N --slot-save-path PATH --jinja --no-webui --no-mmproj --op-offload --kv-offload')
+      '--reasoning MODE --log-verbosity N --slot-save-path PATH --jinja --no-webui --no-mmproj --op-offload --kv-offload')
+  self.assertIn('--reasoning',args)
+  self.assertEqual(args[args.index('--reasoning')+1],'off')
   self.assertIn('--log-verbosity',args)
   self.assertEqual(args[args.index('--log-verbosity')+1],'4')
   self.assertIn('--slot-save-path',args)
   slot_path=Path(args[args.index('--slot-save-path')+1])
   self.assertTrue(slot_path.is_dir())
   self.assertEqual(slot_path.resolve(),(self.tmp_path/'slots').resolve())
+ def test_capabilities_require_reasoning_control(self):
+  required='--ctx-size --n-predict --gpu-layers --parallel --no-context-shift --slots --fit --api-key --list-devices'
+  with patch('workbench.native.diagnostic_command',side_effect=[required,'v']):
+   with self.assertRaises(Exception) as cm:capabilities('llama-server',preparation=True)
+  self.assertIn('--reasoning',str(cm.exception))
+  with patch('workbench.native.diagnostic_command',side_effect=[required+' --reasoning MODE','v']):
+   self.assertIn('--reasoning',capabilities('llama-server',preparation=True)['help'])
  def test_owned_process_load_probe_generation_unload(self):
   metadata=self.load();process=self.b.process
   self.assertEqual(metadata['placement']['status'],'full_gpu');self.assertFalse(metadata['health_exact_ready'])

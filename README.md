@@ -28,7 +28,7 @@ Selection is temporary and does not edit `models.json` or test files. Targeted a
 
 ## What happens while you are away
 
-**Primary pass:** load a model with all layers requested on GPU and automatic fitting disabled. Inspect the backend's placement report and readiness probe. If CPU model placement or GPU-memory failure occurs, record the failed qualification, unload, and proceed to the next model. Unknown placement is not called full GPU.
+**Primary pass:** load a model with all layers requested on GPU, automatic fitting disabled, and llama.cpp reasoning explicitly set to `off` so every model is measured in direct-output mode rather than template-selected `auto` reasoning. Inspect the backend's placement report and readiness probe. If CPU model placement or GPU-memory failure occurs, record the failed qualification, unload, and proceed to the next model. Unknown placement is not called full GPU.
 
 **Recovery pass:** after primary work finishes, revisit memory-related skips, smallest downloaded footprint first. Retry full GPU, then try a bounded sequence of hybrid placements. Hybrid results have separate identities and `execution_class: cpu_offloaded`; they are not pooled with full-GPU results. Unrelated model/runtime errors do not enter an endless retry loop.
 

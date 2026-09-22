@@ -25,7 +25,7 @@ def diagnostic_command(args, timeout=30):
 
 def capabilities(exe, preparation=False):
     help_text=diagnostic_command([exe,'--help'])
-    required=['--ctx-size','--n-predict','--gpu-layers','--parallel','--no-context-shift','--slots','--fit','--api-key','--list-devices']
+    required=['--ctx-size','--n-predict','--gpu-layers','--parallel','--no-context-shift','--slots','--fit','--api-key','--list-devices','--reasoning']
     missing=[flag for flag in required if not re.search(re.escape(flag)+r'(?=[\s,=]|$)',help_text)]
     if missing:raise RunFailure('Runtime lacks required controls: '+', '.join(missing))
     result={'help':help_text,'version':diagnostic_command([exe,'--version'])}
@@ -75,7 +75,11 @@ class NativeBackend:
     def launch_arguments(self,exe,model,context,help_text,layers='all'):
         args=[exe,'--model',model['paths'][0],'--alias',self.owned_id,'--host','127.0.0.1','--port','1235',
               '--ctx-size',str(context['allocated_tokens']),'--n-predict','-1','--gpu-layers',str(layers),
-              '--fit','off','--parallel','1','--split-mode','none','--no-context-shift','--slots','--api-key',self.token]
+              '--fit','off','--parallel','1','--split-mode','none','--no-context-shift','--slots',
+              '--reasoning','off','--api-key',self.token]
+        # Structured-state benchmarks use direct output only. Never let
+        # llama.cpp/model chat templates silently enable reasoning via "auto".
+        # capabilities() requires --reasoning so this cannot degrade silently.
         # llama.cpp routes core INFO messages (including the authoritative
         # "offloaded X/Y layers to GPU" placement summary) at verbosity 4.
         # The server default is 3, which hides that evidence on current builds.
