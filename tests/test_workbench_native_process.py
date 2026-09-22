@@ -2,7 +2,7 @@ import os,sys,tempfile,threading,time,unittest
 from pathlib import Path
 from unittest.mock import patch
 from workbench.native import NativeBackend,capabilities
-from workbench.execution_policy import CPUOffload,RuntimeStall
+from workbench.execution_policy import CPUOffload,RunFailure,RuntimeStall
 ROOT=Path(__file__).resolve().parents[1]
 class ProcessTests(unittest.TestCase):
  def setUp(self):
@@ -30,7 +30,7 @@ class ProcessTests(unittest.TestCase):
  def test_capabilities_require_reasoning_control(self):
   required='--ctx-size --n-predict --gpu-layers --parallel --no-context-shift --slots --fit --api-key --list-devices'
   with patch('workbench.native.diagnostic_command',side_effect=[required,'v']):
-   with self.assertRaises(Exception) as cm:capabilities('llama-server',preparation=True)
+   with self.assertRaises(RunFailure) as cm:capabilities('llama-server',preparation=True)
   self.assertIn('--reasoning',str(cm.exception))
   with patch('workbench.native.diagnostic_command',side_effect=[required+' --reasoning MODE','v']):
    self.assertIn('--reasoning',capabilities('llama-server',preparation=True)['help'])
