@@ -67,6 +67,7 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 page.locator('#individual-test').select_option('time_only')
                 page.locator('#individual-variant').select_option('direct_json_patch')
                 expect(page.locator('#individual-summary')).to_contain_text('1 configured case(s)')
+                expect(page.locator('#individual-summary')).to_contain_text('60 s limit each')
                 page.wait_for_timeout(1500)
                 expect(page.locator('#individual-model')).to_have_value('beta')
                 expect(page.locator('#individual-variant')).to_have_value('direct_json_patch')
@@ -96,6 +97,7 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 expect(page.locator('#one-model-model option')).to_have_count(3)
                 page.locator('#one-model-model').select_option('alpha')
                 expect(page.locator('#one-model-summary')).to_contain_text(str(expected) + ' configured case(s)')
+                expect(page.locator('#one-model-tests')).to_contain_text('60 s limit')
                 screenshot = os.environ.get('WORKBENCH_ONE_MODEL_SCREENSHOT')
                 if screenshot: page.screenshot(path=screenshot, full_page=True)
                 # Disable competing operations without changing or clearing dropdown drafts.
