@@ -98,6 +98,21 @@ class TargetedTests(unittest.TestCase):
         self.assertGreater(self.app.report['plan']['pending'], 0)
         self.assertTrue(all(p.read_bytes() == data for p, data in saved.items()))
 
+    def test_one_model_selected_tests_only(self):
+        selected=['time_only','clothing_append']
+        expected=sum(t.get('repetitions',1)*sum(v.get('enabled',True) for v in t['variants'])
+                     for t in self.tests if t['id'] in selected)
+        selection={'model_id':'alpha','test_ids':selected}
+        self.app.run(selection=selection)
+        records=self.app.store.all()
+        self.assertEqual(len(records),expected)
+        self.assertEqual({r['model_id'] for r in records},{'alpha'})
+        self.assertEqual({r['test_id'] for r in records},set(selected))
+        self.assertEqual(self.app.report['selection'],{'model_id':'alpha','test_ids':sorted(selected)})
+        self.app.run(selection=selection)
+        self.assertEqual(self.app.completed_now,0)
+        self.assertEqual(len(self.app.store.all()),expected)
+
     def test_one_model_all_tests_does_not_edit_configuration(self):
         before = {p: p.read_bytes() for p in (self.root / 'test_specs').glob('*.json')}
         expected = sum(t.get('repetitions', 1) * sum(v.get('enabled', True) for v in t['variants']) for t in self.tests)
@@ -137,6 +152,11 @@ class TargetedTests(unittest.TestCase):
         for selection in ({}, [], {'test_id': 'time_only'}, {'model_id': '../oops'},
                           {'model_id': 'beta', 'variant_id': 'direct_json_patch'},
                           {'model_id': 'missing'}, {'model_id': 'beta', 'test_id': 'missing'},
+                          {'model_id':'beta','test_ids':[]},
+                          {'model_id':'beta','test_ids':['time_only','time_only']},
+                          {'model_id':'beta','test_ids':['missing']},
+                          {'model_id':'beta','test_id':'time_only','test_ids':['clothing_append']},
+                          {'model_id':'beta','test_ids':['time_only'],'variant_id':'direct_json_patch'},
                           {**self.scope, 'variant_id': 'missing'}, {**self.scope, 'force': True}):
             with self.subTest(selection=selection), self.assertRaises(ValueError):
                 self.app.start('run', {'selection': selection})

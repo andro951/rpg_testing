@@ -35,11 +35,27 @@ def normalize_selection(selection):
     """A run filter, never an experimental setting or an implicit request for all models."""
     if selection is None:
         return None
-    if not isinstance(selection, dict) or not selection or set(selection) - {'model_id', 'test_id', 'variant_id'}:
-        raise ValueError('Selection needs a model_id and optional test_id / variant_id')
-    if 'model_id' not in selection or ('variant_id' in selection and 'test_id' not in selection):
-        raise ValueError('Choose a model, and a test before choosing a variant')
-    return {key: safe_id(value) for key, value in selection.items()}
+    allowed={'model_id','test_id','test_ids','variant_id'}
+    if not isinstance(selection,dict) or not selection or set(selection)-allowed:
+        raise ValueError('Selection needs a model_id and optional test_id / test_ids / variant_id')
+    if 'model_id' not in selection:
+        raise ValueError('Choose a model')
+    if 'test_id' in selection and 'test_ids' in selection:
+        raise ValueError('Choose either one test_id or a test_ids subset, not both')
+    if 'variant_id' in selection and 'test_id' not in selection:
+        raise ValueError('Choose one test before choosing a variant')
+    normalized={'model_id':safe_id(selection['model_id'])}
+    if 'test_id' in selection:normalized['test_id']=safe_id(selection['test_id'])
+    if 'variant_id' in selection:normalized['variant_id']=safe_id(selection['variant_id'])
+    if 'test_ids' in selection:
+        values=selection['test_ids']
+        if not isinstance(values,list) or not values:
+            raise ValueError('Choose at least one test')
+        ids=[safe_id(value) for value in values]
+        if len(ids)!=len(set(ids)):
+            raise ValueError('Selected tests must be unique')
+        normalized['test_ids']=sorted(ids)
+    return normalized
 
 
 def validate_selection(selection, models, tests):
@@ -48,12 +64,13 @@ def validate_selection(selection, models, tests):
         return None
     if not any(m['id'] == selection['model_id'] and m.get('enabled', True) for m in models):
         raise ValueError('Selected model is unavailable or disabled. Rescan and assign it in Installed models.')
-    if 'test_id' in selection:
-        test = next((t for t in tests if t['id'] == selection['test_id'] and t.get('enabled', True)), None)
+    selected_ids=[selection['test_id']] if 'test_id' in selection else selection.get('test_ids',[])
+    for test_id in selected_ids:
+        test=next((t for t in tests if t['id']==test_id and t.get('enabled',True)),None)
         if test is None:
             raise ValueError('Selected test is unavailable or disabled. Refresh the test choices.')
-        variants = [v for v in test['variants'] if v.get('enabled', True)]
-        if not variants or ('variant_id' in selection and not any(v['id'] == selection['variant_id'] for v in variants)):
+        variants=[v for v in test['variants'] if v.get('enabled',True)]
+        if not variants or ('variant_id' in selection and not any(v['id']==selection['variant_id'] for v in variants)):
             raise ValueError('Selected test has no matching enabled variant. Refresh the test choices.')
     return selection
 
@@ -74,7 +91,8 @@ def pending_plan(models, tests, target, store, selection=None):
             excluded.append(model['id']);continue
         jobs=[];done=0
         for test in tests:
-            if selection and selection.get('test_id',test['id'])!=test['id']:continue
+            if selection and 'test_id' in selection and selection['test_id']!=test['id']:continue
+            if selection and 'test_ids' in selection and test['id'] not in selection['test_ids']:continue
             for variant in test['variants']:
                 if not variant.get('enabled',True):continue
                 if selection and selection.get('variant_id',variant['id'])!=variant['id']:continue
