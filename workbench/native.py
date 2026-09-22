@@ -76,6 +76,11 @@ class NativeBackend:
         args=[exe,'--model',model['paths'][0],'--alias',self.owned_id,'--host','127.0.0.1','--port','1235',
               '--ctx-size',str(context['allocated_tokens']),'--n-predict','-1','--gpu-layers',str(layers),
               '--fit','off','--parallel','1','--split-mode','none','--no-context-shift','--slots','--api-key',self.token]
+        # llama.cpp routes core INFO messages (including the authoritative
+        # "offloaded X/Y layers to GPU" placement summary) at verbosity 4.
+        # The server default is 3, which hides that evidence on current builds.
+        if '--log-verbosity' in help_text or '--verbosity' in help_text or '-lv' in help_text:
+            args += ['--log-verbosity','4']
         for flag in ('--jinja','--no-webui','--no-mmproj','--op-offload','--kv-offload'):
             if flag in help_text:args.append(flag)
         for flag in ('--n-cpu-moe','--n-cpu-ffn'):

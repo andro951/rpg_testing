@@ -5,6 +5,11 @@ class ExecutionPolicyTests(unittest.TestCase):
     def test_full(self):
         r=placement(['load_tensors: offloaded 33/33 layers to GPU'])
         self.assertEqual(r['status'],'full_gpu');self.assertEqual(r['cpu_layers'],0)
+    def test_current_llamacpp_prefixed_placement_line(self):
+        r=placement(['1.21.001.234 I llama_model_load: offloaded 29/29 layers to GPU'])
+        self.assertEqual(r['status'],'full_gpu');self.assertEqual(r['gpu_layers'],29)
+    def test_watchdog_is_five_minutes(self):
+        self.assertEqual(LOAD_TIMEOUT_SECONDS,300)
     def test_partial(self):
         r=placement(['offloaded 30/33 layers to GPU'])
         self.assertEqual(r['status'],'cpu_offloaded');self.assertEqual(r['cpu_layers'],3)

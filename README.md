@@ -26,7 +26,7 @@ This folder choice applies **only to model files and their partial downloads**. 
 
 **Recovery pass:** after primary work finishes, revisit memory-related skips, smallest downloaded footprint first. Retry full GPU, then try a bounded sequence of hybrid placements. Hybrid results have separate identities and `execution_class: cpu_offloaded`; they are not pooled with full-GPU results. Unrelated model/runtime errors do not enter an endless retry loop.
 
-**Safety deadlines:** a load has a 180-second budget, a full-GPU workflow 600 seconds, and a hybrid workflow 300 seconds. These are operational watchdogs, not output-token caps. A stalled workflow is recorded and its owned process is stopped. Hybrid layer trials are bounded to four; automatic context expansions to two. The policy is recorded with results.
+**Safety deadlines:** a load has a 300-second (5-minute) budget, a full-GPU workflow 600 seconds, and a hybrid workflow 300 seconds. These are operational watchdogs, not output-token caps. A stalled workflow is recorded and its owned process is stopped. Hybrid layer trials are bounded to four; automatic context expansions to two. The policy is recorded with results.
 
 **Context:** generous automatic allocation includes the shared prefix, source, prompts and workflow structure. There is no context slider or artificial output-token cap. Native context is finite. If capacity is exhausted, the attempt is preserved and the worker retries from the beginning with a larger allocation when possible. Extra context consumes memory, so successful GPU fit is still required.
 

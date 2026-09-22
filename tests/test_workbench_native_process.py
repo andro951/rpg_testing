@@ -14,6 +14,13 @@ class ProcessTests(unittest.TestCase):
   self.patcher=patch.object(self.b,'launch_arguments',side_effect=args);self.patcher.start();self.addCleanup(self.patcher.stop)
   self.cap=patch('workbench.native.capabilities',return_value={'help':'','version':'SIMULATED STUB'});self.cap.start();self.addCleanup(self.cap.stop)
  def load(self):return self.b.load({'id':'integration-stub','paths':['not-used.gguf']},{'allocated_tokens':8192,'native_tokens':65536})
+ def test_launch_requests_trace_verbosity_for_placement_evidence(self):
+  backend=NativeBackend({'backend':'llamacpp','llama_path':'llama-server'},{'uuid':'GPU-SIMULATED'})
+  backend.owned_id='test'
+  args=backend.launch_arguments('llama-server',{'paths':['model.gguf']},{'allocated_tokens':8192},
+      '--log-verbosity N --jinja --no-webui --no-mmproj --op-offload --kv-offload')
+  self.assertIn('--log-verbosity',args)
+  self.assertEqual(args[args.index('--log-verbosity')+1],'4')
  def test_owned_process_load_probe_generation_unload(self):
   metadata=self.load();process=self.b.process
   self.assertEqual(metadata['placement']['status'],'full_gpu');self.assertFalse(metadata['health_exact_ready'])
