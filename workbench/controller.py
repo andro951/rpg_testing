@@ -192,6 +192,7 @@ class Controller(ModelManager):
                            'quantization':m.get('quantization',''),'required_vram_gb':m.get('required_vram_gb')}
                           for m in models if m.get('enabled',True)],
                 'tests':[{'id':t['id'],'name':t.get('name') or t['id'],'repetitions':t.get('repetitions',1),
+                          'timeout_seconds':t['timeout_seconds'],
                           'variants':[{'id':v['id'],'name':v.get('name') or v['id']}
                                       for v in t['variants'] if v.get('enabled',True)]}
                          for t in tests if any(v.get('enabled',True) for v in t['variants'])]}

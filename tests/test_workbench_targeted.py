@@ -161,6 +161,7 @@ class TargetedTests(unittest.TestCase):
         self.assertNotIn('expected_state', json.dumps(options))
         self.assertNotIn('initial_state', json.dumps(options))
         self.assertIn('time_only', [t['id'] for t in options['tests']])
+        self.assertTrue(all(t['timeout_seconds']==60 for t in options['tests']))
 
     def test_auto_repair_rechecks_same_selection_without_inference(self):
         self.app.check(selection=self.scope)

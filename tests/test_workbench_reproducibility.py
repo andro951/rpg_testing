@@ -103,6 +103,12 @@ class ReproducibilityTests(unittest.TestCase):
         g=summarize([r])['groups'][0]
         self.assertEqual(g['prior_infrastructure_errors'],1);self.assertEqual(g['prior_attempts'],2)
         self.assertEqual(g['scored'],1);self.assertEqual(g['exact_match_rate'],0)
+    def test_timeout_is_counted_as_completed_failed_measurement(self):
+        r={'case_id':'timeout','model_id':'m','variant_id':'v','test_id':'t','status':'completed',
+           'timed_out':True,'pipeline_seconds':60,'score':{'valid':False,'exact_match':False}}
+        g=summarize([r])['groups'][0]
+        self.assertEqual(g['timeouts'],1);self.assertEqual(g['completed'],1)
+        self.assertEqual(g['scored'],1);self.assertEqual(g['exact_match_rate'],0)
     def test_corrupt_summary_is_not_internal_server_error(self):
         result=summarize([{'status':'corrupt','case_id':'broken','model_id':'m','error':'checksum'}])
         self.assertEqual(result['records'],0);self.assertEqual(len(result['corrupt_files']),1)

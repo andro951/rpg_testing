@@ -42,7 +42,9 @@ def summarize(records):
         summaries.append({'model_id': model, 'test_id': test, 'variant_id': variant,
             'protocol_id': protocol, 'target': target, 'simulated': simulated,
             'execution_class':items[0].get('execution_class','legacy_unverified'),
-            'skipped':sum(r['status']=='skipped' for r in items),'completed': len(completed), 'infrastructure_errors': sum(r['status']=='error' for r in items),
+            'skipped':sum(r['status']=='skipped' for r in items),'completed': len(completed),
+            'timeouts':sum(bool(r.get('timed_out')) for r in completed),
+            'infrastructure_errors': sum(r['status']=='error' for r in items),
             'aborted': sum(r['status']=='aborted' for r in items), 'prior_attempts': len(prior),
             'prior_infrastructure_errors': sum(a.get('status')=='error' for a in prior),
             'invalid_measurements': len(completed)-len(eligible), 'scored': len(scored),
@@ -59,7 +61,7 @@ def summarize(records):
 
 def csv_export(summary):
     out = io.StringIO(newline='')
-    fields = ['model_id','test_id','variant_id','protocol_id','target','simulated','execution_class','skipped','completed',
+    fields = ['model_id','test_id','variant_id','protocol_id','target','simulated','execution_class','skipped','completed','timeouts',
               'infrastructure_errors','aborted','prior_attempts','prior_infrastructure_errors',
               'invalid_measurements','scored','exact_matches','exact_match_rate','timing_samples',
               'mean_pipeline_seconds','median_pipeline_seconds','p95_pipeline_seconds']
