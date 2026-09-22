@@ -55,4 +55,11 @@ class ProcessTests(unittest.TestCase):
   with self.assertRaises(RuntimeStall):
    with self.b.budget(.15):self.b.generate([{'role':'user','content':'WAIT_FOREVER'}],{},None)
   self.b.unload();self.assertLess(time.monotonic()-t,3);self.assertIsNotNone(p.poll())
+ def test_case_watchdog_preserves_partial_without_killing_model(self):
+  self.load();p=self.b.process
+  with self.assertRaises(RuntimeStall) as cm:
+   with self.b.budget(.15,terminate_process=False):
+    self.b.generate([{'role':'user','content':'PARTIAL_FOREVER'}],{},None)
+  self.assertEqual(cm.exception.partial_response['text'],'PARTIAL')
+  self.assertIsNone(p.poll());self.assertEqual(self.b.clear_cache()['n_erased'],0)
 if __name__=='__main__':unittest.main()

@@ -9,7 +9,7 @@ def model():
     return {'id':'demo-2b','files':['test.gguf'],'required_vram_gb':8,'sha256':{'test.gguf':'a'*64}}
 
 def fixture():
-    return {'schema_version':2,'id':'t1','workflow':'steps','source':{'initial_state':{'time':'14:15'},'new_information':'Exactly five minutes pass.'},'expected_state':{'time':'14:20'},'variants':[{'id':'direct','steps':[{'id':'patch','type':'generate','prompt':'Return JSON patch.','output':{'type':'text'},'sampling':{'temperature':0,'seed':42}}],'result':{'step':'patch','representation':'json_patch'}}]}
+    return {'schema_version':2,'id':'t1','workflow':'steps','timeout_seconds':60,'source':{'initial_state':{'time':'14:15'},'new_information':'Exactly five minutes pass.'},'expected_state':{'time':'14:20'},'variants':[{'id':'direct','steps':[{'id':'patch','type':'generate','prompt':'Return JSON patch.','output':{'type':'text'},'sampling':{'temperature':0,'seed':42}}],'result':{'step':'patch','representation':'json_patch'}}]}
 
 class PlanningTests(unittest.TestCase):
     def setUp(self):

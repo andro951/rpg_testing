@@ -28,6 +28,11 @@ class Handler(BaseHTTPRequestHandler):
              'He claimed the box had been waiting for someone who would choose not to open it. '
              'Mara carried it outside unopened, and the dead observatory lights flickered behind them.')
    else:content='[]'
+   if 'PARTIAL_FOREVER' in str(body):
+    first={'choices':[{'delta':{'content':'PARTIAL'},'finish_reason':None}]}
+    try:self.wfile.write(('data: '+json.dumps(first)+'\n\n').encode());self.wfile.flush();time.sleep(10)
+    except (OSError,BrokenPipeError):pass
+    return
    if 'WAIT_FOREVER' in str(body):time.sleep(10)
    chunks=[{'choices':[{'delta':{'content':content},'finish_reason':None}]},{'choices':[{'delta':{},'finish_reason':'stop'}]}]
    try:

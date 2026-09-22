@@ -7,7 +7,7 @@ from workbench.domain import eligibility, recommend_vram, validate_test, case_id
 
 
 def tiny_test():
-    return {'schema_version':2, 'workflow':'steps', 'id':'tiny', 'source':{'initial_state':{'time':'14:15'},'new_information':'Five minutes pass.'},
+    return {'schema_version':2, 'workflow':'steps', 'id':'tiny', 'timeout_seconds':60, 'source':{'initial_state':{'time':'14:15'},'new_information':'Five minutes pass.'},
             'variants':[{'id':'direct','steps':[{'id':'patch','type':'generate','prompt':'Return a patch.'}], 'result':{'step':'patch','representation':'json_patch'}}]}
 
 
@@ -44,6 +44,13 @@ class DomainTests(unittest.TestCase):
     def test_no_infinite_loop(self):
         t=tiny_test();t['variants'][0]['steps']=[{'id':'loop','type':'loop','steps':[]}]
         with self.assertRaises(ValueError):validate_test(t)
+    def test_timeout_required_and_positive(self):
+        for value in [None,0,-1,1.5,'60']:
+            t=tiny_test()
+            if value is None:t.pop('timeout_seconds')
+            else:t['timeout_seconds']=value
+            with self.assertRaises(ValueError):validate_test(t)
+        validate_test(tiny_test())
     def test_identity(self):
         t=tiny_test();m={'id':'qwen','sha256':{'x':'abc'}};a=case_id(m,t,t['variants'][0],0,{'gpu':'1080'})
         self.assertNotEqual(a,case_id(m,t,t['variants'][0],1,{'gpu':'1080'}))
