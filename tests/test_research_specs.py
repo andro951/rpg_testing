@@ -67,4 +67,18 @@ class ResearchSpecTests(unittest.TestCase):
             self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays'])
             self.assertTrue(all(v['result']['required_ops']==ops for v in test['variants']))
 
+    def test_prompt_calibration_suite_is_balanced(self):
+        names=['prompt_calibration_001_time.json','prompt_calibration_002_boolean.json',
+               'prompt_calibration_003_nested.json','prompt_calibration_004_array.json']
+        expected_ids=['v1_original_clinical','v1_raw_json_control','v2_conversational','v3_only_changed',
+                      'v4_smallest_patch','v5_change_rule','v6_one_example']
+        for name in names:
+            test=read_json(ROOT/'test_specs'/name);validate_test(test)
+            self.assertEqual(test['timeout_seconds'],60)
+            self.assertEqual([v['id'] for v in test['variants']],expected_ids)
+            self.assertEqual(len(changes(test['source']['initial_state'],test['expected_state'])),1)
+            self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
+        self.assertEqual(read_json(ROOT/'test_specs'/names[0])['variants'][0]['new_information_override'],
+                         'Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes.')
+
 if __name__=='__main__':unittest.main()

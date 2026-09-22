@@ -8,7 +8,7 @@ A browser-controlled benchmark for **original JSON state + new information → s
 
 Update `main` with GitHub Desktop, open the repository folder, and double-click **Start Workbench.vbs**. Python 3.10+ must already be installed. The graphical bootstrap asks permission before creating its private Python environment and installing missing requirements. Git is required by the harness's own tests and Git synchronization. No drivers are installed.
 
-**Start Demo.vbs** opens the same interface with a simulated model and no hardware requirement. It cannot install real models or runtimes. The current default suite has three tests with four variants each: **12 simulated cases**. Run preflight, run, then run again to verify that completed cases are skipped. These outputs are not measurements of model quality or GPU speed.
+**Start Demo.vbs** opens the same interface with a simulated model and no hardware requirement. It cannot install real models or runtimes. The current enabled suite contains **54 simulated cases**, including 28 prompt-wording calibration cases. Run preflight, run, then run again to verify that completed cases are skipped. These outputs are not measurements of model quality or GPU speed.
 
 ## First-time setup
 
@@ -48,7 +48,7 @@ Overview shows the current pass, execution class, reported GPU/CPU layer counts,
 
 ## Tests and caching
 
-All experimental settings live in `test_specs/*.json`, with a validating editor in the UI. Model-facing state-update prompts use short conversational wording: a plain-language request, a pretty-printed **Current State**, the **New Information**, and the requested output format. The defaults cover a time change, a clothing-array append without movement, and the retail inventory test. Examples can be imported for large shared-prefix cache-on/off questions, conditional follow-ups, verification/repair, and narration followed by state updating using the same model.
+All experimental settings live in `test_specs/*.json`, with a validating editor in the UI. The normal V2 model-facing state-update prompt uses short conversational wording: a plain-language request, a pretty-printed **Current State**, the **New Information**, and the requested output format. Four `prompt_calibration_*` tests preserve the historical V1 clinical prompt and compare it with V2 plus four controlled alternatives: **only changed fields**, **smallest patch**, **value-difference rule**, and **one example**. V1 Original also preserves the old indexed-array/SOURCE presentation and extra time-test wording; V1 Raw-JSON Control isolates the clinical wording from those representation differences. The defaults cover a time change, a clothing-array append without movement, and the retail inventory test. Examples can be imported for large shared-prefix cache-on/off questions, conditional follow-ups, verification/repair, and narration followed by state updating using the same model.
 
 Native llama.cpp exposes the cache controls. The harness starts the server with a Workbench-owned slot path under `.local/runtime-cache/slots`, clears the slot between required measurements, and records reuse evidence. Missing or inconsistent cached-token counters mark a cache measurement unverified; keeping a chat open is not accepted as proof. The interface does not use `experiment.json` or require a hand-written `worker.local.json`.
 
