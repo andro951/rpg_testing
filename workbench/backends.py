@@ -108,10 +108,14 @@ class DemoBackend:
         time.sleep(.02)
         self.counter+=1
         prompt=messages[1]['content']
-        state_text=prompt.split('Current State:\n',1)[1].split('\n\nNew Information:\n',1)[0]
-        event_text=prompt.split('\n\nNew Information:\n',1)[1]
-        event=event_text.split('\n\n',1)[0]
-        source={'initial_state':parse(state_text),'new_information':event}
+        if '\nSOURCE\n' in prompt:
+            source=parse(prompt.split('\nSOURCE\n',1)[1])
+            event=source.get('new_information','')
+        else:
+            state_text=prompt.split('Current State:\n',1)[1].split('\n\nNew Information:\n',1)[0]
+            event_text=prompt.split('\n\nNew Information:\n',1)[1]
+            event=event_text.split('\n\n',1)[0]
+            source={'initial_state':parse(state_text),'new_information':event}
         instruction=messages[-1]['content']
         if len(messages)==2 and 'Current State:\n' in instruction:
             instruction=instruction.rsplit('\n\n',1)[-1]
@@ -130,6 +134,8 @@ class DemoBackend:
         is_coat_remove='takes off his coat and hangs it on the hook' in lower_event
         is_coat_add='brown leather coat is hanging' in lower_event and 'puts it on over his shirt' in lower_event
         is_time='minutes' in event and not is_inventory and not is_coat_remove and not is_coat_add
+        is_door_unlock='unlocks the front door' in lower_event
+        is_relaxed='is now relaxed' in lower_event
         if schema and schema.get('type')=='boolean':
             text='true' if ('time' in instruction.lower() and is_time) or 'correct' in instruction.lower() else 'false'
         elif schema and schema.get('type')=='string':text='"14:20"'
@@ -157,6 +163,8 @@ class DemoBackend:
                 key=ticket_key(ticket_ids[0]);patch=[{'op':'test','path':f'/tickets/{key}/status','value':'waiting_customer'},
                                                      {'op':'replace','path':f'/tickets/{key}/status','value':'active'}]
             elif is_inventory:patch=[{'op':'set' if semantic else 'replace','path':'/inventory/on_hand_units','value':49}]
+            elif is_door_unlock:patch=[{'op':'replace','path':'/doorLocked','value':False}]
+            elif is_relaxed:patch=[{'op':'replace','path':'/characters/Tom/mood','value':'relaxed'}]
             elif is_coat_remove:patch=([{'op':'list_remove','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'remove','path':'/household/members/evan_harper/clothing/4'}])
             elif is_coat_add:patch=([{'op':'list_add','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'add','path':'/household/members/evan_harper/clothing/-','value':'brown leather coat'}])
             elif is_time:patch=[{'op':'set' if semantic else 'replace','path':'/time','value':'14:20'}]

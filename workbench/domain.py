@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 TIERS = (8, 12, 16, 24, 32, 40, 48, 80)
+PROMPT_STYLES = ('legacy_v1','conversational_v2','only_changed_v3','smallest_patch_v4','change_rule_v5','one_example_v6')
 ENGINE_VERSION = 'seeded-repetitions-1'
 
 
@@ -255,6 +256,8 @@ def validate_test(test: dict) -> None:
         variants.add(variant['id'])
         if variant.get('cache', 'default') not in ('default', 'on', 'off'):
             raise ValueError('Unknown cache mode')
+        if variant.get('prompt_style','conversational_v2') not in PROMPT_STYLES:
+            raise ValueError('Unknown prompt style')
         if variant.get('state_presentation',test.get('state_presentation','indexed_arrays')) not in ('raw_json','indexed_arrays'):
             raise ValueError('Unknown state presentation')
         known = set()
