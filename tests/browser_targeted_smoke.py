@@ -96,8 +96,22 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 expect(page.locator('#page-one-model')).to_be_visible()
                 expect(page.locator('#one-model-model option')).to_have_count(3)
                 page.locator('#one-model-model').select_option('alpha')
+                boxes=page.locator('#one-model-tests input[type="checkbox"]')
+                expect(boxes).to_have_count(len(read_tests(project / 'test_specs')))
+                assert page.locator('#one-model-tests input[type="checkbox"]:checked').count()==boxes.count()
+                expect(page.locator('#one-model-toggle-tests')).to_have_text('Deselect all')
                 expect(page.locator('#one-model-summary')).to_contain_text(str(expected) + ' configured case(s)')
                 expect(page.locator('#one-model-tests')).to_contain_text('60 s limit')
+                page.locator('#one-model-toggle-tests').click()
+                assert page.locator('#one-model-tests input[type="checkbox"]:checked').count()==0
+                expect(page.locator('#one-model-toggle-tests')).to_have_text('Select all')
+                expect(page.locator('#one-model-run')).to_be_disabled()
+                time_box=page.locator('#one-model-tests input[data-test-id="time_only"]')
+                time_box.check()
+                expect(page.locator('#one-model-toggle-tests')).to_have_text('Deselect all')
+                selected_expected=next(t for t in read_tests(project / 'test_specs') if t['id']=='time_only')
+                selected_expected=selected_expected.get('repetitions',1)*sum(v.get('enabled',True) for v in selected_expected['variants'])
+                expect(page.locator('#one-model-summary')).to_contain_text(str(selected_expected) + ' configured case(s)')
                 screenshot = os.environ.get('WORKBENCH_ONE_MODEL_SCREENSHOT')
                 if screenshot: page.screenshot(path=screenshot, full_page=True)
                 # Disable competing operations without changing or clearing dropdown drafts.
@@ -105,19 +119,25 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 try:
                     expect(page.locator('#one-model-run')).to_be_disabled(timeout=5000)
                     expect(page.locator('#one-model-model')).to_have_value('alpha')
+                    expect(time_box).to_be_checked()
                 finally: app.operation.release()
                 expect(page.locator('#one-model-run')).to_be_enabled(timeout=5000)
                 page.locator('#one-model-run').click()
-                expect(page.locator('#session-complete')).to_have_text(str(expected), timeout=20000)
+                expect(page.locator('#session-complete')).to_have_text(str(selected_expected), timeout=20000)
                 expect(page.locator('#state-badge')).to_have_text('FINISHED', timeout=20000)
                 records = app.store.all()
-                assert len([r for r in records if r['model_id'] == 'alpha']) == expected
+                alpha=[r for r in records if r['model_id']=='alpha']
+                assert len(alpha)==selected_expected and {r['test_id'] for r in alpha}=={'time_only'}
                 assert len([r for r in records if r['model_id'] == 'beta']) == 1
+                expect(page.locator('#run-scope')).to_contain_text('1 selected test(s)')
                 page.locator('#preflight').click()
-                expect(page.locator('#pending')).to_have_text(str(expected - 1), timeout=10000)
+                expect(page.locator('#pending')).to_have_text(str(2*expected-selected_expected-1), timeout=10000)
                 expect(page.locator('#run-scope')).to_contain_text('all eligible models')
                 assert all(path.read_bytes() == data for path, data in original_files.items())
                 # The same choices survive navigation, refreshing, polling and narrow viewports.
+                page.get_by_role('button', name='Test One Model', exact=True).click()
+                expect(page.locator('#one-model-tests input[data-test-id="time_only"]')).to_be_checked()
+                assert page.locator('#one-model-tests input[type="checkbox"]:checked').count()==1
                 page.get_by_role('button', name='Run Individual Test', exact=True).click()
                 expect(page.locator('#individual-variant')).to_have_value('direct_json_patch')
                 for width in (800, 390):
