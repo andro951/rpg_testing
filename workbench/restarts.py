@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from .domain import read_json,write_json
+from .planning import normalize_selection
 
 MAX_AUTOMATIC_RESTARTS=3
 REQUEST_TTL_SECONDS=600
@@ -15,6 +16,7 @@ def consume_request(app,clock=time.time):
         request=read_json(path)
         age=clock()-request['created_at']
         count=request['restart_count']
+        selection=normalize_selection(request.get('selection'))
         valid=(request.get('operation')=='run' and type(count)is int and 1<=count<=MAX_AUTOMATIC_RESTARTS
                and 0<=age<=REQUEST_TTL_SECONDS)
     except (ValueError,KeyError,TypeError):valid=False
@@ -23,6 +25,7 @@ def consume_request(app,clock=time.time):
         app.log('restart','Ignored stale or invalid restart intent. No experiment was started.')
         return False
     app.automatic_restart_count=count
+    app.requested_run_selection=selection
     return True
 
 
@@ -41,12 +44,19 @@ class UpdateCoordinator:
                     self.app.state='error';self.app.message='Source changed repeatedly; automatic restarts stopped safely. No model was left running.'
                     self.app.log('restart',self.app.message);self.app.flush_logs();return
                 write_json(self.app.data/'resume-after-update.json',
-                           {'operation':'run','created_at':time.time(),'restart_count':count})
+                           {'operation':'run','created_at':time.time(),'restart_count':count,
+                            'selection':getattr(self.app,'requested_run_selection',None)})
                 self.app.log('restart','Restarting on the new source and resuming the requested Run automatically.')
                 self.app.flush_logs();self.server.exit_requested=True
                 self.server.close_all();return
         self.thread=threading.Thread(target=watch,name='source-update-coordinator',daemon=True);self.thread.start()
         if resume:
             self.app.log('restart','Continuing the requested Run after source update.')
-            self.app.start('run')
+            try:
+                selection=getattr(self.app,'requested_run_selection',None)
+                if selection is None:self.app.start('run')
+                else:self.app.start('run',{'selection':selection})
+            except (ValueError,RuntimeError) as exc:
+                self.app.state='error';self.app.message='Saved run could not resume: '+str(exc)
+                self.app.log('restart',self.app.message);self.app.flush_logs()
         return self

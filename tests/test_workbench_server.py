@@ -69,6 +69,27 @@ class ServerTests(unittest.TestCase):
     def test_preflight_does_not_run_model(self):
         self.assertEqual(self.req('/api/preflight',{})[0],202);self.wait()
         self.assertEqual(self.app.store.all(),[]);self.assertTrue(self.app.report['ready'])
+    def test_targeted_run_options_and_authorization(self):
+        self.assertEqual(self.req('/api/run-options',auth=False)[0],403)
+        status,data,_=self.req('/api/run-options');self.assertEqual(status,200)
+        options=json.loads(data);self.assertEqual(options['models'][0]['id'],'demo-2b')
+        self.assertNotIn('expected_state',str(options))
+    def test_targeted_api_runs_and_resumes_only_one_case(self):
+        scope={'model_id':'demo-2b','test_id':'time_only','variant_id':'direct_json_patch'}
+        self.assertEqual(self.req('/api/preflight',{'selection':scope})[0],202);self.wait()
+        self.assertEqual(self.app.report['plan']['pending'],1);self.assertEqual(self.app.store.all(),[])
+        self.assertEqual(self.req('/api/run',{'selection':scope})[0],202);self.wait()
+        self.assertEqual(len(self.app.store.all()),1);self.assertEqual(self.app.report['selection'],scope)
+        self.req('/api/run',{'selection':scope});self.wait();self.assertEqual(self.app.completed_now,0)
+    def test_targeted_api_rejects_bad_scope_without_running(self):
+        for body in [{'selection':{}},{'model_id':'demo-2b'},{'selection':{'model_id':'unknown'}},
+                     {'selection':{'model_id':'demo-2b','test_id':'missing'}}]:
+            self.assertEqual(self.req('/api/run',body)[0],400)
+        self.assertEqual(self.app.store.all(),[]);self.assertFalse(self.app.operation.locked())
+    def test_targeted_options_refuse_disk_reads_while_busy(self):
+        self.app.operation.acquire()
+        try:self.assertEqual(self.req('/api/run-options')[0],409)
+        finally:self.app.operation.release()
     def test_run_resume_and_read_results(self):
         self.assertEqual(self.req('/api/run',{})[0],202);self.wait()
         rs=json.loads(self.req('/api/results')[1]);self.assertEqual(len(rs),configured_case_count(self.root/'test_specs'))

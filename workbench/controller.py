@@ -17,9 +17,9 @@ import uuid
 import zipfile
 from datetime import datetime,timezone
 from pathlib import Path
-from .domain import ResultStore, TIERS, canonical, digest, read_json, safe_id, write_json, validate_test
+from .domain import ResultStore, TIERS, canonical, digest, read_json, safe_id, write_json, validate_test, load_tests
 from .inventory import command, executable, scan_models
-from .planning import validate_catalog
+from .planning import validate_catalog, normalize_selection, validate_selection
 from . import preflight
 from .workflows import execute, Cancelled
 from .backends import DemoBackend
@@ -65,7 +65,7 @@ class Controller(ModelManager):
         self.pause_requested=False;self.stop_after_model=False;self.backend=None
         self.logs=[];self.pending_logs=[];self.completed_now=0;self.session_errors=0;self.current=None;self.restart_required=False
         self.started=None;self.finished=None;self.publisher=None;self.last_publish=0;self.version_cache=None
-        self.on_shutdown=None;self.remote_info=None
+        self.on_shutdown=None;self.remote_info=None;self.requested_run_selection=None
         for name in ('results','logs','preflight_reports'):(self.data/name).mkdir(exist_ok=True)
         self.process_source_commit=self.source_commit()
         self.log('startup','Workbench started'+(' in SIMULATED DEMO mode' if demo else ''))
@@ -104,7 +104,8 @@ class Controller(ModelManager):
         stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
         report['report_id']=stamp
         record={'id':stamp,'time':now(),'ready':bool(report.get('ready')),'prepared':bool(report.get('prepared')),
-                'preparation_only':bool(report.get('preparation_only')),'issues':copy.deepcopy(report.get('issues',[])),
+                'preparation_only':bool(report.get('preparation_only')),'selection':copy.deepcopy(report.get('selection')),
+                'issues':copy.deepcopy(report.get('issues',[])),
                 'plan':copy.deepcopy(report.get('plan',{})),'gpu':copy.deepcopy(report.get('gpu')),
                 'folder':copy.deepcopy(report.get('folder')),'note':report.get('note')}
         write_json(self.data/'preflight_reports'/(stamp+'.json'),record)
@@ -160,7 +161,8 @@ class Controller(ModelManager):
             saved=self.registry.get(m['id'],{}).get('artifact_identity')
             if saved:
                 m['artifact_identity']=copy.deepcopy(saved);continue
-            records=[r for r in self.store.all() if r.get('model_id')==m['id'] and r.get('artifact_identity')]
+            records=[self.store.read(p) for p in (self.store.root/m['id']).glob('*.json')]
+            records=[r for r in records if r.get('artifact_identity')]
             identities={canonical(r['artifact_identity']) for r in records}
             if len(identities)==1:m['artifact_identity']=json.loads(next(iter(identities)))
         return effective
@@ -182,10 +184,21 @@ class Controller(ModelManager):
         if result.returncode:raise RuntimeError('Workbench unit/smoke tests failed; inspect Logs.')
         self.message='Workbench unit/smoke tests passed.'
         self.finish_progress('unit_tests','Unit tests complete',self.message)
-    def check(self,preparation=None):
+    @exclusive_edit
+    def run_options(self):
+        """Small UI choices, without scanning weights or exposing fixture answers."""
+        models=self.catalog();tests=load_tests(self.root/'test_specs')
+        return {'models':[{'id':m['id'],'name':m.get('base_model') or m['id'],
+                           'quantization':m.get('quantization',''),'required_vram_gb':m.get('required_vram_gb')}
+                          for m in models if m.get('enabled',True)],
+                'tests':[{'id':t['id'],'name':t.get('name') or t['id'],'repetitions':t.get('repetitions',1),
+                          'variants':[{'id':v['id'],'name':v.get('name') or v['id']}
+                                      for v in t['variants'] if v.get('enabled',True)]}
+                         for t in tests if any(v.get('enabled',True) for v in t['variants'])]}
+    def check(self,preparation=None,selection=None):
         self.message='Checking files, pending work, and backend readiness.'
         self.set_progress('preflight','Starting preflight',0,0,'Preparing readiness checks.')
-        report,plan=preflight.build(self,preparation,track_progress=True)
+        report,plan=preflight.build(self,preparation,track_progress=True,selection=selection)
         self.report,self.plan=report,plan
         self.record_preflight(report)
         self.message='Preparation checks passed; actual GPU checks remain.' if report['prepared'] else 'Ready.' if report['ready'] else 'Preflight found issues. Use the individual action buttons.'
@@ -195,6 +208,19 @@ class Controller(ModelManager):
     def start(self,kind='preflight',payload=None):
         if not self.operation.acquire(blocking=False):raise RuntimeError('Another operation is active.')
         if self.restart_required:self.operation.release();raise RuntimeError('Source changed. Restart the workbench before continuing.')
+        # Validate under the operation lock, before starting any source sync or inference.
+        try:
+            payload={} if payload is None else copy.deepcopy(payload)
+            if kind in ('run','preflight'):
+                allowed={'selection','preparation'} if kind=='preflight' else {'selection'}
+                if not isinstance(payload,dict) or set(payload)-allowed:raise ValueError('Unknown run/preflight option')
+                selection=normalize_selection(payload.get('selection'))
+                if selection is not None:validate_selection(selection,self.catalog(),load_tests(self.root/'test_specs'))
+                if kind=='run':self.requested_run_selection=selection
+            else:selection=None
+            repair_selection=copy.deepcopy((self.report or {}).get('selection')) if kind=='fix' else None
+        except Exception:
+            self.operation.release();raise
         self.state='checking' if kind=='preflight' else 'testing' if kind=='unit_tests' else 'fixing' if kind=='fix' else 'scanning' if kind=='scan' else 'running'
         if kind=='scan':
             self.message='Scanning the selected models folder…'
@@ -202,10 +228,10 @@ class Controller(ModelManager):
         self.cancel_event.clear()
         def work():
             try:
-                if kind=='preflight':self.check((payload or {}).get('preparation'))
+                if kind=='preflight':self.check(payload.get('preparation'),selection=selection)
                 elif kind=='unit_tests':self.selftest()
-                elif kind=='fix':self.fix(payload);self.check()
-                elif kind=='run':self.run()
+                elif kind=='fix':self.fix(payload);self.check(selection=repair_selection)
+                elif kind=='run':self.run(selection=selection)
                 elif kind=='hub_search':self.search_hub(payload)
                 elif kind=='hub_inspect':self.inspect_hub(payload)
                 elif kind=='hub_download':self.download_selected(payload)
@@ -304,12 +330,16 @@ class Controller(ModelManager):
             self.cancel_event.set();self.resume_event.set()
             if self.backend:self.backend.cancel()
         else:raise ValueError('Unknown control')
-    def run(self):
+    def run(self,selection=None):
+        selection=normalize_selection(selection)
+        if selection is not None:validate_selection(selection,self.catalog(),load_tests(self.root/'test_specs'))
+        self.requested_run_selection=copy.deepcopy(selection)
+        self.log('run_requested',json.dumps({'selection':selection},sort_keys=True))
         if not self.demo and self.settings['sync_source']:
             from .gitops import pull
             if pull(self.root):
                 self.restart_required=True;raise RuntimeError('Source changed before the run. Restart with the new version before starting tests.')
-        report=self.check()
+        report=self.check(selection=selection)
         if not report['ready']:
             self.log('run_blocked',json.dumps({'issue_ids':[i.get('id') for i in report.get('issues',[])],
                                                'issues':report.get('issues',[])},sort_keys=True,ensure_ascii=False))
@@ -320,13 +350,13 @@ class Controller(ModelManager):
         from .scheduler import Session
         from .demo_native import DemoNative
         self.run_provenance={'backend_version':self.backend_version(),'python':platform.python_version(),
-                             'source_commit':self.source_commit(),'workflow_code':self.workflow_code()}
+                             'source_commit':self.source_commit(),'workflow_code':self.workflow_code(),'selection':copy.deepcopy(selection)}
         try:Session(self,report,self.plan,DemoNative if self.demo else NativeBackend).run()
         finally:self.finished=now();self.current=None
         self.state='finished' if not self.session_errors else 'finished_with_errors'
         self.message='Run finished. Full-GPU, skipped, and hybrid results are recorded separately.'
         self.finish_progress('run','Benchmark run complete',self.message)
-        self.report,self.plan=preflight.build(self,track_progress=False)
+        self.report,self.plan=preflight.build(self,track_progress=False,selection=selection)
     def source_commit(self):
         try:
             from .gitops import git

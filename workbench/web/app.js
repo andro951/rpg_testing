@@ -6,7 +6,7 @@ if(fragment.has('key')){key=fragment.get('key');sessionStorage.setItem('rpg-work
 let state=null,page='overview',records=[],testData=[],polling=false,setupDirty=false;const promptedRepairs=new Set();
 $('page-setup').addEventListener('input',()=>{setupDirty=true;});
 $('page-setup').addEventListener('change',()=>{setupDirty=true;});
-const titles={overview:'Overview',models:'Models',tests:'Test definitions',results:'Results',find:'Find models',runtime:'Native runtime',analysis:'Comparison',logs:'Logs',setup:'Worker setup'};
+const titles={overview:'Overview',individual:'Run Individual Test','one-model':'Test One Model',models:'Models',tests:'Test definitions',results:'Results',find:'Find models',runtime:'Native runtime',analysis:'Comparison',logs:'Logs',setup:'Worker setup'};
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 function showAlert(message,title='Notice'){ $('alert-title').textContent=title;$('alert-text').textContent=message;if(!$('alert').open)$('alert').showModal(); }
 function toast(text){$('toast').textContent=text;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),3500);}
@@ -20,7 +20,7 @@ async function offerAutomaticRepair(report){
 async function api(path,body){const options={headers:{Authorization:'Bearer '+key}};if(body!==undefined){options.method='POST';options.headers['Content-Type']='application/json';options.body=JSON.stringify(body);}const r=await fetch(path,options);if(r.status===403){if(!$('login').open)$('login').showModal();throw Error('Pair this browser with the worker.');}if(!r.ok){let msg='Request failed';try{msg=(await r.json()).error||msg;}catch{}throw Error(msg);}if(r.headers.get('Content-Type')?.includes('application/json'))return r.json();return r.blob();}
 function on(id,fn){$(id).addEventListener('click',async()=>{try{await fn();}catch(e){showAlert(e.message);}});}
 function button(text,fn,cls){const b=el('button',text,cls);b.addEventListener('click',async()=>{try{await fn();}catch(e){showAlert(e.message);}});return b;}
-function setPage(name){page=name;document.querySelectorAll('.page').forEach(n=>n.classList.toggle('hidden',n.id!=='page-'+name));document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('selected',n.dataset.page===name));$('page-title').textContent=titles[name];if(name==='tests')loadTests().catch(e=>showAlert(e.message));if(name==='results')loadResults().catch(e=>showAlert(e.message));if(name==='analysis')loadAnalysis().catch(e=>showAlert(e.message));}
+function setPage(name){page=name;document.querySelectorAll('.page').forEach(n=>n.classList.toggle('hidden',n.id!=='page-'+name));document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('selected',n.dataset.page===name));$('page-title').textContent=titles[name];if(name==='tests')loadTests().catch(e=>showAlert(e.message));if(name==='results')loadResults().catch(e=>showAlert(e.message));if(name==='analysis')loadAnalysis().catch(e=>showAlert(e.message));if(name==='individual'||name==='one-model')loadRunOptions().catch(e=>showAlert(e.message));}
 document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>setPage(b.dataset.page)));
 document.querySelectorAll('.close-dialog').forEach(b=>b.addEventListener('click',()=>b.closest('dialog').close()));
 function render(s){state=s;const p=s.report?.plan;const busy=s.busy;$('connection').textContent='● Connected to worker';$('state-badge').textContent=s.state.toUpperCase().replaceAll('_',' ');$('demo').classList.toggle('hidden',!s.demo);$('message').textContent=s.message;$('gpu').textContent=s.report?.gpu?.name||(s.demo?'SIMULATED GTX 1080':'Your GPU worker');$('pending').textContent=p?.pending??'—';$('complete').textContent=p?.complete??'—';$('session-complete').textContent=s.completed_now;$('loads').textContent=p?.model_loads??'—';
@@ -36,7 +36,8 @@ queueMicrotask(()=>offerAutomaticRepair(s.report).catch(e=>showAlert(e.message,'
 $('folder-note').textContent=s.report?.folder?.path?('Active folder: '+s.report.folder.path+' · '+s.report.folder.source):'No active model folder detected yet.';
 renderModels();$('log-view').textContent=s.logs.map(l=>l.time+' ['+l.category+'] '+l.message).join('\n');$('remote-url').textContent=s.remote?.url||'';
 if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=s.settings.publish_results; }
-renderHub();renderRuntimes();folderPrompts();
+renderHub();renderRuntimes();renderRunControls();folderPrompts();
+const scope=s.report?.selection;$('run-scope').textContent=scope?('Scope: '+scope.model_id+' · '+(scope.test_id||'all enabled tests')+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
 }
 let modelRenderSignature='',modelVramDrafts=new Map();
 async function saveModelVram(model,tier){
@@ -162,4 +163,66 @@ on('runtime-install',async()=>{const r=(state.runtime_options||[]).find(r=>r.id=
 on('runtime-locate',async()=>{setPage('setup');await chooseLlamaServer();});
 async function loadAnalysis(){if(state?.busy){$('analysis-list').replaceChildren(el('article','Finish or stop the active operation before reading results.'));return;}const data=await api('/api/analysis');$('analysis-note').textContent=data.note;const list=$('analysis-list');list.replaceChildren();for(const g of data.groups){const card=el('article');card.append(el('h3',g.model_id+' · '+g.variant_id),el('span',(g.simulated?'SIMULATED · ':'')+g.execution_class,'badge'),el('p',g.test_id+' · '+g.scored+' scored · '+(g.exact_match_rate===null?'No exact score':(g.exact_match_rate*100).toFixed(1)+'% exact state matches')+' · median '+(g.median_pipeline_seconds===null?'—':g.median_pipeline_seconds.toFixed(3)+' s')),el('p',g.skipped+' skipped · '+g.infrastructure_errors+' errors · '+g.invalid_measurements+' invalid measurements','muted'));list.append(card);}if(!list.children.length)list.append(el('article','No recorded comparison groups yet.'));}
 on('refresh-analysis',loadAnalysis);
+// Targeted runs filter the queue, never the saved experiment definitions.
+let runOptions=null,runOptionsLoading=false,runOptionsValid=false,targetSubmitting=false;
+function fillRunSelect(id,items,placeholder,label){
+ const select=$(id),previous=select.value;
+ select.replaceChildren(new Option(placeholder,''),...items.map(item=>new Option(label(item),item.id)));
+ select.value=items.some(item=>item.id===previous)?previous:'';
+}
+function selectedRunTest(){return runOptions?.tests.find(t=>t.id===$('individual-test').value);}
+function renderRunVariants(){
+ const test=selectedRunTest();
+ fillRunSelect('individual-variant',test?.variants||[],'All enabled variants',v=>v.name);
+}
+async function loadRunOptions(){
+ if(runOptionsLoading)return;
+ if(state?.busy){renderRunControls();return;}
+ runOptionsLoading=true;runOptionsValid=false;renderRunControls();
+ try{
+  runOptions=await api('/api/run-options');
+  const modelLabel=m=>m.name+' · '+m.quantization+' · '+(m.required_vram_gb===null?'VRAM unassigned':m.required_vram_gb+' GB');
+  fillRunSelect('individual-model',runOptions.models,'Choose a model…',modelLabel);
+  fillRunSelect('one-model-model',runOptions.models,'Choose a model…',modelLabel);
+  fillRunSelect('individual-test',runOptions.tests,'Choose a test…',t=>t.name);
+  renderRunVariants();
+  const list=$('one-model-tests');list.replaceChildren();
+  for(const test of runOptions.tests){const row=el('div',undefined,'row');row.append(el('b',test.name),el('p',test.variants.length+' variants × '+test.repetitions+' repetitions = '+test.variants.length*test.repetitions+' cases','muted'));list.append(row);}
+  if(!runOptions.tests.length)list.append(el('p','No enabled tests. Add or enable a test in Test definitions.','muted'));
+  runOptionsValid=true;
+ }finally{runOptionsLoading=false;renderRunControls();}
+}
+function renderRunControls(){
+ const busy=!!state?.busy||!!state?.restart_required||runOptionsLoading||targetSubmitting;
+ const models=runOptions?.models||[],tests=runOptions?.tests||[],test=selectedRunTest();
+ const individualModel=models.find(m=>m.id===$('individual-model').value),oneModel=models.find(m=>m.id===$('one-model-model').value);
+ const variantValid=!$('individual-variant').value||test?.variants.some(v=>v.id===$('individual-variant').value);
+ const individualReady=runOptionsValid&&individualModel&&test&&variantValid;
+ const modelReady=runOptionsValid&&oneModel&&tests.length;
+ for(const action of ['check','run']){$('individual-'+action).disabled=busy||!individualReady;$('one-model-'+action).disabled=busy||!modelReady;}
+ for(const id of ['individual-model','individual-test','individual-variant','one-model-model'])$(id).disabled=busy||!runOptionsValid;
+ for(const id of ['individual-refresh','one-model-refresh'])$(id).disabled=busy;
+ let notice=runOptionsLoading?'Loading models and tests…':!runOptionsValid?'Refresh choices when the current operation is finished.':!models.length?'No enabled catalogued models. Rescan and assign VRAM in Installed models.':!tests.length?'No enabled test definitions. Add or enable a test in Test definitions.':null;
+ const count=test?test.repetitions*($('individual-variant').value?1:test.variants.length):0;
+ $('individual-summary').textContent=notice|| (individualReady?count+' configured case(s) on '+individualModel.name+'. Only pending cases will run.':'Choose a model and test to see the scope.');
+ const total=tests.reduce((n,t)=>n+t.repetitions*t.variants.length,0);
+ $('one-model-summary').textContent=notice|| (modelReady?tests.length+' test definition(s), '+total+' configured case(s) on '+oneModel.name+'. Only pending cases will run.':'Choose a model to see the scope.');
+}
+async function startTargetedRun(mode,operation){
+ const individual=mode==='individual';
+ const selection={model_id:$(individual?'individual-model':'one-model-model').value};
+ if(!selection.model_id)throw Error('Choose a model.');
+ if(individual){selection.test_id=$('individual-test').value;if(!selection.test_id)throw Error('Choose a test.');if($('individual-variant').value)selection.variant_id=$('individual-variant').value;}
+ targetSubmitting=true;renderRunControls();
+ try{await api('/api/'+operation,{selection});setPage('overview');await poll();}
+ finally{targetSubmitting=false;renderRunControls();}
+}
+for(const mode of ['individual','one-model']){
+ on(mode+'-refresh',loadRunOptions);
+ on(mode+'-check',()=>startTargetedRun(mode,'preflight'));
+ on(mode+'-run',()=>startTargetedRun(mode,'run'));
+}
+for(const id of ['individual-model','one-model-model','individual-variant'])$(id).addEventListener('change',renderRunControls);
+$('individual-test').addEventListener('change',()=>{$('individual-variant').value='';renderRunVariants();renderRunControls();});
+
 if(!key)$('login').showModal();else poll();setInterval(poll,1200);

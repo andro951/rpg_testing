@@ -9,19 +9,21 @@ import tempfile
 from pathlib import Path
 from .domain import ResultStore, load_tests, read_json, device_tier
 from .inventory import automatic_context, command, detect_gpus, executable, scan_models
-from .planning import pending_plan, public_plan, requirements
+from .planning import pending_plan, public_plan, requirements, validate_selection
 
 
 def issue(code, message, label=None, action=None, level='blocked'):
     return {'id':code,'message':message,'level':'fixable' if action else level,'label':label,'action':action}
 
 
-def build(app, preparation=None, track_progress=True):
+def build(app, preparation=None, track_progress=True, selection=None):
     def update(task,task_percent,overall_percent,detail=''):
         if track_progress:app.set_progress('preflight',task,task_percent,overall_percent,detail)
     problems=[];settings=app.settings;kind=settings['backend']
     update('Loading benchmark definitions',0,10,'Reading models and enabled test files.')
-    models=app.catalog();tests=load_tests(app.root/'test_specs')
+    all_models=app.catalog();tests=load_tests(app.root/'test_specs')
+    selection=validate_selection(selection,all_models,tests)
+    models=[m for m in all_models if not selection or m['id']==selection['model_id']]
     update('Loading benchmark definitions',100,15,f'{len(tests)} enabled tests loaded.')
     if not tests:problems.append(issue('tests','No enabled test files. Add or enable a test in Test definitions.'))
     update('Detecting GPU and runtime',10,16,'Inspecting the execution environment.')
@@ -49,6 +51,7 @@ def build(app, preparation=None, track_progress=True):
     update('Checking existing results',0,20,'Validating saved completion evidence.')
     # Pins are metadata, NOT completion tracking. Recover from checksummed results if needed.
     for file in app.store.root.glob('*/*.json'):
+        if selection and file.parent.name!=selection['model_id']:continue
         try:app.store.read(file)
         except (ValueError,KeyError,TypeError) as exc:
             try:app.store.path(file.parent.name,file.stem)
@@ -57,26 +60,27 @@ def build(app, preparation=None, track_progress=True):
             problems.append(issue('corrupt_'+file.stem,'Corrupt result: '+str(exc),'Delete corrupted result',
                                   {'type':'delete_corrupt','model_id':file.parent.name,'case_id':file.stem}))
     if any(i['id'].startswith('corrupt_') for i in problems):
-        return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'issues':problems,
+        return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'issues':problems,'selection':selection,
                 'gpu':gpu,'plan':{'pending':0,'complete':0,'model_loads':0,'groups':[]},
                 'note':'Completion cannot be trusted until corrupt result files are resolved.'},None
     update('Checking existing results',100,25,'Saved result files checked.')
     models=app.with_known_artifacts(models)
     store=app.store
-    plan=pending_plan(models,tests,target,store)
+    plan=pending_plan(models,tests,target,store,selection)
     folder_info=app.folder_info()
     path=folder_info.get('path')
     inventory=[];inventory_error=None
     update('Scanning model files',0,25,'Finding GGUF files and reading lightweight metadata.')
     def scan_progress(done,total,name):
         update('Scanning model files',100*done/max(1,total),25+10*done/max(1,total),name)
-    found=app.demo_models() if app.demo else scan_models(Path(path),models,scan_progress) if path else []
+    found=app.demo_models() if app.demo else scan_models(Path(path),all_models,scan_progress) if path else []
     update('Scanning model files',100,35,f'{len(found)} model variants discovered.')
     app.last_models=found;app.folder_scanned=bool(path)
     # Cheap metadata identity prevents ordinary file replacements from reusing older completion evidence.
     # Full-file SHA-256 is deliberately not computed here; trusted source hashes are retained when already known.
     changed=False
-    identity_items=[item for item in found if item['catalogued'] and item['complete'] and not item['errors']]
+    identity_items=[item for item in found if item['catalogued'] and item['complete'] and not item['errors']
+                    and (not selection or item['id']==selection['model_id'])]
     update('Identifying model files',100 if not identity_items else 0,35,
            'No eligible model files need identification.' if not identity_items else f'0 / {len(identity_items)} models')
     for item_index,item in enumerate(identity_items,1):
@@ -89,7 +93,7 @@ def build(app, preparation=None, track_progress=True):
                f'Model {item_index}/{len(identity_items)} · {item["name"]}')
     update('Identifying model files',100,90,
            f'{len(identity_items)} model identities checked from filename, size, modification time and known source metadata.')
-    if changed:plan=pending_plan(models,tests,target,store)
+    if changed:plan=pending_plan(models,tests,target,store,selection)
     grouped={}
     for item in found:grouped.setdefault(item['id'],[]).append(item)
     update('Checking execution readiness',0,90,'Checking storage, runtime controls, contexts, and pending models.')
@@ -141,14 +145,19 @@ def build(app, preparation=None, track_progress=True):
             try:
                 group['context']=automatic_context(tests,model['metadata'])
             except ValueError as exc:problems.append(issue('context_'+mid,str(exc)));continue
+    if selection and selection['model_id'] in plan['excluded']:
+        problems.append(issue('selected_model_tier','The selected model is not eligible for this GPU tier. Check its assignment in Installed models.','Review VRAM assignment',{'type':'models'}))
+    if selection and selection['model_id'] in plan['unassigned']:
+        problems.append(issue('selected_model_unassigned','Assign a VRAM tier to the selected model first.','Assign VRAM',{'type':'models'}))
     for item in found:
+        if selection and item['id']!=selection['model_id']:continue
         if item['required_vram_gb'] is None:
             problems.append(issue('unassigned_'+item['id'],'Assign a VRAM tier to '+item['name']+' in Models.','Assign VRAM',{'type':'models'},'needs_input'))
     update('Checking execution readiness',85,98,'Checking Git/source state and final readiness.')
     problems.extend(app.git_issues())
     update('Finalizing preflight',100,100,'Preflight report assembled.')
     report={'ready':not problems and not preparation,'prepared':not problems and bool(preparation),
-            'preparation_only':bool(preparation),'issues':problems,'plan':public_plan(plan),'gpu':gpu,
+            'preparation_only':bool(preparation),'selection':selection,'issues':problems,'plan':public_plan(plan),'gpu':gpu,
             'folder':folder_info,'inventory_warning':inventory_error,
             'note':'Preparation checks cannot certify a future allocation, driver, or remote installation.' if preparation else ('Live preflight blocked; resolve the listed issues.' if problems else 'Live preflight passed; model readiness is checked after each load.')}
     return report,plan

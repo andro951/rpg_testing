@@ -31,11 +31,40 @@ def validate_catalog(models):
             raise ValueError('Invalid SHA-256 fingerprint')
 
 
-def pending_plan(models, tests, target, store):
+def normalize_selection(selection):
+    """A run filter, never an experimental setting or an implicit request for all models."""
+    if selection is None:
+        return None
+    if not isinstance(selection, dict) or not selection or set(selection) - {'model_id', 'test_id', 'variant_id'}:
+        raise ValueError('Selection needs a model_id and optional test_id / variant_id')
+    if 'model_id' not in selection or ('variant_id' in selection and 'test_id' not in selection):
+        raise ValueError('Choose a model, and a test before choosing a variant')
+    return {key: safe_id(value) for key, value in selection.items()}
+
+
+def validate_selection(selection, models, tests):
+    selection = normalize_selection(selection)
+    if selection is None:
+        return None
+    if not any(m['id'] == selection['model_id'] and m.get('enabled', True) for m in models):
+        raise ValueError('Selected model is unavailable or disabled. Rescan and assign it in Installed models.')
+    if 'test_id' in selection:
+        test = next((t for t in tests if t['id'] == selection['test_id'] and t.get('enabled', True)), None)
+        if test is None:
+            raise ValueError('Selected test is unavailable or disabled. Refresh the test choices.')
+        variants = [v for v in test['variants'] if v.get('enabled', True)]
+        if not variants or ('variant_id' in selection and not any(v['id'] == selection['variant_id'] for v in variants)):
+            raise ValueError('Selected test has no matching enabled variant. Refresh the test choices.')
+    return selection
+
+
+def pending_plan(models, tests, target, store, selection=None):
     """No model discovery here: completed work must not require installed weights."""
     validate_catalog(models)
+    selection=validate_selection(selection,models,tests)
     groups=[];complete=0;excluded=[];unassigned=[]
     for model in models:
+        if selection and model['id']!=selection['model_id']:continue
         if model.get('enabled', True) is False:
             continue
         if model.get('required_vram_gb') is None:
@@ -45,8 +74,10 @@ def pending_plan(models, tests, target, store):
             excluded.append(model['id']);continue
         jobs=[];done=0
         for test in tests:
+            if selection and selection.get('test_id',test['id'])!=test['id']:continue
             for variant in test['variants']:
                 if not variant.get('enabled',True):continue
+                if selection and selection.get('variant_id',variant['id'])!=variant['id']:continue
                 for repetition in range(test.get('repetitions',1)):
                     cid=case_id(model,test,variant,repetition,target)
                     if store.done(model['id'],cid):
@@ -59,7 +90,7 @@ def pending_plan(models, tests, target, store):
         groups.append({'model':copy.deepcopy(model),'reason':reason,'jobs':jobs,'complete':done})
     return {'groups':groups,'pending':sum(len(g['jobs']) for g in groups),'complete':complete,
             'model_loads':sum(bool(g['jobs']) for g in groups),'excluded':excluded,'unassigned':unassigned,
-            'target':copy.deepcopy(target)}
+            'target':copy.deepcopy(target),'selection':copy.deepcopy(selection)}
 
 
 def public_plan(plan):

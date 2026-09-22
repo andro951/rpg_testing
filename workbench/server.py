@@ -91,6 +91,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,self.server.static_assets[path],kind)
             self.authorize()
             if path=='/api/state':return self.send(200,app.snapshot())
+            if path=='/api/run-options':return self.send(200,app.run_options())
             if path=='/api/results':return self.send(200,app.result_records())
             if path=='/api/analysis':
                 from .analysis import summarize
@@ -141,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
             if path in operations:
                 app.start(operations[path],data);return self.send(202,{'started':True})
             if path=='/api/unit-tests':app.start('unit_tests');return self.send(202,{'started':True})
-            if path=='/api/run':app.start('run');return self.send(202,{'started':True})
+            if path=='/api/run':app.start('run',data);return self.send(202,{'started':True})
             if path=='/api/fix':app.start('fix',data);return self.send(202,{'started':True})
             if path=='/api/control':app.control(data['action']);return self.send(200,{'ok':True})
             if path=='/api/settings':app.configure(data);return self.send(200,{'ok':True})
