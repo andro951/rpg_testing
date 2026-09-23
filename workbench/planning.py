@@ -35,16 +35,22 @@ def normalize_selection(selection):
     """A run filter, never an experimental setting or an implicit request for all models."""
     if selection is None:
         return None
-    allowed={'model_id','test_id','test_ids','variant_id'}
+    allowed={'model_id','all_models','test_id','test_ids','variant_id'}
     if not isinstance(selection,dict) or not selection or set(selection)-allowed:
-        raise ValueError('Selection needs a model_id and optional test_id / test_ids / variant_id')
-    if 'model_id' not in selection:
-        raise ValueError('Choose a model')
+        raise ValueError('Selection needs an explicit model scope and optional test / variant scope')
+    has_model='model_id' in selection
+    has_all='all_models' in selection
+    if has_model==has_all:
+        raise ValueError('Choose exactly one model scope: model_id or all_models')
+    if has_all and selection['all_models'] is not True:
+        raise ValueError('all_models must be true when selected')
     if 'test_id' in selection and 'test_ids' in selection:
         raise ValueError('Choose either one test_id or a test_ids subset, not both')
     if 'variant_id' in selection and 'test_id' not in selection:
         raise ValueError('Choose one test before choosing a variant')
-    normalized={'model_id':safe_id(selection['model_id'])}
+    if has_all and 'test_id' not in selection:
+        raise ValueError('All-model targeted runs require one explicit test_id')
+    normalized={'model_id':safe_id(selection['model_id'])} if has_model else {'all_models':True}
     if 'test_id' in selection:normalized['test_id']=safe_id(selection['test_id'])
     if 'variant_id' in selection:normalized['variant_id']=safe_id(selection['variant_id'])
     if 'test_ids' in selection:
@@ -62,8 +68,11 @@ def validate_selection(selection, models, tests):
     selection = normalize_selection(selection)
     if selection is None:
         return None
-    if not any(m['id'] == selection['model_id'] and m.get('enabled', True) for m in models):
-        raise ValueError('Selected model is unavailable or disabled. Rescan and assign it in Installed models.')
+    if 'model_id' in selection:
+        if not any(m['id']==selection['model_id'] and m.get('enabled',True) for m in models):
+            raise ValueError('Selected model is unavailable or disabled. Rescan and assign it in Installed models.')
+    elif not any(m.get('enabled',True) for m in models):
+        raise ValueError('No enabled models are available. Rescan and assign models in Installed models.')
     selected_ids=[selection['test_id']] if 'test_id' in selection else selection.get('test_ids',[])
     for test_id in selected_ids:
         test=next((t for t in tests if t['id']==test_id and t.get('enabled',True)),None)
@@ -81,7 +90,7 @@ def pending_plan(models, tests, target, store, selection=None):
     selection=validate_selection(selection,models,tests)
     groups=[];complete=0;excluded=[];unassigned=[]
     for model in models:
-        if selection and model['id']!=selection['model_id']:continue
+        if selection and 'model_id' in selection and model['id']!=selection['model_id']:continue
         if model.get('enabled', True) is False:
             continue
         if model.get('required_vram_gb') is None:

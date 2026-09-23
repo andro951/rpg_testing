@@ -23,7 +23,7 @@ def build(app, preparation=None, track_progress=True, selection=None):
     update('Loading benchmark definitions',0,10,'Reading models and enabled test files.')
     all_models=app.catalog();tests=load_tests(app.root/'test_specs')
     selection=validate_selection(selection,all_models,tests)
-    models=[m for m in all_models if not selection or m['id']==selection['model_id']]
+    models=[m for m in all_models if not selection or 'model_id' not in selection or m['id']==selection['model_id']]
     update('Loading benchmark definitions',100,15,f'{len(tests)} enabled tests loaded.')
     if not tests:problems.append(issue('tests','No enabled test files. Add or enable a test in Test definitions.'))
     update('Detecting GPU and runtime',10,16,'Inspecting the execution environment.')
@@ -51,7 +51,7 @@ def build(app, preparation=None, track_progress=True, selection=None):
     update('Checking existing results',0,20,'Validating saved completion evidence.')
     # Pins are metadata, NOT completion tracking. Recover from checksummed results if needed.
     for file in app.store.root.glob('*/*.json'):
-        if selection and file.parent.name!=selection['model_id']:continue
+        if selection and 'model_id' in selection and file.parent.name!=selection['model_id']:continue
         try:app.store.read(file)
         except (ValueError,KeyError,TypeError) as exc:
             try:app.store.path(file.parent.name,file.stem)
@@ -80,7 +80,7 @@ def build(app, preparation=None, track_progress=True, selection=None):
     # Full-file SHA-256 is deliberately not computed here; trusted source hashes are retained when already known.
     changed=False
     identity_items=[item for item in found if item['catalogued'] and item['complete'] and not item['errors']
-                    and (not selection or item['id']==selection['model_id'])]
+                    and (not selection or 'model_id' not in selection or item['id']==selection['model_id'])]
     update('Identifying model files',100 if not identity_items else 0,35,
            'No eligible model files need identification.' if not identity_items else f'0 / {len(identity_items)} models')
     for item_index,item in enumerate(identity_items,1):
@@ -145,12 +145,12 @@ def build(app, preparation=None, track_progress=True, selection=None):
             try:
                 group['context']=automatic_context(tests,model['metadata'])
             except ValueError as exc:problems.append(issue('context_'+mid,str(exc)));continue
-    if selection and selection['model_id'] in plan['excluded']:
+    if selection and 'model_id' in selection and selection['model_id'] in plan['excluded']:
         problems.append(issue('selected_model_tier','The selected model is not eligible for this GPU tier. Check its assignment in Installed models.','Review VRAM assignment',{'type':'models'}))
-    if selection and selection['model_id'] in plan['unassigned']:
+    if selection and 'model_id' in selection and selection['model_id'] in plan['unassigned']:
         problems.append(issue('selected_model_unassigned','Assign a VRAM tier to the selected model first.','Assign VRAM',{'type':'models'}))
     for item in found:
-        if selection and item['id']!=selection['model_id']:continue
+        if selection and 'model_id' in selection and item['id']!=selection['model_id']:continue
         if item['required_vram_gb'] is None:
             problems.append(issue('unassigned_'+item['id'],'Assign a VRAM tier to '+item['name']+' in Models.','Assign VRAM',{'type':'models'},'needs_input'))
     update('Checking execution readiness',85,98,'Checking Git/source state and final readiness.')

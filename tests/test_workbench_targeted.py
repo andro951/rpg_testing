@@ -98,6 +98,19 @@ class TargetedTests(unittest.TestCase):
         self.assertGreater(self.app.report['plan']['pending'], 0)
         self.assertTrue(all(p.read_bytes() == data for p, data in saved.items()))
 
+    def test_one_test_all_models_is_explicit_scope(self):
+        selection={'all_models':True,'test_id':'time_only','variant_id':'direct_json_patch'}
+        self.app.run(selection=selection)
+        records=self.app.store.all()
+        self.assertEqual(len(records),2)
+        self.assertEqual({r['model_id'] for r in records},{'alpha','beta'})
+        self.assertEqual({r['test_id'] for r in records},{'time_only'})
+        self.assertEqual({r['variant_id'] for r in records},{'direct_json_patch'})
+        self.assertTrue(all(r['provenance']['selection']==selection for r in records))
+        self.app.run(selection=selection)
+        self.assertEqual(self.app.completed_now,0)
+        self.assertEqual(len(self.app.store.all()),2)
+
     def test_one_model_selected_tests_only(self):
         selected=['time_only','clothing_append']
         expected=sum(t.get('repetitions',1)*sum(v.get('enabled',True) for v in t['variants'])
@@ -157,6 +170,10 @@ class TargetedTests(unittest.TestCase):
                           {'model_id':'beta','test_ids':['missing']},
                           {'model_id':'beta','test_id':'time_only','test_ids':['clothing_append']},
                           {'model_id':'beta','test_ids':['time_only'],'variant_id':'direct_json_patch'},
+                          {'all_models':False,'test_id':'time_only'},
+                          {'all_models':True},
+                          {'all_models':True,'test_ids':['time_only']},
+                          {'model_id':'beta','all_models':True,'test_id':'time_only'},
                           {**self.scope, 'variant_id': 'missing'}, {**self.scope, 'force': True}):
             with self.subTest(selection=selection), self.assertRaises(ValueError):
                 self.app.start('run', {'selection': selection})

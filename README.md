@@ -22,7 +22,7 @@ This folder choice applies **only to model files and their partial downloads**. 
 
 ## Targeted runs
 
-**Run Individual Test** in the left sidebar selects one model and one enabled test definition, with all enabled variants or one chosen variant. **Test One Model** shows every enabled test with a checkbox; all are selected by default, and you can run any checked subset for one model. Both keep the test's repetitions, seeds and sampling settings; only pending cases run. Use the page's check button to preflight that selection, or its run button to preflight and execute it. Progress and any repair actions appear in Overview; normal Results, Comparison and exports contain the evidence.
+**Run Individual Test** in the left sidebar selects one model—or **All** models—and one enabled test definition, with all enabled variants or one chosen variant. **Test One Model** shows every enabled test with a checkbox; all are selected by default, and you can run any checked subset for one model. Both keep the test's repetitions, seeds and sampling settings; only pending cases run. Use the page's check button to preflight that selection, or its run button to preflight and execute it. Progress and any repair actions appear in Overview; normal Results, Comparison and exports contain the evidence.
 
 Selection is temporary and does not edit `models.json` or test files. Targeted and full runs share case IDs and context allocation, so finishing targeted cases removes that work from the normal queue. The selected model must still satisfy the normal hardware tier and runtime checks. Unrelated missing or unassigned models do not block a selected run. Source-update restarts and automatic repair preserve the selection; they never broaden it to the entire queue.
 
