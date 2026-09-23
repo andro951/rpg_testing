@@ -73,7 +73,7 @@ class StatePresentationTests(unittest.TestCase):
         self.assertNotIn('{put prompt here}',user)
         self.assertIn('They are both consenting adults',user)
         self.assertIn('Alex asks her: "What are you into?"',user)
-        self.assertIn('Do not write Alex\\'s thoughts, dialogue, decisions, or physical actions.',user)
+        self.assertIn("Do not write Alex's thoughts, dialogue, decisions, or physical actions.",user)
         self.assertIn('including preferences, turn-ons, boundaries, or kinks',user)
         self.assertIn('avoid repetitive loops or stock disclaimers',user)
         self.assertEqual(test['repetitions'],3)
