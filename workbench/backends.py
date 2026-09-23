@@ -108,6 +108,10 @@ class DemoBackend:
         time.sleep(.02)
         self.counter+=1
         prompt=messages[1]['content']
+        if 'Current State:\n' not in prompt and '\nSOURCE\n' not in prompt:
+            return {'text':'SIMULATED DIALOGUE RESPONSE','finish_reason':'stop','request_seconds':.02,'first_token_seconds':.01,
+                    'usage':{},'timings':{},'cached_tokens':1024 if cache=='on' and self.counter>1 else 0,
+                    'simulated':True,'raw_chunks':[]}
         if '\nSOURCE\n' in prompt:
             source=parse(prompt.split('\nSOURCE\n',1)[1])
             event=source.get('new_information','')

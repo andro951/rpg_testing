@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 TIERS = (8, 12, 16, 24, 32, 40, 48, 80)
-PROMPT_STYLES = ('legacy_v1','conversational_v2','only_changed_v3','smallest_patch_v4','change_rule_v5','one_example_v6')
+PROMPT_STYLES = ('legacy_v1','conversational_v2','only_changed_v3','smallest_patch_v4','change_rule_v5','one_example_v6','direct_text_v1')
 ENGINE_VERSION = 'seeded-repetitions-1'
 
 

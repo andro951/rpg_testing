@@ -65,6 +65,16 @@ class StatePresentationTests(unittest.TestCase):
         self.assertIn('Make the smallest JSON Patch needed',rendered['v4_smallest_patch'])
         self.assertIn('only when the value in the updated state should be different',rendered['v5_change_rule'])
         self.assertIn('Example:\nCurrent State:',rendered['v6_one_example'])
+    def test_dialogue_test_uses_direct_prompt_only(self):
+        test=read_json(ROOT/'test_specs/dialogue_test.json');variant=test['variants'][0]
+        prompt=messages(test,variant['steps'][0],{},variant)
+        self.assertEqual(prompt,[{'role':'system','content':"Follow the user's prompt."},
+                                 {'role':'user','content':'{put prompt here}'}])
+        self.assertEqual(test['repetitions'],3)
+        self.assertEqual(variant['steps'][0]['sampling']['temperature'],0.9)
+        self.assertNotIn('max_tokens',json.dumps(test))
+        self.assertNotIn('max_output_tokens',json.dumps(test))
+
     def test_default_presentation_is_indexed_arrays(self):
         self.assertEqual(presentation_mode({'source':{}},{}),'indexed_arrays')
 
@@ -90,6 +100,10 @@ class StatePresentationTests(unittest.TestCase):
                 if not variant.get('enabled',True):continue
                 with self.subTest(test=test['id'],variant=variant['id']):
                     result=execute(test,variant,DemoBackend())
-                    self.assertTrue(result['score']['exact_match'],result['score'])
+                    if 'expected_state' not in test and variant.get('result',{}).get('representation')=='answers' and not variant.get('expected_answers'):
+                        self.assertTrue(result['score']['valid'],result['score'])
+                        self.assertIsNone(result['score']['exact_match'],result['score'])
+                    else:
+                        self.assertTrue(result['score']['exact_match'],result['score'])
 
 if __name__=='__main__':unittest.main()
