@@ -68,8 +68,14 @@ class StatePresentationTests(unittest.TestCase):
     def test_dialogue_test_uses_direct_prompt_only(self):
         test=read_json(ROOT/'test_specs/dialogue_test.json');variant=test['variants'][0]
         prompt=messages(test,variant['steps'][0],{},variant)
-        self.assertEqual(prompt,[{'role':'system','content':"Follow the user's prompt."},
-                                 {'role':'user','content':'{put prompt here}'}])
+        self.assertEqual(prompt[0],{'role':'system','content':"Follow the user's prompt."})
+        self.assertEqual(len(prompt),2);user=prompt[1]['content']
+        self.assertNotIn('{put prompt here}',user)
+        self.assertIn('They are both consenting adults',user)
+        self.assertIn('Alex asks her: "What are you into?"',user)
+        self.assertIn('Do not write Alex\\'s thoughts, dialogue, decisions, or physical actions.',user)
+        self.assertIn('including preferences, turn-ons, boundaries, or kinks',user)
+        self.assertIn('avoid repetitive loops or stock disclaimers',user)
         self.assertEqual(test['repetitions'],3)
         self.assertEqual(variant['steps'][0]['sampling']['temperature'],0.9)
         self.assertNotIn('max_tokens',json.dumps(test))
