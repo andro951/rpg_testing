@@ -8,7 +8,7 @@ The application starts without a model path. It never chooses a weights director
 
 That folder can already contain downloaded GGUFs. The scanner recursively inspects metadata and split-file groups without moving them. It ignores image projectors for these text-only experiments. If no models are found, a dialog asks whether the empty folder is intentional. Confirm it, or choose a different folder. Confirmation is tied to the normalized selected path; it cannot authorize another directory.
 
-A moved/disconnected drive or unreadable folder must be fixed before pending model work can run. If old settings came from the LM Studio version, the new model-folder policy asks for fresh consent rather than silently inheriting the old path.
+A successful **Rescan / preflight** or normal preflight reconciles the machine-local model catalog to the GGUF files actually present in the configured folder. Manually deleted models are removed from active model assignments and the artifact-identity cache, but their historical benchmark result files remain available for analysis. Incomplete split models are retained while any shard remains so missing shards can still be repaired. A moved/disconnected drive or unreadable folder is never interpreted as an empty scan and must be fixed before pending model work can run. If old settings came from the LM Studio version, the new model-folder policy asks for fresh consent rather than silently inheriting the old path.
 
 Only models and partial downloads use this directory. Repository-relative storage is:
 

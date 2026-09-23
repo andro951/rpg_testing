@@ -129,6 +129,59 @@ class ModelManagementTests(unittest.TestCase):
         self.assertEqual(len(legacy),3)
         self.assertTrue(all(m['required_vram_gb']==8 for m in legacy))
 
+    def test_rescan_prunes_deleted_model_metadata_but_keeps_history(self):
+        for name in ('Keep-Q4_K_M.gguf','Delete-Q4_K_M.gguf'):
+            (self.models/name).write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        first,second=self.app.last_models
+        self.app.assign_model(first['id'],8);self.app.assign_model(second['id'],8)
+        for item in self.app.last_models:self.app.identify_artifact(item)
+        removed=first;kept=second
+        history=self.app.store.root/removed['id']/'historical-result.json'
+        history.parent.mkdir(parents=True,exist_ok=True);history.write_text('historical evidence')
+        Path(removed['paths'][0]).unlink()
+        self.app.scan_folder()
+        self.assertEqual([m['id'] for m in self.app.catalog()],[kept['id']])
+        self.assertEqual([m['id'] for m in self.app.last_models],[kept['id']])
+        self.assertNotIn(removed['id'],self.app.registry)
+        self.assertIn(kept['id'],self.app.registry)
+        self.assertTrue(history.exists())
+
+    def test_rescan_keeps_catalog_entry_for_incomplete_split_model(self):
+        first='Split-Q4_K_M-00001-of-00002.gguf';second='Split-Q4_K_M-00002-of-00002.gguf'
+        (self.models/first).write_bytes(DATA)
+        catalog=[{'id':'split-model','base_model':'Split','files':[first,second],
+                  'quantization':'Q4_K_M','required_vram_gb':8}]
+        write_json(self.root/'models.json',catalog)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        self.assertEqual([m['id'] for m in self.app.catalog()],['split-model'])
+        self.assertEqual(self.app.last_models[0]['id'],'split-model')
+        self.assertFalse(self.app.last_models[0]['complete'])
+        self.assertEqual(self.app.last_models[0]['missing_shards'],[second])
+
+    def test_preflight_prunes_deleted_models_before_planning(self):
+        (self.root/'test_specs').mkdir()
+        shutil.copy(ROOT/'test_specs/time_only.json',self.root/'test_specs/time_only.json')
+        path=self.models/'Gone-Q4_K_M.gguf';path.write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        mid=self.app.last_models[0]['id'];self.app.assign_model(mid,8);self.app.identify_artifact(self.app.last_models[0])
+        path.unlink()
+        from workbench import preflight
+        report,plan=preflight.build(self.app,preparation={'gpu_name':'GTX 1080','vram_gb':8},track_progress=False)
+        self.assertEqual(self.app.catalog(),[])
+        self.assertNotIn(mid,self.app.registry)
+        self.assertEqual(report['removed_models'],[mid])
+        self.assertEqual(plan['pending'],0)
+        self.assertFalse(any(i['id']=='missing_'+mid for i in report['issues']))
+
+    def test_unavailable_models_folder_does_not_prune_catalog(self):
+        path=self.models/'Keep-Q4_K_M.gguf';path.write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        mid=self.app.last_models[0]['id'];self.app.assign_model(mid,8)
+        shutil.rmtree(self.models)
+        with self.assertRaises(ValueError):self.app.scan_folder()
+        self.assertEqual([m['id'] for m in self.app.catalog()],[mid])
+
     def test_manager_download_requires_folder(self):
         self.app.hub_detail=self.selection()
         with patch('workbench.downloads.download_model') as fn:

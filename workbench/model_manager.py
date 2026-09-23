@@ -8,6 +8,30 @@ from .planning import validate_catalog
 from .workflows import Cancelled
 
 class ModelManager:
+    def reconcile_installed_catalog(self,found):
+        """Forget catalog/artifact entries whose GGUFs are no longer installed.
+
+        The caller must only use this after a successful scan of an existing
+        configured model directory. Historical benchmark results are evidence
+        and are intentionally retained.
+        """
+        if self.demo:return []
+        catalog=self.catalog()
+        if not catalog:return []
+        present={item['id'] for item in found if item.get('catalogued')}
+        removed=[model['id'] for model in catalog if model['id'] not in present]
+        if not removed:return []
+        kept=[model for model in catalog if model['id'] in present]
+        validate_catalog(kept);write_json(self.root/'models.json',kept)
+        registry_changed=False
+        for mid in removed:
+            if mid in self.registry:
+                self.registry.pop(mid,None);registry_changed=True
+        if registry_changed:write_json(self.registry_path,self.registry)
+        self.report=None
+        self.log('catalog_cleanup','Removed missing installed model metadata: '+', '.join(removed))
+        return removed
+
     def search_hub(self,payload):
         from .hub import HubClient
         self.hub_results=HubClient(self.settings.get('hf_token','')).search(payload['query'])

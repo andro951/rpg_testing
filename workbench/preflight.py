@@ -64,18 +64,43 @@ def build(app, preparation=None, track_progress=True, selection=None):
                 'gpu':gpu,'plan':{'pending':0,'complete':0,'model_loads':0,'groups':[]},
                 'note':'Completion cannot be trusted until corrupt result files are resolved.'},None
     update('Checking existing results',100,25,'Saved result files checked.')
-    models=app.with_known_artifacts(models)
     store=app.store
-    plan=pending_plan(models,tests,target,store,selection)
     folder_info=app.folder_info()
     path=folder_info.get('path')
     inventory=[];inventory_error=None
     update('Scanning model files',0,25,'Finding GGUF files and reading lightweight metadata.')
     def scan_progress(done,total,name):
         update('Scanning model files',100*done/max(1,total),25+10*done/max(1,total),name)
-    found=app.demo_models() if app.demo else scan_models(Path(path),all_models,scan_progress) if path else []
+    scan_root=Path(path) if path else None
+    scan_ok=bool(app.demo or (scan_root and scan_root.is_dir()))
+    found=app.demo_models() if app.demo else scan_models(scan_root,all_models,scan_progress) if scan_ok else []
     update('Scanning model files',100,35,f'{len(found)} model variants discovered.')
-    app.last_models=found;app.folder_scanned=bool(path)
+    app.last_models=found;app.folder_scanned=bool(path and scan_ok)
+    removed_models=[]
+    if not app.demo and scan_ok:
+        removed_models=app.reconcile_installed_catalog(found)
+        if removed_models:
+            all_models=app.catalog()
+            if selection and 'model_id' in selection and selection['model_id'] in removed_models:
+                problems.append(issue('selected_model_removed',
+                    'The selected model is no longer installed. Refresh the model choices after rescanning.',
+                    'Open Installed models',{'type':'models'}))
+                models=[]
+                plan_selection=None
+            else:
+                models=[m for m in all_models if not selection or 'model_id' not in selection or m['id']==selection['model_id']]
+                plan_selection=selection
+        else:
+            plan_selection=selection
+    else:
+        plan_selection=selection
+    models=app.with_known_artifacts(models)
+    if selection and selection.get('all_models') and not any(m.get('enabled',True) for m in models):
+        problems.append(issue('selected_models_removed',
+            'No selected models remain installed. Refresh the model choices after rescanning.',
+            'Open Installed models',{'type':'models'}))
+        plan_selection=None
+    plan=pending_plan(models,tests,target,store,plan_selection)
     # Cheap metadata identity prevents ordinary file replacements from reusing older completion evidence.
     # Full-file SHA-256 is deliberately not computed here; trusted source hashes are retained when already known.
     changed=False
@@ -93,7 +118,7 @@ def build(app, preparation=None, track_progress=True, selection=None):
                f'Model {item_index}/{len(identity_items)} · {item["name"]}')
     update('Identifying model files',100,90,
            f'{len(identity_items)} model identities checked from filename, size, modification time and known source metadata.')
-    if changed:plan=pending_plan(models,tests,target,store,selection)
+    if changed:plan=pending_plan(models,tests,target,store,plan_selection)
     grouped={}
     for item in found:grouped.setdefault(item['id'],[]).append(item)
     update('Checking execution readiness',0,90,'Checking storage, runtime controls, contexts, and pending models.')
@@ -158,6 +183,6 @@ def build(app, preparation=None, track_progress=True, selection=None):
     update('Finalizing preflight',100,100,'Preflight report assembled.')
     report={'ready':not problems and not preparation,'prepared':not problems and bool(preparation),
             'preparation_only':bool(preparation),'selection':selection,'issues':problems,'plan':public_plan(plan),'gpu':gpu,
-            'folder':folder_info,'inventory_warning':inventory_error,
+            'folder':folder_info,'inventory_warning':inventory_error,'removed_models':removed_models,
             'note':'Preparation checks cannot certify a future allocation, driver, or remote installation.' if preparation else ('Live preflight blocked; resolve the listed issues.' if problems else 'Live preflight passed; model readiness is checked after each load.')}
     return report,plan

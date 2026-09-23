@@ -278,11 +278,15 @@ class Controller(ModelManager):
             self.last_models=self.demo_models();self.finish_progress('scan','Model scan complete','Simulated model inventory.');return
         path=self.settings.get('model_root','')
         if not path:raise ValueError('Choose your models folder first')
+        root=Path(path)
+        if not root.is_dir():raise ValueError('The chosen models folder is unavailable. Reconnect it or choose another folder.')
         def scan_progress(done,total,name):
             pct=100*done/max(1,total)
             self.set_progress('scan','Scanning model metadata',pct,pct,name)
-        self.last_models=scan_models(Path(path),self.catalog(),scan_progress);self.folder_scanned=True
-        self.message=f'Found {len(self.last_models)} model variants.'
+        self.last_models=scan_models(root,self.catalog(),scan_progress);self.folder_scanned=True
+        removed=self.reconcile_installed_catalog(self.last_models)
+        suffix=f' Removed {len(removed)} missing model assignment(s).' if removed else ''
+        self.message=f'Found {len(self.last_models)} model variants.'+suffix
         self.finish_progress('scan','Model scan complete',self.message)
     @exclusive_edit
     def configure(self,values):
