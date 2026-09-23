@@ -98,6 +98,7 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 page.locator('#run').click()
                 expect(page.locator('#session-complete')).to_have_text(str(expected_pending),timeout=15000)
                 expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)
+                expect(page.locator('#run')).to_be_enabled(timeout=5000)
                 page.locator('nav button[data-page="analysis"]').click()
                 expect(page.locator('#analysis-list')).to_contain_text('full_gpu',timeout=20000)
                 page.locator('nav button[data-page="overview"]').click()
