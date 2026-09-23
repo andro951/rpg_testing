@@ -37,7 +37,7 @@ $('folder-note').textContent=s.report?.folder?.path?('Active folder: '+s.report.
 renderModels();$('log-view').textContent=s.logs.map(l=>l.time+' ['+l.category+'] '+l.message).join('\n');$('remote-url').textContent=s.remote?.url||'';
 if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=s.settings.publish_results; }
 renderHub();renderRuntimes();renderRunControls();folderPrompts();
-const scope=s.report?.selection;let scopeTests='all enabled tests';if(scope?.test_id)scopeTests=scope.test_id;else if(scope?.test_ids)scopeTests=scope.test_ids.length+' selected test(s)';$('run-scope').textContent=scope?('Scope: '+scope.model_id+' · '+scopeTests+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
+const scope=s.report?.selection;let scopeTests='all enabled tests';if(scope?.test_id)scopeTests=scope.test_id;else if(scope?.test_ids)scopeTests=scope.test_ids.length+' selected test(s)';const scopeModel=scope?.all_models?'all eligible models':scope?.model_id;$('run-scope').textContent=scope?('Scope: '+scopeModel+' · '+scopeTests+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
 }
 let modelRenderSignature='',modelVramDrafts=new Map();
 async function saveModelVram(model,tier){
@@ -170,6 +170,11 @@ function fillRunSelect(id,items,placeholder,label){
  select.replaceChildren(new Option(placeholder,''),...items.map(item=>new Option(label(item),item.id)));
  select.value=items.some(item=>item.id===previous)?previous:'';
 }
+function fillIndividualModelSelect(items,label){
+ const select=$('individual-model'),previous=select.value;
+ select.replaceChildren(new Option('Choose a model…',''),new Option('All','__all__'),...items.map(item=>new Option(label(item),item.id)));
+ select.value=previous==='__all__'||items.some(item=>item.id===previous)?previous:'';
+}
 function selectedRunTest(){return runOptions?.tests.find(t=>t.id===$('individual-test').value);}
 function selectedOneModelTests(){
  const tests=runOptions?.tests||[];
@@ -202,7 +207,7 @@ async function loadRunOptions(){
   if(previous===null)oneModelSelectedTests=new Set(runOptions.tests.map(test=>test.id));
   else oneModelSelectedTests=new Set([...previous].filter(id=>runOptions.tests.some(test=>test.id===id)));
   const modelLabel=m=>m.name+' · '+m.quantization+' · '+(m.required_vram_gb===null?'VRAM unassigned':m.required_vram_gb+' GB');
-  fillRunSelect('individual-model',runOptions.models,'Choose a model…',modelLabel);
+  fillIndividualModelSelect(runOptions.models,modelLabel);
   fillRunSelect('one-model-model',runOptions.models,'Choose a model…',modelLabel);
   fillRunSelect('individual-test',runOptions.tests,'Choose a test…',t=>t.name);
   renderRunVariants();renderOneModelTests();runOptionsValid=true;
@@ -211,9 +216,10 @@ async function loadRunOptions(){
 function renderRunControls(){
  const busy=!!state?.busy||!!state?.restart_required||runOptionsLoading||targetSubmitting;
  const models=runOptions?.models||[],tests=runOptions?.tests||[],test=selectedRunTest(),selectedTests=selectedOneModelTests();
+ const individualAll=$('individual-model').value==='__all__';
  const individualModel=models.find(m=>m.id===$('individual-model').value),oneModel=models.find(m=>m.id===$('one-model-model').value);
  const variantValid=!$('individual-variant').value||test?.variants.some(v=>v.id===$('individual-variant').value);
- const individualReady=runOptionsValid&&individualModel&&test&&variantValid;
+ const individualReady=runOptionsValid&&(individualAll||individualModel)&&test&&variantValid;
  const modelReady=runOptionsValid&&oneModel&&selectedTests.length>0;
  for(const action of ['check','run']){$('individual-'+action).disabled=busy||!individualReady;$('one-model-'+action).disabled=busy||!modelReady;}
  for(const id of ['individual-model','individual-test','individual-variant','one-model-model'])$(id).disabled=busy||!runOptionsValid;
@@ -223,14 +229,15 @@ function renderRunControls(){
  $('one-model-toggle-tests').textContent=selectedTests.length?'Deselect all':'Select all';
  let notice=runOptionsLoading?'Loading models and tests…':!runOptionsValid?'Refresh choices when the current operation is finished.':!models.length?'No enabled catalogued models. Rescan and assign VRAM in Installed models.':!tests.length?'No enabled test definitions. Add or enable a test in Test definitions.':null;
  const count=test?test.repetitions*($('individual-variant').value?1:test.variants.length):0;
- $('individual-summary').textContent=notice|| (individualReady?count+' configured case(s) on '+individualModel.name+' · '+test.timeout_seconds+' s limit each. Only pending cases will run.':'Choose a model and test to see the scope.');
+ const individualTotal=count*(individualAll?models.length:1),individualTarget=individualAll?'all '+models.length+' model(s)':individualModel?.name;
+ $('individual-summary').textContent=notice|| (individualReady?individualTotal+' configured case(s) on '+individualTarget+' · '+test.timeout_seconds+' s limit each. Only pending cases will run.':'Choose a model and test to see the scope.');
  const total=selectedTests.reduce((n,t)=>n+t.repetitions*t.variants.length,0);
  $('one-model-summary').textContent=notice|| (modelReady?selectedTests.length+' selected test definition(s), '+total+' configured case(s) on '+oneModel.name+'. Only pending cases will run.':oneModel&&!selectedTests.length?'Select at least one test.':'Choose a model to see the scope.');
 }
 async function startTargetedRun(mode,operation){
- const individual=mode==='individual';
- const selection={model_id:$(individual?'individual-model':'one-model-model').value};
- if(!selection.model_id)throw Error('Choose a model.');
+ const individual=mode==='individual',chosenModel=$(individual?'individual-model':'one-model-model').value;
+ if(!chosenModel)throw Error('Choose a model.');
+ const selection=individual&&chosenModel==='__all__'?{all_models:true}:{model_id:chosenModel};
  if(individual){selection.test_id=$('individual-test').value;if(!selection.test_id)throw Error('Choose a test.');if($('individual-variant').value)selection.variant_id=$('individual-variant').value;}
  else{selection.test_ids=selectedOneModelTests().map(test=>test.id);if(!selection.test_ids.length)throw Error('Select at least one test.');}
  targetSubmitting=true;renderRunControls();

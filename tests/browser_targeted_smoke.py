@@ -61,7 +61,8 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 expect(page.locator('#connection')).to_contain_text('Connected')
                 page.get_by_role('button', name='Run Individual Test', exact=True).click()
                 expect(page.locator('#page-individual')).to_be_visible()
-                expect(page.locator('#individual-model option')).to_have_count(3)
+                expect(page.locator('#individual-model option')).to_have_count(4)
+                expect(page.locator('#individual-model option').nth(1)).to_have_text('All')
                 expect(page.locator('#individual-run')).to_be_disabled()
                 page.locator('#individual-model').select_option('beta')
                 page.locator('#individual-test').select_option('time_only')
@@ -92,6 +93,18 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 expect(page.locator('#state-badge')).to_have_text('FINISHED', timeout=15000)
                 expect(page.locator('#session-complete')).to_have_text('0')
                 assert len(app.store.all()) == 1, 'Repeated targeted Run must resume rather than overwrite'
+                page.get_by_role('button', name='Run Individual Test', exact=True).click()
+                page.locator('#individual-model').select_option('__all__')
+                page.locator('#individual-test').select_option('clothing_append')
+                page.locator('#individual-variant').select_option('direct_json_patch')
+                expect(page.locator('#individual-summary')).to_contain_text('2 configured case(s) on all 2 model(s)')
+                page.locator('#individual-run').click()
+                expect(page.locator('#session-complete')).to_have_text('2',timeout=15000)
+                expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)
+                clothing=[r for r in app.store.all() if r['test_id']=='clothing_append']
+                assert len(clothing)==2 and {r['model_id'] for r in clothing}=={'alpha','beta'}
+                assert all(r['provenance']['selection']=={'all_models':True,'test_id':'clothing_append','variant_id':'direct_json_patch'} for r in clothing)
+                expect(page.locator('#run-scope')).to_contain_text('all eligible models · clothing_append · direct_json_patch')
                 page.get_by_role('button', name='Test One Model', exact=True).click()
                 expect(page.locator('#page-one-model')).to_be_visible()
                 expect(page.locator('#one-model-model option')).to_have_count(3)
@@ -127,11 +140,12 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 expect(page.locator('#state-badge')).to_have_text('FINISHED', timeout=20000)
                 records = app.store.all()
                 alpha=[r for r in records if r['model_id']=='alpha']
-                assert len(alpha)==selected_expected and {r['test_id'] for r in alpha}=={'time_only'}
-                assert len([r for r in records if r['model_id'] == 'beta']) == 1
+                alpha_time=[r for r in records if r['model_id']=='alpha' and r['test_id']=='time_only']
+                assert len(alpha_time)==selected_expected
+                assert len([r for r in records if r['model_id']=='beta'])==2
                 expect(page.locator('#run-scope')).to_contain_text('1 selected test(s)')
                 page.locator('#preflight').click()
-                expect(page.locator('#pending')).to_have_text(str(2*expected-selected_expected-1), timeout=10000)
+                expect(page.locator('#pending')).to_have_text(str(2*expected-selected_expected-3), timeout=10000)
                 expect(page.locator('#run-scope')).to_contain_text('all eligible models')
                 assert all(path.read_bytes() == data for path, data in original_files.items())
                 # The same choices survive navigation, refreshing, polling and narrow viewports.
