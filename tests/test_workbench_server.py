@@ -42,7 +42,9 @@ class ServerTests(unittest.TestCase):
             with urllib.request.urlopen(request,timeout=10) as r:return r.status,r.read(),dict(r.headers)
         except urllib.error.HTTPError as r:return r.code,r.read(),dict(r.headers)
     def wait(self):
-        if self.app.thread:self.app.thread.join(10)
+        if self.app.thread:
+            self.app.thread.join(30)
+            self.assertFalse(self.app.thread.is_alive(),'Workbench operation did not finish')
         self.assertFalse(self.app.operation.locked())
     def test_no_auth_no_state(self):self.assertEqual(self.req('/api/state',auth=False)[0],403)
     def test_bad_key(self):self.assertEqual(self.req('/api/state',headers={'Authorization':'Bearer wrong'})[0],403)
