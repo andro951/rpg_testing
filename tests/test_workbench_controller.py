@@ -32,6 +32,12 @@ class ControllerTests(unittest.TestCase):
     def test_preflight_no_inference(self):
         with patch('workbench.demo_native.DemoNative') as backend:
             self.assertTrue(self.app.check()['ready']);backend.assert_not_called()
+    def test_dirty_checkout_is_not_a_git_preflight_blocker(self):
+        self.app.demo=False;self.app.settings['sync_source']=True
+        dirty={'dirty':' M test_specs/dialogue_test.json','commit':'abc','origin':'origin'}
+        with patch('workbench.gitops.inspect',return_value=dirty):
+            self.assertEqual(self.app.git_issues(),[])
+
     def test_configured_cases_and_resume(self):
         expected=configured_case_count(self.root/'test_specs')
         self.app.run();self.assertEqual(self.app.completed_now,expected)

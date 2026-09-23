@@ -53,6 +53,33 @@ class GitTests(unittest.TestCase):
         (self.root/'models.json').write_text('[1]')
         self.assertFalse(pull(self.root));self.assertEqual((self.root/'models.json').read_text(),'[1]')
         self.assertEqual(git(self.root,'ls-files','--','models.json'),'')
+    def test_dirty_nonconflicting_pull_preserves_local_edit(self):
+        tracked=self.root/'tracked.txt';tracked.write_text('base')
+        git(self.root,'add','tracked.txt');git(self.root,'commit','-m','add tracked');git(self.root,'push')
+        peer=self.root.parent/'peer';git(self.root.parent,'clone',str(self.remote),str(peer))
+        git(peer,'config','user.email','peer@example.invalid');git(peer,'config','user.name','Peer')
+        tracked.write_text('local edit')
+        (peer/'remote.txt').write_text('remote change')
+        git(peer,'add','remote.txt');git(peer,'commit','-m','remote nonconflict');git(peer,'push')
+        self.assertTrue(pull(self.root))
+        self.assertEqual(tracked.read_text(),'local edit')
+        self.assertEqual((self.root/'remote.txt').read_text(),'remote change')
+        self.assertIn('tracked.txt',git(self.root,'status','--porcelain'))
+
+    def test_dirty_conflicting_pull_aborts_and_preserves_local_edit(self):
+        tracked=self.root/'conflict.txt';tracked.write_text('base')
+        git(self.root,'add','conflict.txt');git(self.root,'commit','-m','add conflict');git(self.root,'push')
+        peer=self.root.parent/'peer-conflict';git(self.root.parent,'clone',str(self.remote),str(peer))
+        git(peer,'config','user.email','peer@example.invalid');git(peer,'config','user.name','Peer')
+        tracked.write_text('local edit')
+        (peer/'conflict.txt').write_text('remote edit')
+        git(peer,'add','conflict.txt');git(peer,'commit','-m','remote conflict');git(peer,'push')
+        before=git(self.root,'rev-parse','HEAD')
+        with self.assertRaises(RuntimeError) as cm:pull(self.root)
+        self.assertIn('local changes',str(cm.exception).lower())
+        self.assertEqual(git(self.root,'rev-parse','HEAD'),before)
+        self.assertEqual(tracked.read_text(),'local edit')
+
     def test_save_only_test_config(self):
         (self.root/'models.json').write_text('[1]');(self.root/'private.txt').write_text('private')
         (self.root/'test_specs').mkdir();(self.root/'test_specs/local.json').write_text('{"ok":true}')

@@ -22,7 +22,11 @@ def inspect(root):
 
 
 def pull(root):
-    if inspect(root)['dirty']:raise RuntimeError('Save source/config changes first; nothing was discarded.')
+    # A dirty worktree is not inherently unsafe: Git can fast-forward while
+    # preserving local edits when incoming changes do not overlap them. If an
+    # incoming change would overwrite a local edit (or the branch cannot
+    # fast-forward), git pull --ff-only aborts before discarding local work and
+    # git() surfaces that error to the Workbench.
     before=git(root,'rev-parse','HEAD')
     git(root,'pull','--ff-only')
     return git(root,'rev-parse','HEAD')!=before

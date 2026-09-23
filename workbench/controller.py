@@ -170,8 +170,9 @@ class Controller(ModelManager):
         if self.demo or not self.settings['sync_source']:return []
         from .gitops import inspect
         try:
-            info=inspect(self.root)
-            if info['dirty']:return [preflight.issue('git_dirty','The source checkout has changes. Save test edits or resolve unrelated edits first.','Save and push test edits',{'type':'save_configuration'})]
+            # Local edits are allowed. The actual pre-run fast-forward pull
+            # decides whether incoming changes conflict with them.
+            inspect(self.root)
         except Exception as exc:return [preflight.issue('git',str(exc)+' Use a Git clone for automatic sync, or disable Git in Worker setup.','Open Worker setup',{'type':'setup'})]
         return []
     def selftest(self):
