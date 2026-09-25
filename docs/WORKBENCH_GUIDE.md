@@ -17,7 +17,7 @@ models.json                         shared model catalog, not model bytes
 test_specs/                         experiment definitions
 examples/test_specs/                optional workflow examples
 .local/workbench/settings.json      automatically created operational settings
-.local/workbench/results/<model>/<case>.json
+results/<model>/<case>.json
 .local/workbench/logs/<timestamp>-<id>.json
 .local/runtime/                     explicitly installed native builds
 .local/runtime-cache/               native cache environment

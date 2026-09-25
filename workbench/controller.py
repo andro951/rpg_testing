@@ -30,6 +30,25 @@ from .model_manager import ModelManager
 def now():return datetime.now(timezone.utc).isoformat()
 
 
+def migrate_legacy_results(source:Path,target:Path):
+    """Move authoritative legacy result JSON into the tracked result tree without overwriting evidence."""
+    source,target=Path(source),Path(target)
+    target.mkdir(parents=True,exist_ok=True)
+    if not source.exists() or source.resolve()==target.resolve():return 0
+    moved=0
+    for old in sorted(source.glob('*/*.json')):
+        relative=old.relative_to(source);new=target/relative;new.parent.mkdir(parents=True,exist_ok=True)
+        if new.exists():
+            if old.read_bytes()!=new.read_bytes():
+                raise RuntimeError('Conflicting result evidence during migration: '+relative.as_posix())
+        else:shutil.copy2(old,new)
+        old.unlink();moved+=1
+    for folder in sorted((p for p in source.glob('*') if p.is_dir()),reverse=True):
+        try:folder.rmdir()
+        except OSError:pass
+    return moved
+
+
 def exclusive_edit(method):
     @functools.wraps(method)
     def wrapped(self,*args,**kwargs):
@@ -57,7 +76,9 @@ class Controller(ModelManager):
         self.progress={'active':False,'phase':'idle','task':'Idle','task_percent':0.0,'overall_percent':0.0,
                        'detail':'','started_at':None,'updated_at':now()}
         self.monitor=None;self.last_telemetry=None;self.timing_active=False;self.run_provenance={}
-        self.store=ResultStore(self.data/'results');self.registry_path=self.data/'artifacts.json'
+        result_root=self.data/'results' if demo else self.root/'results'
+        migrated=0 if demo else migrate_legacy_results(self.data/'results',result_root)
+        self.store=ResultStore(result_root);self.registry_path=self.data/'artifacts.json'
         self.registry=read_json(self.registry_path) if self.registry_path.exists() else {}
         self.last_models=[];self.report=None;self.plan=None;self.state='idle';self.message='Run preflight to inspect pending work.'
         self.lock=threading.RLock();self.operation=threading.Lock();self.thread=None
@@ -66,9 +87,11 @@ class Controller(ModelManager):
         self.logs=[];self.pending_logs=[];self.completed_now=0;self.session_errors=0;self.current=None;self.restart_required=False
         self.started=None;self.finished=None;self.publisher=None;self.last_publish=0;self.version_cache=None
         self.on_shutdown=None;self.remote_info=None;self.requested_run_selection=None
-        for name in ('results','logs','preflight_reports'):(self.data/name).mkdir(exist_ok=True)
+        self.store.root.mkdir(parents=True,exist_ok=True)
+        for name in ('logs','preflight_reports'):(self.data/name).mkdir(exist_ok=True)
         self.process_source_commit=self.source_commit()
         self.log('startup','Workbench started'+(' in SIMULATED DEMO mode' if demo else ''))
+        if migrated:self.log('results_migration',f'Migrated {migrated} legacy result file(s) into tracked results/.')
     def set_progress(self,phase,task,task_percent=None,overall_percent=None,detail='',active=True):
         def pct(value,old):
             if value is None:return old
@@ -253,7 +276,8 @@ class Controller(ModelManager):
         found=next((i for i in self.report['issues'] if i['id']==action.get('issue_id')),None)
         if not found or not found.get('action'):raise ValueError('No current repair action for this issue.')
         a=found['action'];kind=a['type'];self.log('action','User approved: '+found['label'])
-        if kind=='create_folder':(self.data/a['name']).mkdir(parents=True,exist_ok=True)
+        if kind=='create_folder':
+            (self.store.root if a['name']=='results' else self.data/a['name']).mkdir(parents=True,exist_ok=True)
         elif kind=='confirm_folder':self.settings['confirmed_empty_folder']=self.folder_info()['path'];self.save_settings()
         elif kind=='download_model':
             from .downloads import download_model
@@ -409,7 +433,10 @@ class Controller(ModelManager):
     def export(self):
         self.flush_logs();out=io.BytesIO()
         with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
-            for folder in ('results','logs','preflight_reports'):
+            for p in sorted(self.store.root.rglob('*')):
+                if p.is_file() and not p.is_symlink() and not p.name.startswith('.'):
+                    z.write(p,(Path('results')/p.relative_to(self.store.root)).as_posix())
+            for folder in ('logs','preflight_reports'):
                 for p in sorted((self.data/folder).rglob('*')):
                     if p.is_file() and not p.is_symlink() and not p.name.startswith('.'):
                         z.write(p,p.relative_to(self.data).as_posix())
@@ -418,7 +445,7 @@ class Controller(ModelManager):
             for path in sorted(self.store.root.glob('*/*.json')):
                 try:valid.append(self.store.read(path))
                 except (ValueError,KeyError,TypeError) as exc:
-                    corrupt.append({'file':path.relative_to(self.data).as_posix(),'error':str(exc)})
+                    corrupt.append({'file':(Path('results')/path.relative_to(self.store.root)).as_posix(),'error':str(exc)})
             summary=summarize(valid)
             summary['corrupt_files']=corrupt
             reports=[]

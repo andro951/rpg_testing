@@ -131,7 +131,7 @@ def build(app, preparation=None, track_progress=True, selection=None):
         elif not found and not app.demo and settings.get('confirmed_empty_folder')!=path:
             problems.append(issue('empty_folder','The current configured model folder is empty: '+str(path),'Confirm this folder',{'type':'confirm_folder'}))
         for name in ('results','logs'):
-            directory=app.data/name
+            directory=app.store.root if name=='results' else app.data/name
             if not directory.is_dir():
                 problems.append(issue('folder_'+name,'Missing '+name+' folder.','Create '+name+' folder',{'type':'create_folder','name':name}))
             else:

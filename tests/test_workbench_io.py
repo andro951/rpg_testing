@@ -53,6 +53,9 @@ class GitTests(unittest.TestCase):
         (self.root/'models.json').write_text('[1]')
         self.assertFalse(pull(self.root));self.assertEqual((self.root/'models.json').read_text(),'[1]')
         self.assertEqual(git(self.root,'ls-files','--','models.json'),'')
+    def test_result_files_are_not_gitignored(self):
+        path=self.root/'results/model-a/case.json';path.parent.mkdir(parents=True);path.write_text('{"status":"completed"}')
+        self.assertIn('results/model-a/case.json',git(self.root,'ls-files','--others','--exclude-standard'))
     def test_dirty_nonconflicting_pull_preserves_local_edit(self):
         tracked=self.root/'tracked.txt';tracked.write_text('base')
         git(self.root,'add','tracked.txt');git(self.root,'commit','-m','add tracked');git(self.root,'push')

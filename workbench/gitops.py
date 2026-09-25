@@ -59,7 +59,7 @@ class Publisher:
         self.prepare()
         destination=self.checkout/'workbench_results'/self.worker
         for folder in ('results','logs'):
-            source=self.data/folder;target=destination/folder
+            source=(self.root/'results') if folder=='results' else (self.data/folder);target=destination/folder
             target.mkdir(parents=True,exist_ok=True)
             keep=set()
             for file in source.rglob('*'):

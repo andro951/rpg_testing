@@ -18,7 +18,7 @@ Update `main` with GitHub Desktop, open the repository folder, and double-click 
 4. **Preflight.** Resolve any listed issue using its specific action button. Preflight checks benchmark readiness only; Workbench unit/smoke tests are run separately with **Run Unit Tests**. It checks only models needed for unfinished work. A completed model does not need to remain installed. Existing uncatalogued models have a VRAM dropdown and an **Accept recommended** action. Model identity uses filename, size, modification time, and known repository/revision metadata; preflight does not reread entire GGUF files to generate SHA-256 hashes. Source-provided hashes are retained when available.
 5. **Run remaining tests.** Leave it running. No model-failure confirmation dialog will hold the rest of the queue hostage.
 
-This folder choice applies **only to model files and their partial downloads**. Model assignments are stored in a machine-local root `models.json`; a fresh checkout can discover GGUFs before that file exists, and the file is created only when local model metadata is saved. `models.json` is ignored by Git. Tests stay in `test_specs/`. Results, logs and operational settings stay under `.local/workbench/` in the repository; runtime files use `.local/runtime/`. Credentials and weights are excluded from Git.
+This folder choice applies **only to model files and their partial downloads**. Model assignments are stored in a machine-local root `models.json`; a fresh checkout can discover GGUFs before that file exists, and the file is created only when local model metadata is saved. `models.json` is ignored by Git. Tests stay in `test_specs/`. Real benchmark result JSON files are stored under tracked `results/` so they are normal Git evidence. Logs, preflight reports and operational settings stay under `.local/workbench/`; runtime files use `.local/runtime/`. Credentials and weights are excluded from Git. On first launch after this change, legacy result JSON under `.local/workbench/results/` is migrated into `results/` without overwriting conflicting evidence.
 
 ## Targeted runs
 
@@ -60,9 +60,9 @@ Unity support is intentionally practical rather than a promise of zero setup: pu
 
 ## Git behavior and validation
 
-Optional source synchronization pulls before a real run. When code changes, the supervisor restarts with the new source and resumes the explicitly requested Run; automatic restart chains are bounded. No hot-reloading experimental code during a measurement. Optional result publishing uses a worker-specific branch, narrow staging, and no force reset or automatic stash.
+Optional source synchronization pulls before a real run. When code changes, the supervisor restarts with the new source and resumes the explicitly requested Run; automatic restart chains are bounded. No hot-reloading experimental code during a measurement. Result JSON under `results/` is intentionally visible to normal Git workflows on the main checkout. Optional result publishing still mirrors evidence to a worker-specific branch for unattended checkpoints, using narrow staging and no force reset or automatic stash.
 
-Only synthetic safe-for-work data belongs in this public repository. Do not publish private saves, real patient/student records, explicit content or credentials.
+Only synthetic benchmark data belongs in this public repository. Test outputs may include mature fictional benchmark content when that is part of the experiment. Do not publish private saves, real patient/student records, credentials, or other personal data.
 
 See [TEST_REPORT.md](docs/TEST_REPORT.md) for actual test evidence, [WORKBENCH_GUIDE.md](docs/WORKBENCH_GUIDE.md) for operation details, and [PLANNED_CHANGES.md](docs/PLANNED_CHANGES.md) for requirement coverage and validation limits. UI/subprocess fixtures are not real GPU inference.
 
