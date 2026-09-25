@@ -88,6 +88,26 @@ class AdapterTests(unittest.TestCase):
     def test_native_cache_on(self):
         b=self.backend();b.generate([],{},None,'on')
         self.assertTrue(b.transport.calls[-1][1]['cache_prompt'])
+    def test_model_without_system_role_gets_compatible_messages(self):
+        b=self.backend();b.load_metadata={'properties':{'chat_template_caps':{'supports_system_role':False},
+            'chat_template':"Conversation roles must alternate user/assistant/user/assistant/..."}}
+        messages=[{'role':'system','content':'Keep unchanged values.'},{'role':'user','content':'Current state.'},
+                  {'role':'user','content':'Return the patch.'}]
+        result=b.generate(messages,{},None)
+        expected=[{'role':'user','content':'Keep unchanged values.\\n\\nCurrent state.\\n\\nReturn the patch.'}]
+        apply=[x for x in b.transport.calls if x[0]=='/apply-template'][0][1]
+        request=[x for x in b.transport.calls if x[0]=='/v1/chat/completions'][0][1]
+        self.assertEqual(apply['messages'],expected);self.assertEqual(request['messages'],expected)
+        self.assertEqual(result['request_messages'],expected)
+        self.assertEqual(result['message_adaptation']['merged_system_messages'],1)
+        self.assertEqual(result['message_adaptation']['merged_adjacent_messages'],1)
+    def test_system_capable_template_preserves_messages(self):
+        b=self.backend();b.load_metadata={'properties':{'chat_template_caps':{'supports_system_role':True},
+            'chat_template':'plain'}}
+        messages=[{'role':'system','content':'Rules'},{'role':'user','content':'Task'}]
+        result=b.generate(messages,{},None)
+        request=[x for x in b.transport.calls if x[0]=='/v1/chat/completions'][0][1]
+        self.assertEqual(request['messages'],messages);self.assertNotIn('message_adaptation',result)
     def test_removed_backend_is_not_selectable(self):
         with self.assertRaises(ValueError):NativeBackend({'backend':'lmstudio'},{})
     def test_native_input_exhaustion_no_generation(self):

@@ -34,6 +34,9 @@ class ProcessTests(unittest.TestCase):
   self.assertIn('--reasoning',str(cm.exception))
   with patch('workbench.native.diagnostic_command',side_effect=[required+' --reasoning MODE','v']):
    self.assertIn('--reasoning',capabilities('llama-server',preparation=True)['help'])
+ def test_configured_load_timeout_extends_default_floor(self):
+  self.b.settings['load_timeout_seconds']=900
+  metadata=self.load();self.assertEqual(metadata['load_timeout_seconds'],900)
  def test_owned_process_load_probe_generation_unload(self):
   metadata=self.load();process=self.b.process
   self.assertEqual(metadata['placement']['status'],'full_gpu');self.assertFalse(metadata['health_exact_ready'])

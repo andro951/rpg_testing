@@ -37,6 +37,37 @@ def capabilities(exe, preparation=False):
     return result
 
 
+def _template_compatible_messages(messages, properties):
+    """Adapt only when the model's own chat-template metadata requires it."""
+    props=properties or {};caps=props.get('chat_template_caps') or {};template=props.get('chat_template') or ''
+    supports_system=caps.get('supports_system_role')
+    strict_alternation=bool(re.search(r'roles?\\s+must\\s+alternate|alternate\\s+user/assistant',template,re.I))
+    if supports_system is not False and not strict_alternation:return messages,None
+    system_parts=[];dialogue=[]
+    for message in messages:
+        role=message.get('role');content=message.get('content','')
+        if not isinstance(content,str):raise Unsupported('Chat-template compatibility requires string message content')
+        if role=='system':system_parts.append(content)
+        elif role in ('user','assistant'):dialogue.append({'role':role,'content':content})
+        else:raise Unsupported('Chat-template compatibility cannot rewrite role: '+str(role))
+    if system_parts:
+        prefix='\\n\\n'.join(system_parts)
+        if dialogue and dialogue[0]['role']=='user':dialogue[0]['content']=prefix+'\\n\\n'+dialogue[0]['content']
+        else:dialogue.insert(0,{'role':'user','content':prefix})
+    merged=[];merged_count=0
+    for message in dialogue:
+        if merged and merged[-1]['role']==message['role']:
+            merged[-1]['content']+='\\n\\n'+message['content'];merged_count+=1
+        else:merged.append(dict(message))
+    if not merged:raise Unsupported('Chat-template compatibility produced no messages')
+    if strict_alternation and merged[0]['role']!='user':
+        raise Unsupported('Model chat template requires the conversation to start with a user message')
+    if merged==messages:return messages,None
+    return merged,{'reason':'model_chat_template_compatibility','supports_system_role':supports_system,
+                   'strict_alternation_detected':strict_alternation,'merged_system_messages':len(system_parts),
+                   'merged_adjacent_messages':merged_count}
+
+
 class NativeBackend:
     supports_cache=True
     supports_schema=True
@@ -137,6 +168,10 @@ class NativeBackend:
         cache=Path(self.settings.get('runtime_cache',Path.cwd()/'.local/runtime-cache'));cache.mkdir(parents=True,exist_ok=True)
         env.update(CUDA_CACHE_PATH=str(cache),XDG_CACHE_HOME=str(cache),HF_HOME=str(cache/'huggingface'))
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
+        configured_timeout=self.settings.get('load_timeout_seconds',LOAD_TIMEOUT_SECONDS)
+        if type(configured_timeout) not in (int,float) or configured_timeout<=0:
+            raise RunFailure('load_timeout_seconds must be a positive number')
+        load_timeout=max(LOAD_TIMEOUT_SECONDS,configured_timeout)
         started=time.perf_counter()
         try:
             self.progress('Loading model',25,'Starting model process and waiting for readiness.')
@@ -148,7 +183,7 @@ class NativeBackend:
                     line=line.rstrip().replace(self.token,'[REDACTED]')
                     self.lines.append(line);self.log('backend',line)
             self.reader=threading.Thread(target=drain,daemon=True);self.reader.start()
-            with self.budget(LOAD_TIMEOUT_SECONDS):
+            with self.budget(load_timeout):
                 while True:
                     if cancel and cancel.is_set():raise Cancelled('Stopped during loading')
                     if process.poll() is not None:
@@ -177,7 +212,7 @@ class NativeBackend:
                 actual=settings.get('n_ctx') or settings.get('params',{}).get('n_ctx')
                 if actual and actual!=self.context:raise RunFailure('Runtime changed the context allocation')
                 self.load_metadata={'placement':evidence,'execution_class':execution_class,'requested_gpu_layers':layers,
-                    'context':context,'load_seconds':time.perf_counter()-started,
+                    'context':context,'load_seconds':time.perf_counter()-started,'load_timeout_seconds':load_timeout,
                     'arguments':['[REDACTED]' if a==self.token else a for a in args],
                     'runtime':self.version_info,'properties':props,
                     'full_gpu_layers_verified':evidence['status']=='full_gpu',
@@ -195,7 +230,7 @@ class NativeBackend:
                 converted=classify_load_failure(str(exc));converted.partial_response=getattr(exc,'partial_response',{})
                 exc=converted
             self.load_metadata.update(context=context,execution_class=execution_class,
-                placement=placement(self.lines),load_seconds=time.perf_counter()-started)
+                placement=placement(self.lines),load_seconds=time.perf_counter()-started,load_timeout_seconds=load_timeout)
             if isinstance(exc,RunFailure):exc.evidence={**self.load_metadata,**exc.evidence}
             self.unload();raise exc
 
@@ -210,22 +245,30 @@ class NativeBackend:
 
     def generate(self,messages,settings,schema,cache='default',cancel=None):
         if cancel and cancel.is_set():raise Cancelled('Stopped')
-        text=self.transport.request('/apply-template',{'messages':messages})['prompt']
+        request_messages,adaptation=_template_compatible_messages(messages,self.load_metadata.get('properties',{}))
+        from .backends import BackendError
+        try:text=self.transport.request('/apply-template',{'messages':request_messages})['prompt']
+        except BackendError as exc:
+            classified=classify_load_failure(str(exc));partial=getattr(exc,'partial_response',{})
+            if adaptation:partial={**partial,'request_messages':request_messages,'message_adaptation':adaptation}
+            classified.partial_response=partial;raise classified from exc
         count=len(self.transport.request('/tokenize',{'content':text,'add_special':True})['tokens'])
         if count+256>=self.context:raise ContextCapacity('Input leaves insufficient continuation space',count+4096)
         if cache=='off':self.clear_cache()
-        body={'model':self.owned_id,'messages':messages,**settings,'stream':True,'stream_options':{'include_usage':True},
+        body={'model':self.owned_id,'messages':request_messages,**settings,'stream':True,'stream_options':{'include_usage':True},
               'max_tokens':-1,'id_slot':0,'cache_prompt':cache!='off'}
         if schema is not None:body['response_format']={'type':'json_schema','json_schema':{'name':'step_output','strict':True,'schema':schema}}
-        from .backends import BackendError
         try:result=self.transport.request('/v1/chat/completions',body,stream=True,cancel=cancel)
         except BackendError as exc:
+            partial=getattr(exc,'partial_response',{})
+            if adaptation:partial={**partial,'request_messages':request_messages,'message_adaptation':adaptation}
             if cancel and cancel.is_set():
-                stopped=Cancelled('Stopped');stopped.partial_response=getattr(exc,'partial_response',{});raise stopped from exc
-            classified=classify_load_failure(str(exc))
-            classified.partial_response=getattr(exc,'partial_response',{})
+                stopped=Cancelled('Stopped');stopped.partial_response=partial;raise stopped from exc
+            classified=classify_load_failure(str(exc));classified.partial_response=partial
             raise classified from exc
         result['input_tokens_verified']=count;result['output_limit_policy']='EOS or native context; no token cap'
+        if adaptation:
+            result['request_messages']=request_messages;result['message_adaptation']=adaptation
         if result['finish_reason']=='length':
             error=ContextCapacity('Continuation reached context capacity',self.context+1)
             error.partial_response=result;raise error
