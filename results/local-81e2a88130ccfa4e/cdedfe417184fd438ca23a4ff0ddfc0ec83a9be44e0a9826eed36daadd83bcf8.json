@@ -1,0 +1,1200 @@
+{
+  "status": "completed",
+  "case_id": "cdedfe417184fd438ca23a4ff0ddfc0ec83a9be44e0a9826eed36daadd83bcf8",
+  "primary_case_id": "cdedfe417184fd438ca23a4ff0ddfc0ec83a9be44e0a9826eed36daadd83bcf8",
+  "model_id": "local-81e2a88130ccfa4e",
+  "test_id": "prompt_calibration_001_time",
+  "variant_id": "v2_conversational",
+  "repetition": 1,
+  "target": {
+    "gpu_name": "NVIDIA GeForce GTX 1080",
+    "vram_gb": 8,
+    "backend": "llamacpp",
+    "backend_version": "0.00.002.987 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64",
+    "os": "Windows-10-10.0.19045-SP0",
+    "python": "3.10.6",
+    "cpu": "Intel64 Family 6 Model 158 Stepping 9, GenuineIntel",
+    "driver": "581.29",
+    "context_recipe": 65536,
+    "execution_policy": "native-two-pass-v2"
+  },
+  "test_definition": {
+    "schema_version": 2,
+    "id": "prompt_calibration_001_time",
+    "name": "Prompt calibration 1/4 — time change",
+    "description": "Compare prompt wording while applying one scalar time change.",
+    "workflow": "steps",
+    "repetitions": 3,
+    "timeout_seconds": 60,
+    "source": {
+      "initial_state": {
+        "time": "14:15",
+        "location": "Kitchen",
+        "characters": {
+          "Tom": {
+            "location": "Kitchen",
+            "clothing": [
+              "blue shirt",
+              "jeans"
+            ],
+            "mood": "annoyed"
+          },
+          "Susie": {
+            "location": "Bedroom",
+            "clothing": [
+              "red dress"
+            ],
+            "mood": "happy"
+          }
+        },
+        "doorLocked": true,
+        "playerHasKey": false
+      },
+      "new_information": "Exactly five minutes pass."
+    },
+    "expected_state": {
+      "time": "14:20",
+      "location": "Kitchen",
+      "characters": {
+        "Tom": {
+          "location": "Kitchen",
+          "clothing": [
+            "blue shirt",
+            "jeans"
+          ],
+          "mood": "annoyed"
+        },
+        "Susie": {
+          "location": "Bedroom",
+          "clothing": [
+            "red dress"
+          ],
+          "mood": "happy"
+        }
+      },
+      "doorLocked": true,
+      "playerHasKey": false
+    },
+    "variants": [
+      {
+        "id": "v1_original_clinical",
+        "name": "V1 Original — clinical + indexed arrays",
+        "prompt_style": "legacy_v1",
+        "state_presentation": "indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        },
+        "new_information_override": "Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes."
+      },
+      {
+        "id": "v1_raw_json_control",
+        "name": "V1 Control — clinical + raw JSON",
+        "prompt_style": "legacy_v1",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v2_conversational",
+        "name": "V2 — conversational baseline",
+        "prompt_style": "conversational_v2",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v3_only_changed",
+        "name": "V3 — conversational + only changed fields",
+        "prompt_style": "only_changed_v3",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v4_smallest_patch",
+        "name": "V4 — conversational + smallest patch",
+        "prompt_style": "smallest_patch_v4",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v5_change_rule",
+        "name": "V5 — conversational + value-difference rule",
+        "prompt_style": "change_rule_v5",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v6_one_example",
+        "name": "V6 — conversational + one example",
+        "prompt_style": "one_example_v6",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      }
+    ]
+  },
+  "variant_definition": {
+    "id": "v2_conversational",
+    "name": "V2 — conversational baseline",
+    "prompt_style": "conversational_v2",
+    "state_presentation": "raw_json",
+    "cache": "default",
+    "steps": [
+      {
+        "id": "patch",
+        "type": "generate",
+        "prompt": "Please return only the JSON Patch array.",
+        "output": {
+          "type": "text"
+        },
+        "sampling": {
+          "temperature": 0,
+          "top_p": 1,
+          "seed": 42
+        }
+      }
+    ],
+    "result": {
+      "step": "patch",
+      "representation": "json_patch",
+      "required_ops": [
+        "replace"
+      ]
+    }
+  },
+  "artifact_identity": {
+    "version": 1,
+    "files": [
+      {
+        "name": "Qwen3.5-9B-Q4_K_M.gguf",
+        "size_bytes": 5627044256,
+        "mtime_ns": 1789941234817428300
+      }
+    ]
+  },
+  "artifact_hashes": {},
+  "session_id": "a40df134d7ea490fb4e297489406f5b4",
+  "simulated": false,
+  "execution_class": "full_gpu",
+  "started_at": "2026-09-23T22:15:07.690107+00:00",
+  "valid_for_full_gpu_comparison": true,
+  "policy": "native-two-pass-v1",
+  "gpu": {
+    "index": "0",
+    "uuid": "GPU-0729d731-a6a3-8bff-2140-d46d660bca17",
+    "name": "NVIDIA GeForce GTX 1080",
+    "total_gib": 8.0,
+    "free_gib": 7.36328125,
+    "driver": "581.29"
+  },
+  "provenance": {
+    "backend_version": "0.00.002.987 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64",
+    "python": "3.10.6",
+    "source_commit": "66cc9813063810c44691dce1db8166913510155b",
+    "workflow_code": "0c8fe81c56af7cbbcddd8631feb4e8ac6a5a03b6072cbe26ed44ad3c0b2f36dd",
+    "selection": null
+  },
+  "load": {
+    "placement": {
+      "status": "full_gpu",
+      "gpu_layers": 33,
+      "total_layers": 33,
+      "cpu_layers": 0,
+      "cpu_kv_evidence": [],
+      "cpu_compute_evidence": [],
+      "scope": "backend-reported model layers and KV placement; CPU control/sampling buffers are not model layers; OS paging is not independently verified",
+      "line": "0.17.105.380 I load_tensors: offloaded 33/33 layers to GPU"
+    },
+    "execution_class": "full_gpu",
+    "requested_gpu_layers": "all",
+    "context": {
+      "allocated_tokens": 65536,
+      "native_tokens": 262144,
+      "input_estimate_bytes": 23623,
+      "method": "generous source/step byte estimate plus 8192 continuation allowance; exact native runtime guard; allowance is not an output cap",
+      "input_may_exceed_native_context": false,
+      "output_cap": null
+    },
+    "load_seconds": 143.17661929968745,
+    "arguments": [
+      "E:\\Source\\Repos\\rpg_testing\\.local\\runtime\\b11094-bfc1d25453b0e1e740ac\\llama-server.exe",
+      "--model",
+      "E:\\Users\\Isaac\\.lmstudio\\models\\lmstudio-community\\Qwen3.5-9B-GGUF\\Qwen3.5-9B-Q4_K_M.gguf",
+      "--alias",
+      "rpg-workbench-local-81e2a88130ccfa4e",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "1235",
+      "--ctx-size",
+      "65536",
+      "--n-predict",
+      "-1",
+      "--gpu-layers",
+      "all",
+      "--fit",
+      "off",
+      "--parallel",
+      "1",
+      "--split-mode",
+      "none",
+      "--no-context-shift",
+      "--slots",
+      "--reasoning",
+      "off",
+      "--api-key",
+      "[REDACTED]",
+      "--log-verbosity",
+      "4",
+      "--slot-save-path",
+      "E:\\Source\\Repos\\rpg_testing\\.local\\runtime-cache\\slots",
+      "--jinja",
+      "--no-webui",
+      "--no-mmproj",
+      "--op-offload",
+      "--kv-offload",
+      "--n-cpu-moe",
+      "0",
+      "--n-cpu-ffn",
+      "0",
+      "--device",
+      "CUDA0"
+    ],
+    "runtime": {
+      "llama_server": "0.00.001.394 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64",
+      "selected_device": "CUDA0"
+    },
+    "properties": {
+      "default_generation_settings": {
+        "params": {
+          "seed": 4294967295,
+          "temperature": 0.800000011920929,
+          "dynatemp_range": 0.0,
+          "dynatemp_exponent": 1.0,
+          "top_k": 40,
+          "top_p": 0.949999988079071,
+          "min_p": 0.05000000074505806,
+          "top_n_sigma": -1.0,
+          "xtc_probability": 0.0,
+          "xtc_threshold": 0.10000000149011612,
+          "typical_p": 1.0,
+          "repeat_last_n": 64,
+          "repeat_penalty": 1.0,
+          "presence_penalty": 0.0,
+          "frequency_penalty": 0.0,
+          "dry_multiplier": 0.0,
+          "dry_base": 1.75,
+          "dry_allowed_length": 2,
+          "dry_penalty_last_n": 64,
+          "mirostat": 0,
+          "mirostat_tau": 5.0,
+          "mirostat_eta": 0.10000000149011612,
+          "adaptive_target": -1.0,
+          "adaptive_decay": 0.8999999761581421,
+          "max_tokens": -1,
+          "n_predict": -1,
+          "n_keep": 0,
+          "n_discard": 0,
+          "ignore_eos": false,
+          "stream": false,
+          "n_probs": 0,
+          "min_keep": 0,
+          "chat_format": "Content-only",
+          "reasoning_format": "none",
+          "reasoning_in_content": false,
+          "generation_prompt": "",
+          "samplers": [
+            "penalties",
+            "dry",
+            "top_n_sigma",
+            "top_k",
+            "typ_p",
+            "top_p",
+            "min_p",
+            "xtc",
+            "temperature"
+          ],
+          "speculative.types": "none",
+          "timings_per_token": false,
+          "post_sampling_probs": false,
+          "backend_sampling": false,
+          "lora": []
+        },
+        "n_ctx": 65536
+      },
+      "total_slots": 1,
+      "model_alias": "rpg-workbench-local-81e2a88130ccfa4e",
+      "model_ftype": "Q4_K - Medium",
+      "model_path": "E:\\Users\\Isaac\\.lmstudio\\models\\lmstudio-community\\Qwen3.5-9B-GGUF\\Qwen3.5-9B-Q4_K_M.gguf",
+      "modalities": {
+        "vision": false,
+        "video": false,
+        "audio": false
+      },
+      "media_marker": "<__media_ElzgKjuDxB3IBnLY1iLc7UotpeVoCHYF__>",
+      "endpoint_slots": true,
+      "endpoint_props": false,
+      "endpoint_metrics": false,
+      "ui": false,
+      "ui_settings": {},
+      "chat_template": "{%- set image_count = namespace(value=0) %}\n{%- set video_count = namespace(value=0) %}\n{%- macro render_content(content, do_vision_count, is_system_content=false) %}\n    {%- if content is string %}\n        {{- content }}\n    {%- elif content is iterable and content is not mapping %}\n        {%- for item in content %}\n            {%- if 'image' in item or 'image_url' in item or item.type == 'image' %}\n                {%- if is_system_content %}\n                    {{- raise_exception('System message cannot contain images.') }}\n                {%- endif %}\n                {%- if do_vision_count %}\n                    {%- set image_count.value = image_count.value + 1 %}\n                {%- endif %}\n                {%- if add_vision_id %}\n                    {{- 'Picture ' ~ image_count.value ~ ': ' }}\n                {%- endif %}\n                {{- '<|vision_start|><|image_pad|><|vision_end|>' }}\n            {%- elif 'video' in item or item.type == 'video' %}\n                {%- if is_system_content %}\n                    {{- raise_exception('System message cannot contain videos.') }}\n                {%- endif %}\n                {%- if do_vision_count %}\n                    {%- set video_count.value = video_count.value + 1 %}\n                {%- endif %}\n                {%- if add_vision_id %}\n                    {{- 'Video ' ~ video_count.value ~ ': ' }}\n                {%- endif %}\n                {{- '<|vision_start|><|video_pad|><|vision_end|>' }}\n            {%- elif 'text' in item %}\n                {{- item.text }}\n            {%- else %}\n                {{- raise_exception('Unexpected item type in content.') }}\n            {%- endif %}\n        {%- endfor %}\n    {%- elif content is none or content is undefined %}\n        {{- '' }}\n    {%- else %}\n        {{- raise_exception('Unexpected content type.') }}\n    {%- endif %}\n{%- endmacro %}\n{%- if not messages %}\n    {{- raise_exception('No messages provided.') }}\n{%- endif %}\n{%- if tools and tools is iterable and tools is not mapping %}\n    {{- '<|im_start|>system\\n' }}\n    {{- \"# Tools\\n\\nYou have access to the following functions:\\n\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\" }}\n    {{- '\\n\\nIf you choose to call a function ONLY reply in the following format with NO suffix:\\n\\n<tool_call>\\n<function=example_function_name>\\n<parameter=example_parameter_1>\\nvalue_1\\n</parameter>\\n<parameter=example_parameter_2>\\nThis is the value for the second parameter\\nthat can span\\nmultiple lines\\n</parameter>\\n</function>\\n</tool_call>\\n\\n<IMPORTANT>\\nReminder:\\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\\n- Required parameters MUST be specified\\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\\n</IMPORTANT>' }}\n    {%- if messages[0].role == 'system' %}\n        {%- set content = render_content(messages[0].content, false, true)|trim %}\n        {%- if content %}\n            {{- '\\n\\n' + content }}\n        {%- endif %}\n    {%- endif %}\n    {{- '<|im_end|>\\n' }}\n{%- else %}\n    {%- if messages[0].role == 'system' %}\n        {%- set content = render_content(messages[0].content, false, true)|trim %}\n        {{- '<|im_start|>system\\n' + content + '<|im_end|>\\n' }}\n    {%- endif %}\n{%- endif %}\n{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}\n{%- for message in messages[::-1] %}\n    {%- set index = (messages|length - 1) - loop.index0 %}\n    {%- if ns.multi_step_tool and message.role == \"user\" %}\n        {%- set content = render_content(message.content, false)|trim %}\n        {%- if not(content.startswith('<tool_response>') and content.endswith('</tool_response>')) %}\n            {%- set ns.multi_step_tool = false %}\n            {%- set ns.last_query_index = index %}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if ns.multi_step_tool %}\n    {{- raise_exception('No user query found in messages.') }}\n{%- endif %}\n{%- for message in messages %}\n    {%- set content = render_content(message.content, true)|trim %}\n    {%- if message.role == \"system\" %}\n        {%- if not loop.first %}\n            {{- raise_exception('System message must be at the beginning.') }}\n        {%- endif %}\n    {%- elif message.role == \"user\" %}\n        {{- '<|im_start|>' + message.role + '\\n' + content + '<|im_end|>' + '\\n' }}\n    {%- elif message.role == \"assistant\" %}\n        {%- set reasoning_content = '' %}\n        {%- if message.reasoning_content is string %}\n            {%- set reasoning_content = message.reasoning_content %}\n        {%- else %}\n            {%- if '</think>' in content %}\n                {%- set reasoning_content = content.split('</think>')[0].rstrip('\\n').split('<think>')[-1].lstrip('\\n') %}\n                {%- set content = content.split('</think>')[-1].lstrip('\\n') %}\n            {%- endif %}\n        {%- endif %}\n        {%- set reasoning_content = reasoning_content|trim %}\n        {%- if loop.index0 > ns.last_query_index %}\n            {{- '<|im_start|>' + message.role + '\\n<think>\\n' + reasoning_content + '\\n</think>\\n\\n' + content }}\n        {%- else %}\n            {{- '<|im_start|>' + message.role + '\\n' + content }}\n        {%- endif %}\n        {%- if message.tool_calls and message.tool_calls is iterable and message.tool_calls is not mapping %}\n            {%- for tool_call in message.tool_calls %}\n                {%- if tool_call.function is defined %}\n                    {%- set tool_call = tool_call.function %}\n                {%- endif %}\n                {%- if loop.first %}\n                    {%- if content|trim %}\n                        {{- '\\n\\n<tool_call>\\n<function=' + tool_call.name + '>\\n' }}\n                    {%- else %}\n                        {{- '<tool_call>\\n<function=' + tool_call.name + '>\\n' }}\n                    {%- endif %}\n                {%- else %}\n                    {{- '\\n<tool_call>\\n<function=' + tool_call.name + '>\\n' }}\n                {%- endif %}\n                {%- if tool_call.arguments is defined %}\n                    {%- for args_name, args_value in tool_call.arguments|items %}\n                        {{- '<parameter=' + args_name + '>\\n' }}\n                        {%- set args_value = args_value | tojson | safe if args_value is mapping or (args_value is sequence and args_value is not string) else args_value | string %}\n                        {{- args_value }}\n                        {{- '\\n</parameter>\\n' }}\n                    {%- endfor %}\n                {%- endif %}\n                {{- '</function>\\n</tool_call>' }}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if loop.previtem and loop.previtem.role != \"tool\" %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {{- content }}\n        {{- '\\n</tool_response>' }}\n        {%- if not loop.last and loop.nextitem.role != \"tool\" %}\n            {{- '<|im_end|>\\n' }}\n        {%- elif loop.last %}\n            {{- '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- else %}\n        {{- raise_exception('Unexpected message role.') }}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n    {%- if enable_thinking is defined and enable_thinking is false %}\n        {{- '<think>\\n\\n</think>\\n\\n' }}\n    {%- else %}\n        {{- '<think>\\n' }}\n    {%- endif %}\n{%- endif %}",
+      "chat_template_caps": {
+        "supports_object_arguments": true,
+        "supports_parallel_tool_calls": true,
+        "supports_preserve_reasoning": false,
+        "supports_reasoning_effort": false,
+        "supports_string_content": true,
+        "supports_system_role": true,
+        "supports_tool_calls": true,
+        "supports_tools": true,
+        "supports_typed_content": true
+      },
+      "bos_token": ",",
+      "eos_token": "<|im_end|>",
+      "build_info": "b11094-ff0dbb975",
+      "is_sleeping": false,
+      "cors_proxy_enabled": false
+    },
+    "full_gpu_layers_verified": true,
+    "independent_os_residency_verified": false,
+    "health_check": {
+      "text": "READY",
+      "reasoning_text": "",
+      "finish_reason": "stop",
+      "request_seconds": 0.9116099001839757,
+      "first_token_seconds": 0.8404193995520473,
+      "first_visible_text_seconds": 0.8404204994440079,
+      "usage": {
+        "completion_tokens": 2,
+        "prompt_tokens": 19,
+        "total_tokens": 21,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 19,
+        "prompt_ms": 822.883,
+        "prompt_per_token_ms": 43.30963157894737,
+        "prompt_per_second": 23.089552220668065,
+        "predicted_n": 2,
+        "predicted_ms": 71.147,
+        "predicted_per_token_ms": 71.147,
+        "predicted_per_second": 14.055406412076405
+      },
+      "cached_tokens": 0,
+      "raw_chunks": [
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": null
+              }
+            }
+          ],
+          "created": 1790200700,
+          "id": "chatcmpl-cEuHdd0JFixZulm3cgs8DDvENWHBKPO0",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "READY"
+              }
+            }
+          ],
+          "created": 1790200700,
+          "id": "chatcmpl-cEuHdd0JFixZulm3cgs8DDvENWHBKPO0",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "delta": {}
+            }
+          ],
+          "created": 1790200700,
+          "id": "chatcmpl-cEuHdd0JFixZulm3cgs8DDvENWHBKPO0",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [],
+          "created": 1790200700,
+          "id": "chatcmpl-cEuHdd0JFixZulm3cgs8DDvENWHBKPO0",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 19,
+            "total_tokens": 21,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 19,
+            "prompt_ms": 822.883,
+            "prompt_per_token_ms": 43.30963157894737,
+            "prompt_per_second": 23.089552220668065,
+            "predicted_n": 2,
+            "predicted_ms": 71.147,
+            "predicted_per_token_ms": 71.147,
+            "predicted_per_second": 14.055406412076405
+          }
+        }
+      ],
+      "input_tokens_verified": 19,
+      "output_limit_policy": "EOS or native context; no token cap"
+    },
+    "health_exact_ready": true,
+    "seed_reproducibility": {
+      "policy": "seed-reproducibility-v1",
+      "status": "completed",
+      "prompt_sha256": "24d99227bb7b92c4537871f015900dac33b347a1c00d994c62bf7bb0d512dfdb",
+      "prompt_description": "five-sentence open-ended fiction diagnostic",
+      "sampling": {
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "top_k": 40,
+        "min_p": 0.05,
+        "repeat_penalty": 1.0
+      },
+      "primary_seed": 314159265,
+      "alternate_seed": 271828183,
+      "same_seed_exact_match": true,
+      "different_seed_changes_output": true,
+      "seed_behavior_verified": true,
+      "runs": [
+        {
+          "seed": 314159265,
+          "finish_reason": "stop",
+          "digest": "cf62261ebb516e77f0c51020b0b30b466f7f10ae91951deffc926541eff4ae7b",
+          "visible_chars": 553,
+          "reasoning_chars": 0
+        },
+        {
+          "seed": 314159265,
+          "finish_reason": "stop",
+          "digest": "cf62261ebb516e77f0c51020b0b30b466f7f10ae91951deffc926541eff4ae7b",
+          "visible_chars": 553,
+          "reasoning_chars": 0
+        },
+        {
+          "seed": 271828183,
+          "finish_reason": "stop",
+          "digest": "ab411d603cd8aca5acf3ab546082c69102e7b8f821be03a9b6a026ba05cffd7a",
+          "visible_chars": 616,
+          "reasoning_chars": 0
+        }
+      ],
+      "note": "Exact comparison covers visible and reasoning text; streaming chunk boundaries are ignored."
+    }
+  },
+  "timeout_seconds": 60,
+  "watchdog_seconds": 60,
+  "calls": [
+    {
+      "step": "patch",
+      "iteration": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You help update an existing JSON state when new information is provided."
+        },
+        {
+          "role": "user",
+          "content": "I need you to write a JSON Patch to update the existing state with the new information.\n\nCurrent State:\n{\n  \"time\": \"14:15\",\n  \"location\": \"Kitchen\",\n  \"characters\": {\n    \"Tom\": {\n      \"location\": \"Kitchen\",\n      \"clothing\": [\n        \"blue shirt\",\n        \"jeans\"\n      ],\n      \"mood\": \"annoyed\"\n    },\n    \"Susie\": {\n      \"location\": \"Bedroom\",\n      \"clothing\": [\n        \"red dress\"\n      ],\n      \"mood\": \"happy\"\n    }\n  },\n  \"doorLocked\": true,\n  \"playerHasKey\": false\n}\n\nNew Information:\nExactly five minutes pass.\n\nPlease return only the JSON Patch array."
+        }
+      ],
+      "sampling": {
+        "temperature": 0,
+        "top_p": 1,
+        "top_k": 0,
+        "min_p": 0.0,
+        "seed": 2654435803
+      },
+      "base_seed": 42,
+      "schema": null,
+      "text": "[{\"op\":\"replace\",\"path\":\"/time\",\"value\":\"14:20\"}]",
+      "reasoning_text": "",
+      "finish_reason": "stop",
+      "request_seconds": 0.7512936005368829,
+      "first_token_seconds": 0.08492410089820623,
+      "first_visible_text_seconds": 0.08492500055581331,
+      "usage": {
+        "completion_tokens": 20,
+        "prompt_tokens": 213,
+        "total_tokens": 233,
+        "prompt_tokens_details": {
+          "cached_tokens": 209
+        }
+      },
+      "timings": {
+        "cache_n": 209,
+        "prompt_n": 4,
+        "prompt_ms": 81.015,
+        "prompt_per_token_ms": 20.25375,
+        "prompt_per_second": 49.37357279516139,
+        "predicted_n": 20,
+        "predicted_ms": 666.352,
+        "predicted_per_token_ms": 35.07115789473684,
+        "predicted_per_second": 28.513458352342308
+      },
+      "cached_tokens": 209,
+      "raw_chunks": [
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "content": null
+              }
+            }
+          ],
+          "created": 1790201707,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "["
+              }
+            }
+          ],
+          "created": 1790201707,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "{\""
+              }
+            }
+          ],
+          "created": 1790201707,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "op"
+              }
+            }
+          ],
+          "created": 1790201707,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "\":\""
+              }
+            }
+          ],
+          "created": 1790201707,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "replace"
+              }
+            }
+          ],
+          "created": 1790201707,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "\",\""
+              }
+            }
+          ],
+          "created": 1790201707,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "path"
+              }
+            }
+          ],
+          "created": 1790201707,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "\":\"/"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "time"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "\",\""
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "value"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "\":\""
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "1"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "4"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": ":"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "2"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "0"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "\"}"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": null,
+              "index": 0,
+              "delta": {
+                "content": "]"
+              }
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "delta": {}
+            }
+          ],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk"
+        },
+        {
+          "choices": [],
+          "created": 1790201708,
+          "id": "chatcmpl-Qh4xJ9slpdFPbzOX9A8Zb9zYzTIodclz",
+          "model": "rpg-workbench-local-81e2a88130ccfa4e",
+          "system_fingerprint": "b11094-ff0dbb975",
+          "object": "chat.completion.chunk",
+          "usage": {
+            "completion_tokens": 20,
+            "prompt_tokens": 213,
+            "total_tokens": 233,
+            "prompt_tokens_details": {
+              "cached_tokens": 209
+            }
+          },
+          "timings": {
+            "cache_n": 209,
+            "prompt_n": 4,
+            "prompt_ms": 81.015,
+            "prompt_per_token_ms": 20.25375,
+            "prompt_per_second": 49.37357279516139,
+            "predicted_n": 20,
+            "predicted_ms": 666.352,
+            "predicted_per_token_ms": 35.07115789473684,
+            "predicted_per_second": 28.513458352342308
+          }
+        }
+      ],
+      "input_tokens_verified": 213,
+      "output_limit_policy": "EOS or native context; no token cap"
+    }
+  ],
+  "step_events": [
+    {
+      "step": "patch",
+      "status": "completed",
+      "iteration": 0
+    }
+  ],
+  "outputs": {
+    "patch": "[{\"op\":\"replace\",\"path\":\"/time\",\"value\":\"14:20\"}]"
+  },
+  "score": {
+    "valid": true,
+    "exact_match": true,
+    "actual_state": {
+      "time": "14:20",
+      "location": "Kitchen",
+      "characters": {
+        "Tom": {
+          "location": "Kitchen",
+          "clothing": [
+            "blue shirt",
+            "jeans"
+          ],
+          "mood": "annoyed"
+        },
+        "Susie": {
+          "location": "Bedroom",
+          "clothing": [
+            "red dress"
+          ],
+          "mood": "happy"
+        }
+      },
+      "doorLocked": true,
+      "playerHasKey": false
+    },
+    "required_changes": 1,
+    "correct_changes": 1,
+    "missed_changes": 0,
+    "wrong_values": 0,
+    "unsupported_changes": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "state_exact_match": true,
+    "required_patch_ops": [
+      "replace"
+    ],
+    "actual_patch_ops": [
+      "replace"
+    ],
+    "patch_ops_match": true,
+    "objective_checks": []
+  },
+  "pipeline_seconds": 0.7558755995705724,
+  "scoring_seconds": 0.0001629004254937172,
+  "cache_mode": "default",
+  "cache_verified": null,
+  "measurement_valid": true,
+  "state_presentation": "raw_json",
+  "sampling_seed_policy": "base_seed_plus_repetition_times_0x9E3779B1_mod_2^32",
+  "gpu_memory": {
+    "policy": "nvml-device-memory-250ms-v1",
+    "status": "available",
+    "source": "NVML",
+    "scope": "total_device_including_other_processes",
+    "sample_interval_seconds": 0.25,
+    "sample_count": 5,
+    "samples_dropped": 0,
+    "sampled_peak_used_bytes": 8309370880,
+    "sampled_peak_used_gib": 7.738704681396484,
+    "samples": [
+      {
+        "total_bytes": 8589934592,
+        "used_bytes": 8309370880,
+        "free_bytes": 280563712,
+        "gpu_utilization_percent": 25,
+        "temperature_c": 74,
+        "power_w": 57.887,
+        "elapsed_seconds": 0.0020201997831463814
+      },
+      {
+        "total_bytes": 8589934592,
+        "used_bytes": 8309370880,
+        "free_bytes": 280563712,
+        "gpu_utilization_percent": 25,
+        "temperature_c": 74,
+        "power_w": 173.632,
+        "elapsed_seconds": 0.11113269999623299
+      },
+      {
+        "total_bytes": 8589934592,
+        "used_bytes": 8309370880,
+        "free_bytes": 280563712,
+        "gpu_utilization_percent": 92,
+        "temperature_c": 75,
+        "power_w": 167.868,
+        "elapsed_seconds": 0.37443790026009083
+      },
+      {
+        "total_bytes": 8589934592,
+        "used_bytes": 8309370880,
+        "free_bytes": 280563712,
+        "gpu_utilization_percent": 93,
+        "temperature_c": 75,
+        "power_w": 169.653,
+        "elapsed_seconds": 0.6338857002556324
+      },
+      {
+        "total_bytes": 8589934592,
+        "used_bytes": 8309370880,
+        "free_bytes": 280563712,
+        "gpu_utilization_percent": 90,
+        "temperature_c": 75,
+        "power_w": 157.449,
+        "elapsed_seconds": 0.760011799633503
+      }
+    ],
+    "error": null,
+    "note": "Sampled peak with pre/post boundary samples. Brief peaks can be missed; not model-only VRAM or proof of full GPU residency."
+  },
+  "finished_at": "2026-09-23T22:15:08.451071+00:00",
+  "sha256": "7069290b7219c664bbf2126fb62c476a7b10be1563976dced4382d454123dea1"
+}
