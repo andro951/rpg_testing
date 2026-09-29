@@ -62,10 +62,40 @@ class ResearchSpecTests(unittest.TestCase):
         }
         for name,(patch,ops) in cases.items():
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
+            self.assertEqual(test['timeout_seconds'],120)
             self.assertEqual(len(test['source']['initial_state']['tickets']),100)
             self.assertTrue(equal(apply(test['source']['initial_state'],patch,'json_patch'),test['expected_state']),name)
             self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays'])
             self.assertTrue(all(v['result']['required_ops']==ops for v in test['variants']))
+
+    def test_100_item_array_locating_only_specs(self):
+        cases={
+            'array_index_replace_010.json':('array_patch_replace_004.json','73'),
+            'array_index_remove_011.json':('array_patch_remove_005.json','87'),
+            'array_index_add_012.json':('array_patch_add_006.json','64'),
+            'array_index_move_013.json':('array_patch_move_007.json','91, 7'),
+            'array_index_copy_014.json':('array_patch_copy_008.json','62'),
+            'array_index_test_015.json':('array_patch_test_009.json','84'),
+        }
+        for name,(companion,expected) in cases.items():
+            test=read_json(ROOT/'test_specs'/name);validate_test(test)
+            original=read_json(ROOT/'test_specs'/companion)
+            self.assertEqual(test['provenance']['companion_test'],original['id'])
+            self.assertEqual(test['source'],{'initial_state':{},'new_information':''})
+            self.assertEqual(test['timeout_seconds'],120)
+            self.assertEqual(test['repetitions'],original.get('repetitions',1))
+            self.assertEqual([v['id'] for v in test['variants']],['raw_array_index','indexed_object_index'])
+            self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays'])
+            for variant in test['variants']:
+                self.assertEqual(variant['prompt_style'],'direct_text_v1')
+                self.assertEqual(variant['result'],{'step':'index','representation':'answers'})
+                self.assertEqual(variant['expected_answers'],{'index':expected})
+                self.assertEqual(variant['steps'][0]['output'],{'type':'text'})
+                model_facing=(test['instructions']+'\n'+variant['steps'][0]['prompt']).lower()
+                self.assertNotIn('json patch',model_facing)
+                self.assertNotIn('json pointer',model_facing)
+            self.assertIn('"tickets": [',test['variants'][0]['steps'][0]['prompt'])
+            self.assertIn('"tickets": {',test['variants'][1]['steps'][0]['prompt'])
 
     def test_prompt_calibration_suite_is_balanced(self):
         names=['prompt_calibration_001_time.json','prompt_calibration_002_boolean.json',
@@ -73,10 +103,10 @@ class ResearchSpecTests(unittest.TestCase):
         expected_ids=['v1_original_clinical','v1_raw_json_control','v2_conversational','v3_only_changed',
                       'v4_smallest_patch','v5_change_rule','v6_one_example']
         expected_timeouts={
-            'prompt_calibration_001_time.json':120,
+            'prompt_calibration_001_time.json':60,
             'prompt_calibration_002_boolean.json':60,
             'prompt_calibration_003_nested.json':60,
-            'prompt_calibration_004_array.json':120,
+            'prompt_calibration_004_array.json':60,
         }
         for name in names:
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
@@ -87,5 +117,10 @@ class ResearchSpecTests(unittest.TestCase):
             self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
         self.assertEqual(read_json(ROOT/'test_specs'/names[0])['variants'][0]['new_information_override'],
                          'Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes.')
+
+    def test_runaway_generation_timeouts_stay_bounded(self):
+        for name in ['household_coat_add_003.json','household_coat_remove_002.json']:
+            self.assertEqual(read_json(ROOT/'test_specs'/name)['timeout_seconds'],60)
+        self.assertEqual(read_json(ROOT/'test_specs'/'dialogue_test 1_4.json')['timeout_seconds'],600)
 
 if __name__=='__main__':unittest.main()

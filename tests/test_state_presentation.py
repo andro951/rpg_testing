@@ -102,7 +102,10 @@ class StatePresentationTests(unittest.TestCase):
                 if not variant.get('enabled',True):continue
                 with self.subTest(test=test['id'],variant=variant['id']):
                     result=execute(test,variant,DemoBackend())
-                    if 'expected_state' not in test and variant.get('result',{}).get('representation')=='answers' and not variant.get('expected_answers'):
+                    locating_only=test.get('provenance',{}).get('purpose')=='Isolate array index selection from JSON Patch construction.'
+                    if locating_only:
+                        self.assertTrue(result['score']['valid'],result['score'])
+                    elif 'expected_state' not in test and variant.get('result',{}).get('representation')=='answers' and not variant.get('expected_answers'):
                         self.assertTrue(result['score']['valid'],result['score'])
                         self.assertIsNone(result['score']['exact_match'],result['score'])
                     else:
