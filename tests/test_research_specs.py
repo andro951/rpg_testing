@@ -113,6 +113,21 @@ class ResearchSpecTests(unittest.TestCase):
         self.assertIn('"tickets": [',test['variants'][0]['steps'][0]['prompt'])
         self.assertIn('"tickets": {',test['variants'][1]['steps'][0]['prompt'])
 
+    def test_explicit_replace_plain_question_has_no_indexing_guidance(self):
+        test=read_json(ROOT/'test_specs/array_index_replace_explicit_minimal_017.json');validate_test(test)
+        self.assertEqual(test.get('instructions'),'')
+        self.assertEqual(len(test['variants']),1)
+        variant=test['variants'][0]
+        prompt=variant['steps'][0]['prompt']
+        self.assertTrue(prompt.endswith('What is the index of this ticket: SR-60432?'))
+        self.assertNotIn('zero-based',prompt.lower())
+        self.assertNotIn('Current State:',prompt)
+        self.assertNotIn('New Information:',prompt)
+        self.assertNotIn('Task:',prompt)
+        self.assertIn('"73": {',prompt)
+        self.assertIn('"ticket_id": "SR-60432"',prompt)
+        self.assertEqual(variant['expected_answers'],{'index':'73'})
+
     def test_prompt_calibration_suite_is_balanced(self):
         names=['prompt_calibration_001_time.json','prompt_calibration_002_boolean.json',
                'prompt_calibration_003_nested.json','prompt_calibration_004_array.json']
