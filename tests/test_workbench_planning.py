@@ -2,7 +2,7 @@ import copy
 import tempfile
 import unittest
 from pathlib import Path
-from workbench.domain import ResultStore, eligibility
+from workbench.domain import ResultStore, code_fingerprint, eligibility
 from workbench.planning import pending_plan, validate_catalog, requirements, public_plan
 
 
@@ -30,6 +30,8 @@ class PlanningTests(unittest.TestCase):
             'test_id':test['id'],'variant_id':test['variants'][0]['id'],'repetition':0,
             'target':copy.deepcopy(self.target),'test_definition':copy.deepcopy(test),
             'variant_definition':copy.deepcopy(test['variants'][0]),
+            'artifact_hashes':copy.deepcopy(model()['sha256']),'execution_class':'full_gpu',
+            'provenance':{'workflow_code':code_fingerprint()},
             'timeout_seconds':test['timeout_seconds'],'timed_out':timed_out,
             'reason':'case_timeout' if timed_out else None,
         })
@@ -50,6 +52,19 @@ class PlanningTests(unittest.TestCase):
         old=fixture();self.save_fixture_result(old)
         changed=copy.deepcopy(old);changed['timeout_seconds']=120;changed['source']['new_information']='Ten minutes pass.'
         self.assertEqual(self.plan(t=[changed])['pending'],1)
+    def test_timeout_bump_does_not_reuse_different_artifact(self):
+        old=fixture();self.save_fixture_result(old)
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        changed_model=model();changed_model['sha256']['test.gguf']='b'*64
+        self.assertEqual(self.plan(m=[changed_model],t=[bumped])['pending'],1)
+    def test_timeout_bump_requires_matching_workflow_provenance(self):
+        old=fixture();self.save_fixture_result(old)
+        path=next((self.store.root/'demo-2b').glob('*.json'))
+        record=self.store.read(path);record.pop('sha256',None)
+        record['provenance']['workflow_code']='0'*64
+        path.unlink();self.store.save(record)
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        self.assertEqual(self.plan(t=[bumped])['pending'],1)
     def test_delete_is_rerun(self):
         j=self.plan()['groups'][0]['jobs'][0]
         path=self.store.save({'status':'completed','model_id':'demo-2b','case_id':j['case_id']})
