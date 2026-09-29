@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from workbench.domain import ResultStore, code_fingerprint, eligibility
-from workbench.planning import pending_plan, validate_catalog, requirements, public_plan
+from workbench.planning import pending_plan, stable_backend_version, validate_catalog, requirements, public_plan
 
 
 def model():
@@ -63,6 +63,23 @@ class PlanningTests(unittest.TestCase):
         record=self.store.read(path);record.pop('sha256',None)
         record['provenance']['workflow_code']='0'*64
         path.unlink();self.store.save(record)
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        self.assertEqual(self.plan(t=[bumped])['pending'],1)
+    def test_backend_version_normalization_strips_log_clock(self):
+        raw='0.00.004.323 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
+        self.assertEqual(stable_backend_version(raw),'version: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64')
+    def test_timeout_history_survives_backend_log_timestamp_change(self):
+        old=fixture()
+        self.target['backend_version']='0.00.004.323 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
+        self.save_fixture_result(old)
+        self.target['backend_version']='version: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        self.assertEqual(self.plan(t=[bumped])['pending'],0)
+    def test_timed_out_history_reruns_after_backend_log_timestamp_change(self):
+        old=fixture()
+        self.target['backend_version']='0.00.004.323 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
+        self.save_fixture_result(old,True)
+        self.target['backend_version']='version: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
         bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
         self.assertEqual(self.plan(t=[bumped])['pending'],1)
     def test_delete_is_rerun(self):
