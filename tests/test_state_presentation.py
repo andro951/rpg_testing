@@ -4,7 +4,7 @@ from pathlib import Path
 from workbench.domain import read_json,validate_test,load_tests as load_workflow_specs
 from workbench.presentation import indexed_arrays,render_source,presentation_mode
 from workbench.workflows import messages,evaluate,execute
-from workbench.backends import DemoBackend
+from workbench.demo_native import DemoNative as DemoBackend
 
 ROOT=Path(__file__).resolve().parents[1]
 
