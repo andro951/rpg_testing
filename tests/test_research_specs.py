@@ -72,9 +72,15 @@ class ResearchSpecTests(unittest.TestCase):
                'prompt_calibration_003_nested.json','prompt_calibration_004_array.json']
         expected_ids=['v1_original_clinical','v1_raw_json_control','v2_conversational','v3_only_changed',
                       'v4_smallest_patch','v5_change_rule','v6_one_example']
+        expected_timeouts={
+            'prompt_calibration_001_time.json':120,
+            'prompt_calibration_002_boolean.json':60,
+            'prompt_calibration_003_nested.json':60,
+            'prompt_calibration_004_array.json':120,
+        }
         for name in names:
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
-            self.assertEqual(test['timeout_seconds'],60)
+            self.assertEqual(test['timeout_seconds'],expected_timeouts[name])
             self.assertEqual(test['repetitions'],3)
             self.assertEqual([v['id'] for v in test['variants']],expected_ids)
             self.assertEqual(len(changes(test['source']['initial_state'],test['expected_state'])),1)
