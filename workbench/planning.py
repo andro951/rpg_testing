@@ -91,6 +91,20 @@ def _timeout_neutral_spec(test, variant):
     return spec
 
 
+def _model_history(store, model_id):
+    """Best-effort history for timeout compatibility; unrelated corrupt files stay isolated."""
+    records=[]
+    directory=store.root / model_id
+    if not directory.exists():
+        return records
+    for path in sorted(directory.glob('*.json')):
+        try:
+            records.append(store.read(path))
+        except (OSError,ValueError):
+            continue
+    return records
+
+
 def _historical_timeout_result(records, model, test, variant, repetition, target):
     """Reuse old results only when the sole experiment change is timeout_seconds.
 
@@ -142,7 +156,7 @@ def pending_plan(models, tests, target, store, selection=None):
     """No model discovery here: completed work must not require installed weights."""
     validate_catalog(models)
     selection=validate_selection(selection,models,tests)
-    groups=[];complete=0;excluded=[];unassigned=[];history=None
+    groups=[];complete=0;excluded=[];unassigned=[];history={}
     for model in models:
         if selection and 'model_id' in selection and model['id']!=selection['model_id']:continue
         if model.get('enabled', True) is False:
@@ -167,9 +181,9 @@ def pending_plan(models, tests, target, store, selection=None):
                             jobs.append({'case_id':cid,'model_id':model['id'],'test':test,'variant':variant,'repetition':repetition,'recovery_only':True})
                         else:done+=1;complete+=1
                     else:
-                        if history is None:
-                            history=store.all()
-                        prior=_historical_timeout_result(history,model,test,variant,repetition,target)
+                        if model['id'] not in history:
+                            history[model['id']]=_model_history(store,model['id'])
+                        prior=_historical_timeout_result(history[model['id']],model,test,variant,repetition,target)
                         if prior and prior['done']:
                             done+=1;complete+=1
                         else:
