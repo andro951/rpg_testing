@@ -91,6 +91,24 @@ def _timeout_neutral_spec(test, variant):
     return spec
 
 
+def stable_backend_version(value):
+    """Strip volatile llama-server log timing while retaining build identity."""
+    if not isinstance(value,str):
+        return value
+    lines=[line.strip() for line in value.splitlines() if line.strip()]
+    stable=[line for line in lines if line.lower().startswith('version:') or line.lower().startswith('built with ')]
+    return '\n'.join(stable) if stable else value.strip()
+
+
+def _stable_target(target):
+    if not isinstance(target,dict):
+        return target
+    normalized=copy.deepcopy(target)
+    if 'backend_version' in normalized:
+        normalized['backend_version']=stable_backend_version(normalized['backend_version'])
+    return normalized
+
+
 def _model_history(store, model_id):
     """Best-effort history for timeout compatibility; unrelated corrupt files stay isolated."""
     records=[]
@@ -119,7 +137,8 @@ def _historical_timeout_result(records, model, test, variant, repetition, target
     for record in records:
         if (record.get('model_id')!=model['id'] or record.get('test_id')!=test['id']
                 or record.get('variant_id')!=variant['id'] or record.get('repetition')!=repetition
-                or record.get('target')!=target or record.get('execution_class','full_gpu')!='full_gpu'):
+                or _stable_target(record.get('target'))!=_stable_target(target)
+                or record.get('execution_class','full_gpu')!='full_gpu'):
             continue
         provenance=record.get('provenance')
         if not isinstance(provenance,dict) or provenance.get('workflow_code')!=workflow_code:
