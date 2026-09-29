@@ -19,7 +19,7 @@ from datetime import datetime,timezone
 from pathlib import Path
 from .domain import ResultStore, TIERS, canonical, digest, read_json, safe_id, write_json, validate_test, load_tests
 from .inventory import command, executable, scan_models
-from .planning import validate_catalog, normalize_selection, validate_selection
+from .planning import stable_backend_version, validate_catalog, normalize_selection, validate_selection
 from . import preflight
 from .workflows import execute, Cancelled
 from .backends import DemoBackend
@@ -158,7 +158,9 @@ class Controller(ModelManager):
         exe=executable('llama-server',self.settings.get('llama_path',''))
         try:version=diagnostic_command([exe,'--version']) if exe else 'unavailable'
         except Exception as exc:version='unavailable: '+str(exc)
-        if not version.startswith('unavailable'):self.version_cache=version
+        if not version.startswith('unavailable'):
+            version=stable_backend_version(version)
+            self.version_cache=version
         return version
     def identify_artifact(self,item):
         if self.demo:
