@@ -62,6 +62,7 @@ class ResearchSpecTests(unittest.TestCase):
         }
         for name,(patch,ops) in cases.items():
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
+            self.assertEqual(test['timeout_seconds'],120)
             self.assertEqual(len(test['source']['initial_state']['tickets']),100)
             self.assertTrue(equal(apply(test['source']['initial_state'],patch,'json_patch'),test['expected_state']),name)
             self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays'])
@@ -73,10 +74,10 @@ class ResearchSpecTests(unittest.TestCase):
         expected_ids=['v1_original_clinical','v1_raw_json_control','v2_conversational','v3_only_changed',
                       'v4_smallest_patch','v5_change_rule','v6_one_example']
         expected_timeouts={
-            'prompt_calibration_001_time.json':120,
+            'prompt_calibration_001_time.json':60,
             'prompt_calibration_002_boolean.json':60,
             'prompt_calibration_003_nested.json':60,
-            'prompt_calibration_004_array.json':120,
+            'prompt_calibration_004_array.json':60,
         }
         for name in names:
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
@@ -87,5 +88,10 @@ class ResearchSpecTests(unittest.TestCase):
             self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
         self.assertEqual(read_json(ROOT/'test_specs'/names[0])['variants'][0]['new_information_override'],
                          'Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes.')
+
+    def test_runaway_generation_timeouts_stay_bounded(self):
+        for name in ['household_coat_add_003.json','household_coat_remove_002.json']:
+            self.assertEqual(read_json(ROOT/'test_specs'/name)['timeout_seconds'],60)
+        self.assertEqual(read_json(ROOT/'test_specs'/'dialogue_test 1_4.json')['timeout_seconds'],600)
 
 if __name__=='__main__':unittest.main()
