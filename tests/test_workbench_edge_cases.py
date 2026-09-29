@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from workbench.controller import Controller
-from workbench.domain import ResultStore,read_json,validate_test
+from workbench.domain import ResultStore,read_json,validate_test,write_json
 from workbench.workflows import execute,messages
 from workbench.demo_native import DemoNative as DemoBackend
 ROOT=Path(__file__).resolve().parents[1]
@@ -66,19 +66,37 @@ class EdgeTests(unittest.TestCase):
         prompt=messages(t,{'prompt':'Make patch','uses':['new_time']},{})
         self.assertIn('skipped',prompt[-2]['content'])
     def test_pause_and_resume(self):
-        class Slow(DemoBackend):
-            def generate(self,*a,**kw):time.sleep(.05);return super().generate(*a,**kw)
-        with patch('workbench.demo_native.DemoNative',Slow):
-            self.app.start('run')
+        # This is a scheduling test, not a timed run of the growing research suite.
+        # Modify only this test's temporary copy and exercise four measurements.
+        path=self.root/'test_specs/time_only.json'
+        test=read_json(path);test['repetitions']=4;write_json(path,test)
+        selection={'model_id':self.app.catalog()[0]['id'],
+                   'test_id':test['id'],'variant_id':test['variants'][0]['id']}
+        entered=threading.Event();release=threading.Event()
+        def stop_worker():
+            release.set()
+            if self.app.thread and self.app.thread.is_alive():
+                self.app.control('stop');self.app.thread.join(10)
+        self.addCleanup(stop_worker)
+        class Controlled(DemoBackend):
+            def generate(self,*a,**kw):
+                entered.set()
+                if not release.wait(10):raise RuntimeError('Pause fixture was not released')
+                return super().generate(*a,**kw)
+        with patch('workbench.demo_native.DemoNative',Controlled):
+            self.app.start('run',{'selection':selection})
+            self.assertTrue(entered.wait(10),'Demo generation did not start')
+            self.app.control('pause');release.set()
             deadline=time.monotonic()+10
-            while self.app.current is None and time.monotonic()<deadline:time.sleep(.01)
-            self.app.control('pause')
             while self.app.state!='paused' and time.monotonic()<deadline:time.sleep(.01)
             self.assertEqual(self.app.state,'paused')
-            count=len(self.app.store.all());time.sleep(.15);self.assertEqual(len(self.app.store.all()),count)
+            count=len(self.app.store.all())
+            self.assertGreater(count,0);self.assertLess(count,4)
+            time.sleep(.15);self.assertEqual(len(self.app.store.all()),count)
             self.app.control('resume');self.app.thread.join(30)
             self.assertFalse(self.app.thread.is_alive(),'Resumed demo run did not finish')
             self.assertFalse(self.app.operation.locked());self.assertEqual(self.app.report['plan']['pending'],0)
+            self.assertEqual(len(self.app.store.all()),4)
     def test_stop_now_records_aborted_without_deadlock(self):
         class Slow(DemoBackend):
             def generate(self,*a,**kw):
