@@ -40,7 +40,7 @@ class TargetedTests(unittest.TestCase):
         self.app = Controller(self.root, True)
         self.models, self.inventory = configure_demo(self.app)
         self.tests = read_tests(self.root / 'test_specs')
-        self.scope = {'model_id': 'beta', 'test_id': 'time_only', 'variant_id': 'direct_json_patch'}
+        self.scope = {'model_id': 'beta', 'test_id': 'time_only', 'variant_id': 'direct_json_patch__raw_json'}
 
     def jobs(self):
         return [j for g in self.app.plan['groups'] for j in g['jobs']]
@@ -80,7 +80,7 @@ class TargetedTests(unittest.TestCase):
         records = self.app.store.all()
         self.assertEqual(len(records), 3)
         self.assertEqual({r['model_id'] for r in records}, {'beta'})
-        self.assertEqual({r['variant_id'] for r in records}, {'direct_json_patch'})
+        self.assertEqual({r['variant_id'] for r in records}, {'direct_json_patch__raw_json'})
         self.assertEqual({r['repetition'] for r in records}, {0, 1, 2})
         self.assertTrue(all(r['status'] == 'completed' for r in records))
         self.app.run(selection=self.scope)
@@ -90,22 +90,24 @@ class TargetedTests(unittest.TestCase):
     def test_one_test_all_variants_and_global_resume(self):
         self.app.run(selection={'model_id': 'beta', 'test_id': 'time_only'})
         records = self.app.store.all()
-        self.assertEqual(len(records), 4)
+        expected=next(t for t in self.tests if t['id']=='time_only')
+        expected=expected.get('repetitions',1)*sum(v.get('enabled',True) for v in expected['variants'])
+        self.assertEqual(len(records), expected)
         self.assertEqual({r['test_id'] for r in records}, {'time_only'})
         saved = {p: p.read_bytes() for p in self.app.store.root.rglob('*.json')}
         self.app.check()
-        self.assertEqual(self.app.report['plan']['complete'], 4)
+        self.assertEqual(self.app.report['plan']['complete'], expected)
         self.assertGreater(self.app.report['plan']['pending'], 0)
         self.assertTrue(all(p.read_bytes() == data for p, data in saved.items()))
 
     def test_one_test_all_models_is_explicit_scope(self):
-        selection={'all_models':True,'test_id':'time_only','variant_id':'direct_json_patch'}
+        selection={'all_models':True,'test_id':'time_only','variant_id':'direct_json_patch__raw_json'}
         self.app.run(selection=selection)
         records=self.app.store.all()
         self.assertEqual(len(records),2)
         self.assertEqual({r['model_id'] for r in records},{'alpha','beta'})
         self.assertEqual({r['test_id'] for r in records},{'time_only'})
-        self.assertEqual({r['variant_id'] for r in records},{'direct_json_patch'})
+        self.assertEqual({r['variant_id'] for r in records},{'direct_json_patch__raw_json'})
         self.assertTrue(all(r['provenance']['selection']==selection for r in records))
         self.app.run(selection=selection)
         self.assertEqual(self.app.completed_now,0)
@@ -163,13 +165,13 @@ class TargetedTests(unittest.TestCase):
 
     def test_invalid_or_stale_selection_never_runs_all(self):
         for selection in ({}, [], {'test_id': 'time_only'}, {'model_id': '../oops'},
-                          {'model_id': 'beta', 'variant_id': 'direct_json_patch'},
+                          {'model_id': 'beta', 'variant_id': 'direct_json_patch__raw_json'},
                           {'model_id': 'missing'}, {'model_id': 'beta', 'test_id': 'missing'},
                           {'model_id':'beta','test_ids':[]},
                           {'model_id':'beta','test_ids':['time_only','time_only']},
                           {'model_id':'beta','test_ids':['missing']},
                           {'model_id':'beta','test_id':'time_only','test_ids':['clothing_append']},
-                          {'model_id':'beta','test_ids':['time_only'],'variant_id':'direct_json_patch'},
+                          {'model_id':'beta','test_ids':['time_only'],'variant_id':'direct_json_patch__raw_json'},
                           {'all_models':False,'test_id':'time_only'},
                           {'all_models':True},
                           {'all_models':True,'test_ids':['time_only']},
