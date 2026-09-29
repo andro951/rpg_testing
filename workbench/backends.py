@@ -120,7 +120,20 @@ class DemoBackend:
                 event=source.get('new_information','')
             except Exception:
                 flat_text=source_text
-                match=re.search(r'(?m)^new_information:\\s*(.*)        if len(messages)==2 and 'Current State:\n' in instruction:
+                match=re.search(r'(?m)^new_information:\\s*(.*)$',source_text)
+                event=match.group(1) if match else ''
+                source={'initial_state':{},'new_information':event}
+        else:
+            actual=prompt.rsplit('Current State:\n',1)[1]
+            state_text,event_text=actual.split('\n\nNew Information:\n',1)
+            event=event_text.split('\n\n',1)[0]
+            try:presented=parse(state_text)
+            except Exception:
+                presented={}
+                flat_text=state_text
+            source={'initial_state':presented,'new_information':event}
+        instruction=messages[-1]['content']
+        if len(messages)==2 and 'Current State:\n' in instruction:
             instruction=instruction.rsplit('\n\n',1)[-1]
         is_inventory='A2667' in event and 'received' in event.lower() and 'shipped' in event.lower()
         lower_event=event.lower()
@@ -134,189 +147,8 @@ class DemoBackend:
                 if isinstance(item,dict) and item.get('ticket_id')==ticket_id:return str(key)
             if flat_text:
                 escaped=re.escape(ticket_id)
-                match=re.search(r'(?m)^(?:initial_state\\.)?tickets\\.(\\d+)\\.ticket_id:\\s*'+escaped+r'\\s*        ticket_ids=re.findall(r'SR-[0-9]+',event)
-        is_coat_remove='takes off his coat and hangs it on the hook' in lower_event
-        is_coat_add='brown leather coat is hanging' in lower_event and 'puts it on over his shirt' in lower_event
-        is_time='minutes' in event and not is_inventory and not is_coat_remove and not is_coat_add
-        is_door_unlock=lower_event.strip()=='tom unlocks the front door.'
-        is_relaxed=lower_event.strip()=='tom is now relaxed.'
-        if schema and schema.get('type')=='boolean':
-            text='true' if ('time' in instruction.lower() and is_time) or 'correct' in instruction.lower() else 'false'
-        elif schema and schema.get('type')=='string':text='"14:20"'
-        elif 'Describe' in instruction or 'briefly tell me what needs to change' in instruction.lower():
-            if is_inventory:text='On-hand inventory changes from 42 to 49 units. Product metadata, reservations, reorder point, units on order, backorder status, supplier, bin location, and lifecycle status do not change.'
-            elif is_coat_remove:text="Evan removes the brown leather coat from his current clothing. His other tracked fields and Laura's state do not change."
-            elif is_coat_add:text="Evan adds the brown leather coat to his current clothing. His other tracked fields and Laura's state do not change."
-            else:text='The time changes to 14:20.' if is_time else 'Tom adds a green jacket and does not move.'
-        elif 'narrat' in instruction.lower():text='Tom waits in the kitchen. Exactly five minutes pass. The clock now reads 14:20.'
-        else:
-            semantic='list_add' in instruction or 'semantic' in instruction
-            if 'status is now resolved' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'replace','path':f'/tickets/{key}/status','value':'resolved'}]
-            elif 'removed from the active support queue' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'remove','path':f'/tickets/{key}'}]
-            elif 'inserted immediately before ticket' in lower_event:
-                target=re.search(r'before ticket (SR-[0-9]+)',event,re.I);key=ticket_key(target.group(1)) if target else None
-                patch=[{'op':'add','path':f'/tickets/{key}','value':{'ticket_id':'SR-99991','status':'open','priority':'urgent','subject':'VPN access failed after credential rotation','customer_contact':'new.user@example.test'}}]
-            elif 'moved in the active support queue' in lower_event and len(ticket_ids)>=2:
-                source_key=ticket_key(ticket_ids[0]);dest_key=ticket_key(ticket_ids[1])
-                patch=[{'op':'move','from':f'/tickets/{source_key}','path':f'/tickets/{dest_key}'}]
-            elif 'copy the complete current record' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'copy','from':f'/tickets/{key}','path':'/review_samples/-'}]
-            elif 'precondition test before the change' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'test','path':f'/tickets/{key}/status','value':'waiting_customer'},
-                                                     {'op':'replace','path':f'/tickets/{key}/status','value':'active'}]
-            elif is_inventory:patch=[{'op':'set' if semantic else 'replace','path':'/inventory/on_hand_units','value':49}]
-            elif is_door_unlock:patch=[{'op':'replace','path':'/doorLocked','value':False}]
-            elif is_relaxed:patch=[{'op':'replace','path':'/characters/Tom/mood','value':'relaxed'}]
-            elif is_coat_remove:patch=([{'op':'list_remove','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'remove','path':'/household/members/evan_harper/clothing/4'}])
-            elif is_coat_add:patch=([{'op':'list_add','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'add','path':'/household/members/evan_harper/clothing/-','value':'brown leather coat'}])
-            elif is_time:patch=[{'op':'set' if semantic else 'replace','path':'/time','value':'14:20'}]
-            else:patch=[{'op':'list_add' if semantic else 'add','path':'/characters/Tom/clothing'+('' if semantic else '/-'),'value':'green jacket'}]
-            text=canonical(patch)
-        return {'text':text,'finish_reason':'stop','request_seconds':.02,'first_token_seconds':.01,
-                'usage':{},'timings':{},'cached_tokens':1024 if cache=='on' and self.counter>1 else 0,
-                'simulated':True,'raw_chunks':[]}
-,source_text)
-                event=match.group(1) if match else ''
-                source={'initial_state':{},'new_information':event}
-        else:
-            actual=prompt.rsplit('Current State:\n',1)[1]
-            state_text,event_text=actual.split('\n\nNew Information:\n',1)
-            event=event_text.split('\n\n',1)[0]
-            try:presented=parse(state_text)
-            except Exception:
-                presented={}
-                flat_text=state_text
-            source={'initial_state':presented,'new_information':event}
-        instruction=messages[-1]['content']
-        if len(messages)==2 and 'Current State:\n' in instruction:
-            instruction=instruction.rsplit('\n\n',1)[-1]
-        is_inventory='A2667' in event and 'received' in event.lower() and 'shipped' in event.lower()
-        lower_event=event.lower()
-        presented_state=source.get('initial_state',source)
-        ticket_container=presented_state.get('tickets') if isinstance(presented_state,dict) else None
-        ticket_entries=(list(enumerate(ticket_container)) if isinstance(ticket_container,list)
-                        else sorted(ticket_container.items(),key=lambda kv:int(kv[0])) if isinstance(ticket_container,dict)
-                        else [])
-        def ticket_key(ticket_id):
-            for key,item in ticket_entries:
-                if isinstance(item,dict) and item.get('ticket_id')==ticket_id:return str(key)
-            return None
-        ticket_ids=re.findall(r'SR-[0-9]+',event)
-        is_coat_remove='takes off his coat and hangs it on the hook' in lower_event
-        is_coat_add='brown leather coat is hanging' in lower_event and 'puts it on over his shirt' in lower_event
-        is_time='minutes' in event and not is_inventory and not is_coat_remove and not is_coat_add
-        is_door_unlock=lower_event.strip()=='tom unlocks the front door.'
-        is_relaxed=lower_event.strip()=='tom is now relaxed.'
-        if schema and schema.get('type')=='boolean':
-            text='true' if ('time' in instruction.lower() and is_time) or 'correct' in instruction.lower() else 'false'
-        elif schema and schema.get('type')=='string':text='"14:20"'
-        elif 'Describe' in instruction or 'briefly tell me what needs to change' in instruction.lower():
-            if is_inventory:text='On-hand inventory changes from 42 to 49 units. Product metadata, reservations, reorder point, units on order, backorder status, supplier, bin location, and lifecycle status do not change.'
-            elif is_coat_remove:text="Evan removes the brown leather coat from his current clothing. His other tracked fields and Laura's state do not change."
-            elif is_coat_add:text="Evan adds the brown leather coat to his current clothing. His other tracked fields and Laura's state do not change."
-            else:text='The time changes to 14:20.' if is_time else 'Tom adds a green jacket and does not move.'
-        elif 'narrat' in instruction.lower():text='Tom waits in the kitchen. Exactly five minutes pass. The clock now reads 14:20.'
-        else:
-            semantic='list_add' in instruction or 'semantic' in instruction
-            if 'status is now resolved' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'replace','path':f'/tickets/{key}/status','value':'resolved'}]
-            elif 'removed from the active support queue' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'remove','path':f'/tickets/{key}'}]
-            elif 'inserted immediately before ticket' in lower_event:
-                target=re.search(r'before ticket (SR-[0-9]+)',event,re.I);key=ticket_key(target.group(1)) if target else None
-                patch=[{'op':'add','path':f'/tickets/{key}','value':{'ticket_id':'SR-99991','status':'open','priority':'urgent','subject':'VPN access failed after credential rotation','customer_contact':'new.user@example.test'}}]
-            elif 'moved in the active support queue' in lower_event and len(ticket_ids)>=2:
-                source_key=ticket_key(ticket_ids[0]);dest_key=ticket_key(ticket_ids[1])
-                patch=[{'op':'move','from':f'/tickets/{source_key}','path':f'/tickets/{dest_key}'}]
-            elif 'copy the complete current record' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'copy','from':f'/tickets/{key}','path':'/review_samples/-'}]
-            elif 'precondition test before the change' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'test','path':f'/tickets/{key}/status','value':'waiting_customer'},
-                                                     {'op':'replace','path':f'/tickets/{key}/status','value':'active'}]
-            elif is_inventory:patch=[{'op':'set' if semantic else 'replace','path':'/inventory/on_hand_units','value':49}]
-            elif is_door_unlock:patch=[{'op':'replace','path':'/doorLocked','value':False}]
-            elif is_relaxed:patch=[{'op':'replace','path':'/characters/Tom/mood','value':'relaxed'}]
-            elif is_coat_remove:patch=([{'op':'list_remove','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'remove','path':'/household/members/evan_harper/clothing/4'}])
-            elif is_coat_add:patch=([{'op':'list_add','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'add','path':'/household/members/evan_harper/clothing/-','value':'brown leather coat'}])
-            elif is_time:patch=[{'op':'set' if semantic else 'replace','path':'/time','value':'14:20'}]
-            else:patch=[{'op':'list_add' if semantic else 'add','path':'/characters/Tom/clothing'+('' if semantic else '/-'),'value':'green jacket'}]
-            text=canonical(patch)
-        return {'text':text,'finish_reason':'stop','request_seconds':.02,'first_token_seconds':.01,
-                'usage':{},'timings':{},'cached_tokens':1024 if cache=='on' and self.counter>1 else 0,
-                'simulated':True,'raw_chunks':[]}
-,flat_text)
+                match=re.search(r'(?m)^(?:initial_state\\.)?tickets\\.(\\d+)\\.ticket_id:\\s*'+escaped+r'\\s*$',flat_text)
                 if match:return match.group(1)
-            return None
-        ticket_ids=re.findall(r'SR-[0-9]+',event)
-        is_coat_remove='takes off his coat and hangs it on the hook' in lower_event
-        is_coat_add='brown leather coat is hanging' in lower_event and 'puts it on over his shirt' in lower_event
-        is_time='minutes' in event and not is_inventory and not is_coat_remove and not is_coat_add
-        is_door_unlock=lower_event.strip()=='tom unlocks the front door.'
-        is_relaxed=lower_event.strip()=='tom is now relaxed.'
-        if schema and schema.get('type')=='boolean':
-            text='true' if ('time' in instruction.lower() and is_time) or 'correct' in instruction.lower() else 'false'
-        elif schema and schema.get('type')=='string':text='"14:20"'
-        elif 'Describe' in instruction or 'briefly tell me what needs to change' in instruction.lower():
-            if is_inventory:text='On-hand inventory changes from 42 to 49 units. Product metadata, reservations, reorder point, units on order, backorder status, supplier, bin location, and lifecycle status do not change.'
-            elif is_coat_remove:text="Evan removes the brown leather coat from his current clothing. His other tracked fields and Laura's state do not change."
-            elif is_coat_add:text="Evan adds the brown leather coat to his current clothing. His other tracked fields and Laura's state do not change."
-            else:text='The time changes to 14:20.' if is_time else 'Tom adds a green jacket and does not move.'
-        elif 'narrat' in instruction.lower():text='Tom waits in the kitchen. Exactly five minutes pass. The clock now reads 14:20.'
-        else:
-            semantic='list_add' in instruction or 'semantic' in instruction
-            if 'status is now resolved' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'replace','path':f'/tickets/{key}/status','value':'resolved'}]
-            elif 'removed from the active support queue' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'remove','path':f'/tickets/{key}'}]
-            elif 'inserted immediately before ticket' in lower_event:
-                target=re.search(r'before ticket (SR-[0-9]+)',event,re.I);key=ticket_key(target.group(1)) if target else None
-                patch=[{'op':'add','path':f'/tickets/{key}','value':{'ticket_id':'SR-99991','status':'open','priority':'urgent','subject':'VPN access failed after credential rotation','customer_contact':'new.user@example.test'}}]
-            elif 'moved in the active support queue' in lower_event and len(ticket_ids)>=2:
-                source_key=ticket_key(ticket_ids[0]);dest_key=ticket_key(ticket_ids[1])
-                patch=[{'op':'move','from':f'/tickets/{source_key}','path':f'/tickets/{dest_key}'}]
-            elif 'copy the complete current record' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'copy','from':f'/tickets/{key}','path':'/review_samples/-'}]
-            elif 'precondition test before the change' in lower_event and ticket_ids:
-                key=ticket_key(ticket_ids[0]);patch=[{'op':'test','path':f'/tickets/{key}/status','value':'waiting_customer'},
-                                                     {'op':'replace','path':f'/tickets/{key}/status','value':'active'}]
-            elif is_inventory:patch=[{'op':'set' if semantic else 'replace','path':'/inventory/on_hand_units','value':49}]
-            elif is_door_unlock:patch=[{'op':'replace','path':'/doorLocked','value':False}]
-            elif is_relaxed:patch=[{'op':'replace','path':'/characters/Tom/mood','value':'relaxed'}]
-            elif is_coat_remove:patch=([{'op':'list_remove','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'remove','path':'/household/members/evan_harper/clothing/4'}])
-            elif is_coat_add:patch=([{'op':'list_add','path':'/household/members/evan_harper/clothing','value':'brown leather coat'}] if semantic else [{'op':'add','path':'/household/members/evan_harper/clothing/-','value':'brown leather coat'}])
-            elif is_time:patch=[{'op':'set' if semantic else 'replace','path':'/time','value':'14:20'}]
-            else:patch=[{'op':'list_add' if semantic else 'add','path':'/characters/Tom/clothing'+('' if semantic else '/-'),'value':'green jacket'}]
-            text=canonical(patch)
-        return {'text':text,'finish_reason':'stop','request_seconds':.02,'first_token_seconds':.01,
-                'usage':{},'timings':{},'cached_tokens':1024 if cache=='on' and self.counter>1 else 0,
-                'simulated':True,'raw_chunks':[]}
-,source_text)
-                event=match.group(1) if match else ''
-                source={'initial_state':{},'new_information':event}
-        else:
-            actual=prompt.rsplit('Current State:\n',1)[1]
-            state_text,event_text=actual.split('\n\nNew Information:\n',1)
-            event=event_text.split('\n\n',1)[0]
-            try:presented=parse(state_text)
-            except Exception:
-                presented={}
-                flat_text=state_text
-            source={'initial_state':presented,'new_information':event}
-        instruction=messages[-1]['content']
-        if len(messages)==2 and 'Current State:\n' in instruction:
-            instruction=instruction.rsplit('\n\n',1)[-1]
-        is_inventory='A2667' in event and 'received' in event.lower() and 'shipped' in event.lower()
-        lower_event=event.lower()
-        presented_state=source.get('initial_state',source)
-        ticket_container=presented_state.get('tickets') if isinstance(presented_state,dict) else None
-        ticket_entries=(list(enumerate(ticket_container)) if isinstance(ticket_container,list)
-                        else sorted(ticket_container.items(),key=lambda kv:int(kv[0])) if isinstance(ticket_container,dict)
-                        else [])
-        def ticket_key(ticket_id):
-            for key,item in ticket_entries:
-                if isinstance(item,dict) and item.get('ticket_id')==ticket_id:return str(key)
             return None
         ticket_ids=re.findall(r'SR-[0-9]+',event)
         is_coat_remove='takes off his coat and hangs it on the hook' in lower_event
