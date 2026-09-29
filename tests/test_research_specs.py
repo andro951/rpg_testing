@@ -97,6 +97,22 @@ class ResearchSpecTests(unittest.TestCase):
             self.assertIn('"tickets": [',test['variants'][0]['steps'][0]['prompt'])
             self.assertIn('"tickets": {',test['variants'][1]['steps'][0]['prompt'])
 
+    def test_minimal_replace_index_prompt_has_no_test_framing(self):
+        test=read_json(ROOT/'test_specs/array_index_replace_minimal_016.json');validate_test(test)
+        self.assertEqual(test.get('instructions'),'')
+        self.assertEqual(test['source'],{'initial_state':{},'new_information':''})
+        self.assertEqual([v['expected_answers'] for v in test['variants']],[{'index':'73'},{'index':'73'}])
+        for variant in test['variants']:
+            prompt=variant['steps'][0]['prompt']
+            self.assertTrue(prompt.endswith('What is the zero-based index of this ticket: SR-60432?'))
+            self.assertNotIn('Current State:',prompt)
+            self.assertNotIn('New Information:',prompt)
+            self.assertNotIn('Task:',prompt)
+            self.assertNotIn('The tickets field is shown',prompt)
+            self.assertNotIn('Arrays are shown as objects',prompt)
+        self.assertIn('"tickets": [',test['variants'][0]['steps'][0]['prompt'])
+        self.assertIn('"tickets": {',test['variants'][1]['steps'][0]['prompt'])
+
     def test_prompt_calibration_suite_is_balanced(self):
         names=['prompt_calibration_001_time.json','prompt_calibration_002_boolean.json',
                'prompt_calibration_003_nested.json','prompt_calibration_004_array.json']
