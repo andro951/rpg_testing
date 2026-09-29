@@ -36,11 +36,16 @@ def _legacy_presentation_instruction(mode):
                 'whose string keys are the real zero-based array indexes. Use those visible numeric keys directly as '
                 'the corresponding RFC 6902 array indexes in JSON Pointer paths. The authoritative state still contains '
                 'real arrays, so add, remove, move and copy use normal RFC 6902 array semantics.')
+    if mode=='full_paths':
+        return ('SOURCE is a flattened dot-path view of ordinary JSON. Array positions appear as numeric path segments. '
+                'Empty arrays and objects are preserved as [] and {}. The authoritative state is still ordinary JSON, '
+                'so return normal RFC 6902 JSON Pointer paths.')
     raise ValueError('Unknown state presentation: '+str(mode))
 
 
 def _legacy_source_text(source,mode):
-    from .presentation import render_source
+    from .presentation import render_source,render_source_text
+    if mode=='full_paths':return render_source_text(source,mode)
     return json.dumps(render_source(source,mode),ensure_ascii=False,separators=(',',':'),allow_nan=False)
 
 

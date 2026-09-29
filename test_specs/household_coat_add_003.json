@@ -2,7 +2,7 @@
   "schema_version": 2,
   "id": "household_coat_add_003",
   "name": "Household clothing: put on coat",
-  "description": "Third real general state-update benchmark and mirror of test 002. The conversation names a brown leather coat before Evan puts it on; the only justified tracked change is appending that item to his clothing list.",
+  "description": "Third real general state-update benchmark and mirror of test 002. The conversation names a brown leather coat before Evan puts it on; the only justified tracked change is appending that item to his clothing list. Every workflow variant is crossed with all three state presentations.",
   "provenance": {
     "scenario": "Synthetic household state and conversation",
     "note": "All people, employers, household details, and events are fictional benchmark data."
@@ -144,7 +144,7 @@
   },
   "variants": [
     {
-      "id": "direct_json_patch",
+      "id": "direct_json_patch__raw_json",
       "cache": "default",
       "steps": [
         {
@@ -168,10 +168,67 @@
           "add"
         ]
       },
-      "state_presentation": "indexed_arrays"
+      "state_presentation": "raw_json",
+      "name": "direct_json_patch — Raw JSON"
     },
     {
-      "id": "analyze_json_patch",
+      "id": "direct_json_patch__indexed_arrays",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "add"
+        ]
+      },
+      "state_presentation": "indexed_arrays",
+      "name": "direct_json_patch — Indexed-array JSON"
+    },
+    {
+      "id": "direct_json_patch__full_paths",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "add"
+        ]
+      },
+      "state_presentation": "full_paths",
+      "name": "direct_json_patch — Full dot paths"
+    },
+    {
+      "id": "analyze_json_patch__raw_json",
       "cache": "default",
       "steps": [
         {
@@ -211,8 +268,96 @@
           "add"
         ]
       },
-      "state_presentation": "indexed_arrays"
+      "state_presentation": "raw_json",
+      "name": "analyze_json_patch — Raw JSON"
+    },
+    {
+      "id": "analyze_json_patch__indexed_arrays",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "analysis",
+          "type": "generate",
+          "prompt": "Identify only state fields that are established to have changed. Distinguish completed actions from dialogue, discussion, plans, implications, movement that is not represented in the tracked state, and unchanged facts. Do not generate JSON yet.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        },
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the established state changes. Preserve all unchanged fields. Check the earlier analysis against the original evidence. To append an array item use add and /- at the end of the path. No markdown.",
+          "uses": [
+            "analysis"
+          ],
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "add"
+        ]
+      },
+      "state_presentation": "indexed_arrays",
+      "name": "analyze_json_patch — Indexed-array JSON"
+    },
+    {
+      "id": "analyze_json_patch__full_paths",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "analysis",
+          "type": "generate",
+          "prompt": "Identify only state fields that are established to have changed. Distinguish completed actions from dialogue, discussion, plans, implications, movement that is not represented in the tracked state, and unchanged facts. Do not generate JSON yet.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        },
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the established state changes. Preserve all unchanged fields. Check the earlier analysis against the original evidence. To append an array item use add and /- at the end of the path. No markdown.",
+          "uses": [
+            "analysis"
+          ],
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "add"
+        ]
+      },
+      "state_presentation": "full_paths",
+      "name": "analyze_json_patch — Full dot paths"
     }
-  ],
-  "state_presentation": "indexed_arrays"
+  ]
 }

@@ -2,7 +2,7 @@
   "schema_version": 2,
   "id": "inventory_net_stock_001",
   "name": "Retail inventory: net on-hand stock update",
-  "description": "First real general state-update benchmark. A realistic product/inventory record contains many unchanged fields; only on-hand inventory changes.",
+  "description": "First real general state-update benchmark. A realistic product/inventory record contains many unchanged fields; only on-hand inventory changes. Every workflow variant is run in all three state presentations.",
   "provenance": {
     "product_metadata_source": "Anker manufacturer product and support pages",
     "product_page": "https://www.anker.com/products/a2667",
@@ -238,7 +238,7 @@
   },
   "variants": [
     {
-      "id": "direct_json_patch",
+      "id": "direct_json_patch__raw_json",
       "cache": "default",
       "steps": [
         {
@@ -262,10 +262,67 @@
           "replace"
         ]
       },
-      "state_presentation": "indexed_arrays"
+      "state_presentation": "raw_json",
+      "name": "direct_json_patch — Raw JSON"
     },
     {
-      "id": "analyze_json_patch",
+      "id": "direct_json_patch__indexed_arrays",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. No markdown.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "replace"
+        ]
+      },
+      "state_presentation": "indexed_arrays",
+      "name": "direct_json_patch — Indexed-array JSON"
+    },
+    {
+      "id": "direct_json_patch__full_paths",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. No markdown.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "replace"
+        ]
+      },
+      "state_presentation": "full_paths",
+      "name": "direct_json_patch — Full dot paths"
+    },
+    {
+      "id": "analyze_json_patch__raw_json",
       "cache": "default",
       "steps": [
         {
@@ -305,8 +362,96 @@
           "replace"
         ]
       },
-      "state_presentation": "indexed_arrays"
+      "state_presentation": "raw_json",
+      "name": "analyze_json_patch — Raw JSON"
+    },
+    {
+      "id": "analyze_json_patch__indexed_arrays",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "analysis",
+          "type": "generate",
+          "prompt": "Identify only state fields that are established to have changed. Distinguish completed events from discussion, plans, possibilities, and explicitly unchanged facts. Do not generate JSON yet.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        },
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the established state changes. Preserve all unchanged fields. Check the earlier analysis against the original evidence. No markdown.",
+          "uses": [
+            "analysis"
+          ],
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "replace"
+        ]
+      },
+      "state_presentation": "indexed_arrays",
+      "name": "analyze_json_patch — Indexed-array JSON"
+    },
+    {
+      "id": "analyze_json_patch__full_paths",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "analysis",
+          "type": "generate",
+          "prompt": "Identify only state fields that are established to have changed. Distinguish completed events from discussion, plans, possibilities, and explicitly unchanged facts. Do not generate JSON yet.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        },
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the established state changes. Preserve all unchanged fields. Check the earlier analysis against the original evidence. No markdown.",
+          "uses": [
+            "analysis"
+          ],
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "replace"
+        ]
+      },
+      "state_presentation": "full_paths",
+      "name": "analyze_json_patch — Full dot paths"
     }
-  ],
-  "state_presentation": "indexed_arrays"
+  ]
 }
