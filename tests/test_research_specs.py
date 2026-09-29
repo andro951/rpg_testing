@@ -119,6 +119,7 @@ class ResearchSpecTests(unittest.TestCase):
         self.assertEqual(len(test['variants']),1)
         variant=test['variants'][0]
         prompt=variant['steps'][0]['prompt']
+        self.assertIn('review_samples: []\n\nWhat is the index of this ticket: SR-60432?',prompt)
         self.assertTrue(prompt.endswith('What is the index of this ticket: SR-60432?'))
         self.assertNotIn('zero-based',prompt.lower())
         self.assertNotIn('Current State:',prompt)
