@@ -212,6 +212,78 @@
         ]
       },
       "state_presentation": "indexed_arrays"
+    },
+    {
+      "id": "direct_json_patch__raw_json",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "add"
+        ]
+      },
+      "state_presentation": "raw_json",
+      "name": "direct_json_patch — Raw JSON"
+    },
+    {
+      "id": "analyze_json_patch__raw_json",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "analysis",
+          "type": "generate",
+          "prompt": "Identify only state fields that are established to have changed. Distinguish completed actions from dialogue, discussion, plans, implications, movement that is not represented in the tracked state, and unchanged facts. Do not generate JSON yet.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        },
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the established state changes. Preserve all unchanged fields. Check the earlier analysis against the original evidence. To append an array item use add and /- at the end of the path. No markdown.",
+          "uses": [
+            "analysis"
+          ],
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "add"
+        ]
+      },
+      "state_presentation": "raw_json",
+      "name": "analyze_json_patch — Raw JSON"
     }
   ],
   "state_presentation": "indexed_arrays"

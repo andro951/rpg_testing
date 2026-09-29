@@ -1,6 +1,7 @@
 """Readiness report. Checking never downloads, installs, unloads or changes settings."""
 from __future__ import annotations
 import importlib.util
+import copy
 import os
 import platform
 import shutil
@@ -12,6 +13,18 @@ from .inventory import automatic_context, command, detect_gpus, executable, scan
 from .planning import pending_plan, public_plan, requirements, validate_selection
 
 
+def _context_planning_tests(tests):
+    """Do not double-count authoritative JSON for direct-text full-path companions."""
+    planned=copy.deepcopy(tests)
+    for test in planned:
+        if test.get('provenance',{}).get('presentation')!='full_paths':
+            continue
+        if not all(v.get('prompt_style')=='direct_text_v1' for v in test.get('variants',[])):
+            continue
+        test['source']={'initial_state':{},'new_information':''}
+    return planned
+
+
 def issue(code, message, label=None, action=None, level='blocked'):
     return {'id':code,'message':message,'level':'fixable' if action else level,'label':label,'action':action}
 
@@ -21,7 +34,7 @@ def build(app, preparation=None, track_progress=True, selection=None):
         if track_progress:app.set_progress('preflight',task,task_percent,overall_percent,detail)
     problems=[];settings=app.settings;kind=settings['backend']
     update('Loading benchmark definitions',0,10,'Reading models and enabled test files.')
-    all_models=app.catalog();tests=load_tests(app.root/'test_specs')
+    all_models=app.catalog();tests=load_tests(app.root/'test_specs');context_tests=_context_planning_tests(tests)
     selection=validate_selection(selection,all_models,tests)
     models=[m for m in all_models if not selection or 'model_id' not in selection or m['id']==selection['model_id']]
     update('Loading benchmark definitions',100,15,f'{len(tests)} enabled tests loaded.')
@@ -46,7 +59,7 @@ def build(app, preparation=None, track_progress=True, selection=None):
             'os':platform.platform(),'python':platform.python_version(),'cpu':platform.processor() or platform.machine(),'driver':gpu.get('driver'),
             # Context allocation uses the whole enabled suite, never just what remains.
             # The recipe is computable without model files so completed models remain optional.
-            'context_recipe':automatic_context(tests, {'planning.context_length':2**63-1})['allocated_tokens'],
+            'context_recipe':automatic_context(context_tests, {'planning.context_length':2**63-1})['allocated_tokens'],
             'execution_policy':'native-two-pass-v2'}
     update('Checking existing results',0,20,'Validating saved completion evidence.')
     # Pins are metadata, NOT completion tracking. Recover from checksummed results if needed.
@@ -168,7 +181,7 @@ def build(app, preparation=None, track_progress=True, selection=None):
                 action={'type':'download_model','model_id':mid} if not model['errors'] and group['model'].get('repo_id') else None
                 problems.append(issue('invalid_'+mid,'Incomplete/invalid model '+mid+': '+str(model['missing_shards']+model['errors']), 'Download missing shards' if action else None,action));continue
             try:
-                group['context']=automatic_context(tests,model['metadata'])
+                group['context']=automatic_context(context_tests,model['metadata'])
             except ValueError as exc:problems.append(issue('context_'+mid,str(exc)));continue
     if selection and 'model_id' in selection and selection['model_id'] in plan['excluded']:
         problems.append(issue('selected_model_tier','The selected model is not eligible for this GPU tier. Check its assignment in Installed models.','Review VRAM assignment',{'type':'models'}))
