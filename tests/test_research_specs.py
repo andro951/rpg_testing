@@ -1,6 +1,6 @@
 import unittest
 from pathlib import Path
-from workbench.domain import read_json, validate_test, load_tests
+from workbench.domain import read_json, validate_test, load_tests as load_workflow_specs
 from workbench.scoring import changes, apply, equal
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -23,7 +23,7 @@ class ResearchSpecTests(unittest.TestCase):
             self.assertEqual({v['state_presentation'] for v in items.values()},set(FORMATS))
 
     def test_every_state_benchmark_is_balanced_across_three_presentations(self):
-        for test in load_tests(ROOT/'test_specs'):
+        for test in load_workflow_specs(ROOT/'test_specs'):
             if test['id'].startswith('dialogue_test'):continue
             with self.subTest(test=test['id']):
                 self.assert_balanced(test)
