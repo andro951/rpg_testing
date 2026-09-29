@@ -77,7 +77,7 @@ class ServerTests(unittest.TestCase):
         options=json.loads(data);self.assertEqual(options['models'][0]['id'],'demo-2b')
         self.assertNotIn('expected_state',str(options))
     def test_targeted_api_runs_and_resumes_only_one_case(self):
-        scope={'model_id':'demo-2b','test_id':'time_only','variant_id':'direct_json_patch'}
+        scope={'model_id':'demo-2b','test_id':'time_only','variant_id':'direct_json_patch__raw_json'}
         self.assertEqual(self.req('/api/preflight',{'selection':scope})[0],202);self.wait()
         self.assertEqual(self.app.report['plan']['pending'],1);self.assertEqual(self.app.store.all(),[])
         self.assertEqual(self.req('/api/run',{'selection':scope})[0],202);self.wait()
