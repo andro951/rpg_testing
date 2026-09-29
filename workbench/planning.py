@@ -1,7 +1,7 @@
 """One pending-work planner, shared by preparation, live preflight and execution."""
 from __future__ import annotations
 import copy
-from .domain import case_id, eligibility, safe_id, TIERS
+from .domain import case_id, eligibility, experiment_spec, safe_id, TIERS
 from .execution_policy import fallback_id
 
 
@@ -84,11 +84,65 @@ def validate_selection(selection, models, tests):
     return selection
 
 
+def _timeout_neutral_spec(test, variant):
+    """Experimental identity with only the watchdog duration removed."""
+    spec=copy.deepcopy(experiment_spec(test,variant))
+    spec['test'].pop('timeout_seconds',None)
+    return spec
+
+
+def _historical_timeout_result(records, model, test, variant, repetition, target):
+    """Reuse old results only when the sole experiment change is timeout_seconds.
+
+    Recomputing the old case ID with the current workflow fingerprint prevents this
+    compatibility path from hiding real code/model/target changes.
+    """
+    wanted=_timeout_neutral_spec(test,variant)
+    matches=[]
+    for record in records:
+        if (record.get('model_id')!=model['id'] or record.get('test_id')!=test['id']
+                or record.get('variant_id')!=variant['id'] or record.get('repetition')!=repetition
+                or record.get('target')!=target):
+            continue
+        old_test=record.get('test_definition');old_variant=record.get('variant_definition')
+        if not isinstance(old_test,dict) or not isinstance(old_variant,dict):
+            continue
+        try:
+            if _timeout_neutral_spec(old_test,old_variant)!=wanted:
+                continue
+            if case_id(model,old_test,old_variant,repetition,target)!=record.get('case_id'):
+                continue
+        except (KeyError,TypeError,ValueError):
+            continue
+        if record.get('status') in ('completed','skipped'):
+            matches.append(record)
+    if not matches:
+        return None
+
+    def timed_out(record):
+        return bool(record.get('timed_out')) or record.get('reason')=='case_timeout'
+
+    # Any successful/non-timeout completion remains complete after a timeout-only bump.
+    non_timeout=[record for record in matches if not timed_out(record)]
+    if non_timeout:
+        return {'done':True,'record':max(non_timeout,key=lambda r:str(r.get('finished_at','')))}
+
+    def timeout(record):
+        value=record.get('timeout_seconds')
+        if type(value) not in (int,float):
+            value=record.get('test_definition',{}).get('timeout_seconds',0)
+        return value if type(value) in (int,float) else 0
+
+    latest=max(matches,key=lambda r:(timeout(r),str(r.get('finished_at',''))))
+    # A timed-out case becomes pending only when it is being given a larger watchdog.
+    return {'done':test['timeout_seconds']<=timeout(latest),'record':latest}
+
+
 def pending_plan(models, tests, target, store, selection=None):
     """No model discovery here: completed work must not require installed weights."""
     validate_catalog(models)
     selection=validate_selection(selection,models,tests)
-    groups=[];complete=0;excluded=[];unassigned=[]
+    groups=[];complete=0;excluded=[];unassigned=[];history=None
     for model in models:
         if selection and 'model_id' in selection and model['id']!=selection['model_id']:continue
         if model.get('enabled', True) is False:
@@ -113,7 +167,13 @@ def pending_plan(models, tests, target, store, selection=None):
                             jobs.append({'case_id':cid,'model_id':model['id'],'test':test,'variant':variant,'repetition':repetition,'recovery_only':True})
                         else:done+=1;complete+=1
                     else:
-                        jobs.append({'case_id':cid,'model_id':model['id'],'test':test,'variant':variant,'repetition':repetition})
+                        if history is None:
+                            history=store.all()
+                        prior=_historical_timeout_result(history,model,test,variant,repetition,target)
+                        if prior and prior['done']:
+                            done+=1;complete+=1
+                        else:
+                            jobs.append({'case_id':cid,'model_id':model['id'],'test':test,'variant':variant,'repetition':repetition})
         groups.append({'model':copy.deepcopy(model),'reason':reason,'jobs':jobs,'complete':done})
     return {'groups':groups,'pending':sum(len(g['jobs']) for g in groups),'complete':complete,
             'model_loads':sum(bool(g['jobs']) for g in groups),'excluded':excluded,'unassigned':unassigned,
