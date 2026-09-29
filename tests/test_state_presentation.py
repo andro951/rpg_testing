@@ -69,7 +69,7 @@ class StatePresentationTests(unittest.TestCase):
         test=read_json(ROOT/'test_specs/dialogue_test.json');variant=test['variants'][0]
         prompt=messages(test,variant['steps'][0],{},variant)
         self.assertEqual(prompt,[{'role':'system','content':"Follow the user's prompt."},
-                                 {'role':'user','content':'{put prompt here}'}])
+                                 {'role':'user','content':variant['steps'][0]['prompt']}])
         self.assertEqual(test['name'],'Dialogue test')
         self.assertEqual(test['description'],'Open-ended dialogue generation using a locally supplied prompt.')
         self.assertEqual(test['repetitions'],3)
@@ -102,10 +102,7 @@ class StatePresentationTests(unittest.TestCase):
                 if not variant.get('enabled',True):continue
                 with self.subTest(test=test['id'],variant=variant['id']):
                     result=execute(test,variant,DemoBackend())
-                    locating_only=test.get('provenance',{}).get('purpose')=='Isolate array index selection from JSON Patch construction.'
-                    if locating_only:
-                        self.assertTrue(result['score']['valid'],result['score'])
-                    elif 'expected_state' not in test and variant.get('result',{}).get('representation')=='answers' and not variant.get('expected_answers'):
+                    if 'expected_state' not in test and variant.get('result',{}).get('representation')=='answers' and not variant.get('expected_answers'):
                         self.assertTrue(result['score']['valid'],result['score'])
                         self.assertIsNone(result['score']['exact_match'],result['score'])
                     else:

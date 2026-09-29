@@ -90,11 +90,13 @@ class TargetedTests(unittest.TestCase):
     def test_one_test_all_variants_and_global_resume(self):
         self.app.run(selection={'model_id': 'beta', 'test_id': 'time_only'})
         records = self.app.store.all()
-        self.assertEqual(len(records), 4)
+        spec=next(t for t in self.tests if t['id']=='time_only')
+        expected=spec.get('repetitions',1)*sum(v.get('enabled',True) for v in spec['variants'])
+        self.assertEqual(len(records), expected)
         self.assertEqual({r['test_id'] for r in records}, {'time_only'})
         saved = {p: p.read_bytes() for p in self.app.store.root.rglob('*.json')}
         self.app.check()
-        self.assertEqual(self.app.report['plan']['complete'], 4)
+        self.assertEqual(self.app.report['plan']['complete'], expected)
         self.assertGreater(self.app.report['plan']['pending'], 0)
         self.assertTrue(all(p.read_bytes() == data for p, data in saved.items()))
 
@@ -153,6 +155,7 @@ class TargetedTests(unittest.TestCase):
         report = self.app.check(selection=self.scope)
         self.assertFalse(report['ready'])
         self.assertIn('missing_beta', [i['id'] for i in report['issues']])
+        self.assertEqual(self.app.store.all(), [])
 
     def test_ineligible_model_is_not_silently_reported_ready(self):
         self.models[1]['required_vram_gb'] = 80

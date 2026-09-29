@@ -44,11 +44,13 @@ class ResearchSpecTests(unittest.TestCase):
         self.assertTrue(equal(remove['expected_state'],add['source']['initial_state']))
         self.assertTrue(equal(add['expected_state'],remove['source']['initial_state']))
 
-    def test_core_research_specs_use_indexed_json_patch_not_semantic_patch(self):
+    def test_core_research_specs_preserve_original_indexed_workflows(self):
         for name in ['inventory_net_stock_001.json','household_coat_remove_002.json','household_coat_add_003.json']:
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
             self.assertEqual(test['state_presentation'],'indexed_arrays')
-            self.assertTrue(all(v['state_presentation']=='indexed_arrays' for v in test['variants']))
+            self.assertEqual(len(test['variants']),4)
+            self.assertTrue(all(v['state_presentation']=='indexed_arrays' for v in test['variants'][:2]))
+            self.assertTrue(all(v['state_presentation']=='raw_json' for v in test['variants'][2:]))
             self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
 
     def test_100_item_array_patch_pair_specs(self):
@@ -84,8 +86,8 @@ class ResearchSpecTests(unittest.TestCase):
             self.assertEqual(test['source'],{'initial_state':{},'new_information':''})
             self.assertEqual(test['timeout_seconds'],120)
             self.assertEqual(test['repetitions'],original.get('repetitions',1))
-            self.assertEqual([v['id'] for v in test['variants']],['raw_array_index','indexed_object_index'])
-            self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays'])
+            self.assertEqual([v['id'] for v in test['variants']],['raw_array_index','indexed_object_index','full_paths_index'])
+            self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays','raw_json'])
             for variant in test['variants']:
                 self.assertEqual(variant['prompt_style'],'direct_text_v1')
                 self.assertEqual(variant['result'],{'step':'index','representation':'answers'})
@@ -96,12 +98,13 @@ class ResearchSpecTests(unittest.TestCase):
                 self.assertNotIn('json pointer',model_facing)
             self.assertIn('"tickets": [',test['variants'][0]['steps'][0]['prompt'])
             self.assertIn('"tickets": {',test['variants'][1]['steps'][0]['prompt'])
+            self.assertIn('review_samples: []',test['variants'][2]['steps'][0]['prompt'])
 
     def test_minimal_replace_index_prompt_has_no_test_framing(self):
         test=read_json(ROOT/'test_specs/array_index_replace_minimal_016.json');validate_test(test)
         self.assertEqual(test.get('instructions'),'')
         self.assertEqual(test['source'],{'initial_state':{},'new_information':''})
-        self.assertEqual([v['expected_answers'] for v in test['variants']],[{'index':'73'},{'index':'73'}])
+        self.assertEqual([v['expected_answers'] for v in test['variants']],[{'index':'73'}]*3)
         for variant in test['variants']:
             prompt=variant['steps'][0]['prompt']
             self.assertTrue(prompt.endswith('What is the zero-based index of this ticket: SR-60432?'))
@@ -116,10 +119,9 @@ class ResearchSpecTests(unittest.TestCase):
     def test_explicit_replace_plain_question_has_no_indexing_guidance(self):
         test=read_json(ROOT/'test_specs/array_index_replace_explicit_minimal_017.json');validate_test(test)
         self.assertEqual(test.get('instructions'),'')
-        self.assertEqual(len(test['variants']),1)
+        self.assertEqual(len(test['variants']),3)
         variant=test['variants'][0]
         prompt=variant['steps'][0]['prompt']
-        self.assertIn('review_samples: []\n\nWhat is the index of this ticket: SR-60432?',prompt)
         self.assertTrue(prompt.endswith('What is the index of this ticket: SR-60432?'))
         self.assertNotIn('zero-based',prompt.lower())
         self.assertNotIn('Current State:',prompt)
@@ -132,9 +134,10 @@ class ResearchSpecTests(unittest.TestCase):
     def test_flattened_replace_paths_prompt_format(self):
         test=read_json(ROOT/'test_specs/array_index_replace_flat_paths_018.json');validate_test(test)
         self.assertEqual(test.get('instructions'),'')
-        self.assertEqual(len(test['variants']),1)
+        self.assertEqual(len(test['variants']),3)
         prompt=test['variants'][0]['steps'][0]['prompt']
         self.assertFalse('"' in prompt)
+        self.assertIn('review_samples: []\n\nWhat is the index of this ticket: SR-60432?',prompt)
         self.assertTrue(prompt.startswith('queue_name: North Region Service Desk\n\nqueue_date: 2026-09-21\n\n'))
         self.assertIn('tickets.0.ticket_id: SR-22345\n',prompt)
         self.assertIn('tickets.73.ticket_id: SR-60432\n',prompt)
@@ -157,7 +160,8 @@ class ResearchSpecTests(unittest.TestCase):
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
             self.assertEqual(test['timeout_seconds'],expected_timeouts[name])
             self.assertEqual(test['repetitions'],3)
-            self.assertEqual([v['id'] for v in test['variants']],expected_ids)
+            self.assertEqual([v['id'] for v in test['variants'][:len(expected_ids)]],expected_ids)
+            self.assertEqual(len(test['variants']),14)
             self.assertEqual(len(changes(test['source']['initial_state'],test['expected_state'])),1)
             self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
         self.assertEqual(read_json(ROOT/'test_specs'/names[0])['variants'][0]['new_information_override'],

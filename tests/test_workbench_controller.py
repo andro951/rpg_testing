@@ -43,10 +43,10 @@ class ControllerTests(unittest.TestCase):
         self.app.run();self.assertEqual(self.app.completed_now,expected)
         records=self.app.store.all();self.assertEqual(len(records),expected)
         self.assertTrue(all(r['simulated'] for r in records))
-        dialogue=[r for r in records if r['test_id']=='dialogue_test']
-        scored=[r for r in records if r['test_id']!='dialogue_test']
+        dialogue=[r for r in records if r['test_id'].startswith('dialogue_test')]
+        scored=[r for r in records if not r['test_id'].startswith('dialogue_test')]
         self.assertTrue(dialogue and all(r['score']['valid'] and r['score']['exact_match'] is None for r in dialogue))
-        self.assertTrue(all(r['score']['exact_match'] for r in scored))
+        self.assertTrue(scored and all(r['score']['exact_match'] for r in scored))
         self.assertTrue(all(r['load']['seed_reproducibility']['status']=='simulated' for r in records))
         self.app.run();self.assertEqual(self.app.completed_now,0)
         self.assertEqual(self.app.report['plan']['pending'],0)
@@ -132,10 +132,15 @@ class ControllerTests(unittest.TestCase):
             def generate(self,*a):return {'text':'not JSON','finish_reason':'stop'}
         with patch('workbench.demo_native.DemoNative',Broken):self.app.run()
         records=self.app.store.all();self.assertEqual(len(records),configured_case_count(self.root/'test_specs'))
-        structured=[r for r in records if r['test_id']!='dialogue_test']
-        dialogue=[r for r in records if r['test_id']=='dialogue_test']
-        self.assertTrue(all(r['status']=='completed' and not r['score']['valid'] for r in structured))
+        definitions={read_json(p)['id']:read_json(p) for p in (self.root/'test_specs').glob('*.json')}
+        structured=[r for r in records if 'expected_state' in definitions[r['test_id']]]
+        lookups=[r for r in records if r['test_id'].startswith('array_index_')]
+        dialogue=[r for r in records if r['test_id'].startswith('dialogue_test')]
+        self.assertTrue(structured and all(r['status']=='completed' and not r['score']['valid'] for r in structured))
+        self.assertTrue(lookups and all(r['status']=='completed' and r['score']['valid'] and r['score']['exact_match'] is False for r in lookups))
         self.assertTrue(dialogue and all(r['status']=='completed' and r['score']['valid'] and r['score']['exact_match'] is None for r in dialogue))
+        self.assertEqual(len(structured)+len(lookups)+len(dialogue),len(records))
+        self.app.run();self.assertEqual(self.app.completed_now,0)
     def test_artifact_identity_from_results_needs_no_weights(self):
         self.app.run();m={'id':'demo-2b','files':['demo.gguf']}
         identity=self.app.with_known_artifacts([m])[0]['artifact_identity']

@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from workbench.domain import load_tests, read_json, validate_test
+from workbench.domain import load_tests as load_workflow_specs, read_json, validate_test
 from workbench.inventory import automatic_context
 from workbench.preflight import _context_planning_tests
 
@@ -10,7 +10,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 class ThreeFormatMatrixTests(unittest.TestCase):
     def test_new_companions_do_not_change_context_recipe(self):
-        tests=load_tests(ROOT/'test_specs')
+        tests=load_workflow_specs(ROOT/'test_specs')
         planned=_context_planning_tests(tests)
         self.assertEqual(
             automatic_context(planned,{'planning.context_length':2**63-1})['allocated_tokens'],
@@ -27,6 +27,9 @@ class ThreeFormatMatrixTests(unittest.TestCase):
             self.assertEqual(len(companion['variants']),1)
             self.assertEqual(companion['provenance']['presentation'],'full_paths')
             self.assertEqual(companion['provenance']['companion_test'],base['id'])
+            self.assertEqual(companion['source'],base['source'])
+            self.assertEqual(companion['expected_state'],base['expected_state'])
+            self.assertEqual(companion['timeout_seconds'],base['timeout_seconds'])
 
     def test_array_lookup_tests_have_three_presentations_without_replacing_old_variants(self):
         for name in [
@@ -37,6 +40,7 @@ class ThreeFormatMatrixTests(unittest.TestCase):
         ]:
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
             self.assertEqual(len(test['variants']),3,name)
+            self.assertEqual(len({str(v['expected_answers']) for v in test['variants']}),1)
 
     def test_core_workflows_have_two_json_presentations_plus_full_path_companion(self):
         cases={
@@ -56,6 +60,8 @@ class ThreeFormatMatrixTests(unittest.TestCase):
                 self.assertEqual(len(other),1,(name,logical,other))
                 self.assertIn(logical+'__full_paths',{v['id'] for v in companion['variants']})
             self.assertEqual(companion['provenance']['presentation'],'full_paths')
+            self.assertEqual(companion['source'],base['source'])
+            self.assertEqual(companion['expected_state'],base['expected_state'])
 
     def test_prompt_calibration_has_three_formats_for_every_existing_prompt_variant(self):
         for name in [
@@ -75,6 +81,10 @@ class ThreeFormatMatrixTests(unittest.TestCase):
             legacy=read_json(ROOT/'test_specs'/(stem+'_v1_full_paths.json'));validate_test(legacy)
             full_ids={v['id'] for v in modern['variants']+legacy['variants']}
             self.assertEqual(full_ids,{x+'__full_paths' for x in original_ids})
+            for companion in (modern,legacy):
+                self.assertEqual(companion['source'],base['source'])
+                self.assertEqual(companion['expected_state'],base['expected_state'])
+                self.assertEqual(companion['repetitions'],base['repetitions'])
 
     def test_dialogue_only_tests_are_not_triplicated(self):
         for path in (ROOT/'test_specs').glob('dialogue_test*.json'):
