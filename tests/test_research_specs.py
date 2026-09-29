@@ -80,7 +80,8 @@ class ResearchSpecTests(unittest.TestCase):
         for name,(companion,expected) in cases.items():
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
             original=read_json(ROOT/'test_specs'/companion)
-            self.assertEqual(test['source'],original['source'])
+            self.assertEqual(test['provenance']['companion_test'],original['id'])
+            self.assertEqual(test['source'],{'initial_state':{},'new_information':''})
             self.assertEqual(test['timeout_seconds'],120)
             self.assertEqual(test['repetitions'],original.get('repetitions',1))
             self.assertEqual([v['id'] for v in test['variants']],['raw_array_index','indexed_object_index'])
