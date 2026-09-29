@@ -1,7 +1,7 @@
 """One pending-work planner, shared by preparation, live preflight and execution."""
 from __future__ import annotations
 import copy
-from .domain import case_id, eligibility, experiment_spec, safe_id, TIERS
+from .domain import case_id, code_fingerprint, eligibility, experiment_spec, safe_id, TIERS
 from .execution_policy import fallback_id
 
 
@@ -105,26 +105,33 @@ def _model_history(store, model_id):
     return records
 
 
-def _historical_timeout_result(records, model, test, variant, repetition, target):
+def _historical_timeout_result(records, model, test, variant, repetition, target, workflow_code):
     """Reuse old results only when the sole experiment change is timeout_seconds.
 
-    Recomputing the old case ID with the current workflow fingerprint prevents this
-    compatibility path from hiding real code/model/target changes.
+    Historical case IDs cannot be regenerated safely after timeout changes because
+    the ID itself includes the timeout. Compare the persisted identity inputs
+    directly instead: workflow fingerprint, model artifact, target, and the
+    timeout-neutral test/variant definition.
     """
     wanted=_timeout_neutral_spec(test,variant)
+    artifact_pin=model.get('artifact_identity') or model.get('sha256',{})
     matches=[]
     for record in records:
         if (record.get('model_id')!=model['id'] or record.get('test_id')!=test['id']
                 or record.get('variant_id')!=variant['id'] or record.get('repetition')!=repetition
-                or record.get('target')!=target):
+                or record.get('target')!=target or record.get('execution_class','full_gpu')!='full_gpu'):
+            continue
+        provenance=record.get('provenance')
+        if not isinstance(provenance,dict) or provenance.get('workflow_code')!=workflow_code:
+            continue
+        record_artifact=record.get('artifact_identity') or record.get('artifact_hashes',{})
+        if record_artifact!=artifact_pin:
             continue
         old_test=record.get('test_definition');old_variant=record.get('variant_definition')
         if not isinstance(old_test,dict) or not isinstance(old_variant,dict):
             continue
         try:
             if _timeout_neutral_spec(old_test,old_variant)!=wanted:
-                continue
-            if case_id(model,old_test,old_variant,repetition,target)!=record.get('case_id'):
                 continue
         except (KeyError,TypeError,ValueError):
             continue
@@ -156,7 +163,7 @@ def pending_plan(models, tests, target, store, selection=None):
     """No model discovery here: completed work must not require installed weights."""
     validate_catalog(models)
     selection=validate_selection(selection,models,tests)
-    groups=[];complete=0;excluded=[];unassigned=[];history={}
+    groups=[];complete=0;excluded=[];unassigned=[];history={};workflow_code=code_fingerprint()
     for model in models:
         if selection and 'model_id' in selection and model['id']!=selection['model_id']:continue
         if model.get('enabled', True) is False:
@@ -183,7 +190,7 @@ def pending_plan(models, tests, target, store, selection=None):
                     else:
                         if model['id'] not in history:
                             history[model['id']]=_model_history(store,model['id'])
-                        prior=_historical_timeout_result(history[model['id']],model,test,variant,repetition,target)
+                        prior=_historical_timeout_result(history[model['id']],model,test,variant,repetition,target,workflow_code)
                         if prior and prior['done']:
                             done+=1;complete+=1
                         else:
