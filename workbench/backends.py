@@ -112,26 +112,14 @@ class DemoBackend:
             return {'text':'SIMULATED DIALOGUE RESPONSE','finish_reason':'stop','request_seconds':.02,'first_token_seconds':.01,
                     'usage':{},'timings':{},'cached_tokens':1024 if cache=='on' and self.counter>1 else 0,
                     'simulated':True,'raw_chunks':[]}
-        flat_text=''
         if '\nSOURCE\n' in prompt:
-            source_text=prompt.split('\nSOURCE\n',1)[1]
-            try:
-                source=parse(source_text)
-                event=source.get('new_information','')
-            except Exception:
-                flat_text=source_text
-                match=re.search(r'(?m)^new_information:\s*(.*)$',source_text)
-                event=match.group(1) if match else ''
-                source={'initial_state':{},'new_information':event}
+            source=parse(prompt.split('\nSOURCE\n',1)[1])
+            event=source.get('new_information','')
         else:
             actual=prompt.rsplit('Current State:\n',1)[1]
             state_text,event_text=actual.split('\n\nNew Information:\n',1)
             event=event_text.split('\n\n',1)[0]
-            try:presented=parse(state_text)
-            except Exception:
-                presented={}
-                flat_text=state_text
-            source={'initial_state':presented,'new_information':event}
+            source={'initial_state':parse(state_text),'new_information':event}
         instruction=messages[-1]['content']
         if len(messages)==2 and 'Current State:\n' in instruction:
             instruction=instruction.rsplit('\n\n',1)[-1]
@@ -145,10 +133,6 @@ class DemoBackend:
         def ticket_key(ticket_id):
             for key,item in ticket_entries:
                 if isinstance(item,dict) and item.get('ticket_id')==ticket_id:return str(key)
-            if flat_text:
-                escaped=re.escape(ticket_id)
-                match=re.search(r'(?m)^(?:initial_state\.)?tickets\.(\d+)\.ticket_id:\s*'+escaped+r'\s*$',flat_text)
-                if match:return match.group(1)
             return None
         ticket_ids=re.findall(r'SR-[0-9]+',event)
         is_coat_remove='takes off his coat and hangs it on the hook' in lower_event

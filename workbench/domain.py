@@ -183,7 +183,7 @@ def validate_test(test: dict) -> None:
         raise ValueError('timeout_seconds must be a positive integer')
     if not isinstance(test.get('source'), dict) or not isinstance(test.get('variants'), list) or not test['variants']:
         raise ValueError('Test needs source and nonempty variants')
-    if test.get('state_presentation','indexed_arrays') not in ('raw_json','indexed_arrays','full_paths'):
+    if test.get('state_presentation','indexed_arrays') not in ('raw_json','indexed_arrays'):
         raise ValueError('Unknown state presentation')
     if 'expected' in test['source'] or 'expected_state' in test['source']:
         raise ValueError('Ground truth must not be placed in source')
@@ -260,7 +260,7 @@ def validate_test(test: dict) -> None:
             raise ValueError('Unknown prompt style')
         if 'new_information_override' in variant and not isinstance(variant['new_information_override'],str):
             raise ValueError('new_information_override must be text')
-        if variant.get('state_presentation',test.get('state_presentation','indexed_arrays')) not in ('raw_json','indexed_arrays','full_paths'):
+        if variant.get('state_presentation',test.get('state_presentation','indexed_arrays')) not in ('raw_json','indexed_arrays'):
             raise ValueError('Unknown state presentation')
         known = set()
         steps(variant['steps'], known)
