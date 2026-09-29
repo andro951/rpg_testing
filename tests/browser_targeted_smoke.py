@@ -66,28 +66,28 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 expect(page.locator('#individual-run')).to_be_disabled()
                 page.locator('#individual-model').select_option('beta')
                 page.locator('#individual-test').select_option('time_only')
-                page.locator('#individual-variant').select_option('direct_json_patch')
+                page.locator('#individual-variant').select_option('direct_json_patch__raw_json')
                 expect(page.locator('#individual-summary')).to_contain_text('1 configured case(s)')
                 expect(page.locator('#individual-summary')).to_contain_text('60 s limit each')
                 page.wait_for_timeout(1500)
                 expect(page.locator('#individual-model')).to_have_value('beta')
-                expect(page.locator('#individual-variant')).to_have_value('direct_json_patch')
+                expect(page.locator('#individual-variant')).to_have_value('direct_json_patch__raw_json')
                 screenshot = os.environ.get('WORKBENCH_INDIVIDUAL_SCREENSHOT')
                 if screenshot: page.screenshot(path=screenshot, full_page=True)
                 page.locator('#individual-check').click()
                 expect(page.locator('#page-overview')).to_be_visible()
                 expect(page.locator('#readiness')).to_have_text('Ready')
                 expect(page.locator('#pending')).to_have_text('1')
-                expect(page.locator('#run-scope')).to_contain_text('beta · time_only · direct_json_patch')
+                expect(page.locator('#run-scope')).to_contain_text('beta · time_only · direct_json_patch__raw_json')
                 assert app.store.all() == [], 'Targeted preflight must not perform inference'
                 page.get_by_role('button', name='Run Individual Test', exact=True).click()
                 expect(page.locator('#individual-model')).to_have_value('beta')
-                expect(page.locator('#individual-variant')).to_have_value('direct_json_patch')
+                expect(page.locator('#individual-variant')).to_have_value('direct_json_patch__raw_json')
                 page.locator('#individual-run').click()
                 expect(page.locator('#state-badge')).to_have_text('FINISHED', timeout=15000)
                 records = app.store.all()
                 assert len(records) == 1 and records[0]['model_id'] == 'beta' and records[0]['test_id'] == 'time_only'
-                assert records[0]['variant_id'] == 'direct_json_patch'
+                assert records[0]['variant_id'] == 'direct_json_patch__raw_json'
                 page.get_by_role('button', name='Run Individual Test', exact=True).click()
                 page.locator('#individual-run').click()
                 expect(page.locator('#state-badge')).to_have_text('FINISHED', timeout=15000)
@@ -96,15 +96,15 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 page.get_by_role('button', name='Run Individual Test', exact=True).click()
                 page.locator('#individual-model').select_option('__all__')
                 page.locator('#individual-test').select_option('clothing_append')
-                page.locator('#individual-variant').select_option('direct_json_patch')
+                page.locator('#individual-variant').select_option('direct_json_patch__raw_json')
                 expect(page.locator('#individual-summary')).to_contain_text('2 configured case(s) on all 2 model(s)')
                 page.locator('#individual-run').click()
                 expect(page.locator('#session-complete')).to_have_text('2',timeout=15000)
                 expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)
                 clothing=[r for r in app.store.all() if r['test_id']=='clothing_append']
                 assert len(clothing)==2 and {r['model_id'] for r in clothing}=={'alpha','beta'}
-                assert all(r['provenance']['selection']=={'all_models':True,'test_id':'clothing_append','variant_id':'direct_json_patch'} for r in clothing)
-                expect(page.locator('#run-scope')).to_contain_text('all eligible models · clothing_append · direct_json_patch')
+                assert all(r['provenance']['selection']=={'all_models':True,'test_id':'clothing_append','variant_id':'direct_json_patch__raw_json'} for r in clothing)
+                expect(page.locator('#run-scope')).to_contain_text('all eligible models · clothing_append · direct_json_patch__raw_json')
                 page.get_by_role('button', name='Test One Model', exact=True).click()
                 expect(page.locator('#page-one-model')).to_be_visible()
                 expect(page.locator('#one-model-model option')).to_have_count(3)
@@ -153,7 +153,7 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 expect(page.locator('#one-model-tests input[data-test-id="time_only"]')).to_be_checked()
                 assert page.locator('#one-model-tests input[type="checkbox"]:checked').count()==1
                 page.get_by_role('button', name='Run Individual Test', exact=True).click()
-                expect(page.locator('#individual-variant')).to_have_value('direct_json_patch')
+                expect(page.locator('#individual-variant')).to_have_value('direct_json_patch__raw_json')
                 for width in (800, 390):
                     page.set_viewport_size({'width': width, 'height': 900})
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'Page overflow'
