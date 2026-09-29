@@ -21,7 +21,7 @@ class StatePresentationTests(unittest.TestCase):
         shown=full_paths_text(value)
         self.assertEqual(shown,
             'queue_name: Desk\n\n'
-            'tickets.0.id: A\n\n'
+            'tickets.0.id: A\n'
             'tickets.0.tags: []\n\n'
             'tickets.1.id: B\n\n'
             'meta: {}')
