@@ -128,6 +128,19 @@ class ResearchSpecTests(unittest.TestCase):
         self.assertIn('"ticket_id": "SR-60432"',prompt)
         self.assertEqual(variant['expected_answers'],{'index':'73'})
 
+    def test_flattened_replace_paths_prompt_format(self):
+        test=read_json(ROOT/'test_specs/array_index_replace_flat_paths_018.json');validate_test(test)
+        self.assertEqual(test.get('instructions'),'')
+        self.assertEqual(len(test['variants']),1)
+        prompt=test['variants'][0]['steps'][0]['prompt']
+        self.assertFalse('"' in prompt)
+        self.assertTrue(prompt.startswith('queue_name: North Region Service Desk\n\nqueue_date: 2026-09-21\n\n'))
+        self.assertIn('tickets.0.ticket_id: SR-22345\n',prompt)
+        self.assertIn('tickets.73.ticket_id: SR-60432\n',prompt)
+        self.assertIn('tickets.73.customer_contact: user73@example.test\n\ntickets.74.ticket_id:',prompt)
+        self.assertTrue(prompt.endswith('What is the index of this ticket: SR-60432?'))
+        self.assertEqual(test['variants'][0]['expected_answers'],{'index':'73'})
+
     def test_prompt_calibration_suite_is_balanced(self):
         names=['prompt_calibration_001_time.json','prompt_calibration_002_boolean.json',
                'prompt_calibration_003_nested.json','prompt_calibration_004_array.json']
