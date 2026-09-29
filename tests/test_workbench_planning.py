@@ -1,3 +1,4 @@
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,33 @@ class PlanningTests(unittest.TestCase):
         self.store.save({'status':'completed','model_id':'demo-2b','case_id':j['case_id'],'score':{'exact_match':False}})
         self.assertEqual(self.plan()['pending'],0)
         self.assertEqual(self.plan()['model_loads'],0)
+    def save_fixture_result(self,test,timed_out=False):
+        plan=self.plan(t=[test]);job=plan['groups'][0]['jobs'][0]
+        self.store.save({
+            'status':'completed','model_id':'demo-2b','case_id':job['case_id'],
+            'test_id':test['id'],'variant_id':test['variants'][0]['id'],'repetition':0,
+            'target':copy.deepcopy(self.target),'test_definition':copy.deepcopy(test),
+            'variant_definition':copy.deepcopy(test['variants'][0]),
+            'timeout_seconds':test['timeout_seconds'],'timed_out':timed_out,
+            'reason':'case_timeout' if timed_out else None,
+        })
+        return job['case_id']
+    def test_timeout_bump_keeps_non_timeout_completion(self):
+        old=fixture();old_cid=self.save_fixture_result(old)
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        new_cid=self.plan(t=[bumped])['groups'][0]['jobs'][0]['case_id'] if self.plan(t=[bumped])['pending'] else None
+        self.assertNotEqual(old_cid,new_cid)
+        self.assertEqual(self.plan(t=[bumped])['pending'],0)
+    def test_timeout_bump_reruns_timed_out_completion(self):
+        old=fixture();old_cid=self.save_fixture_result(old,True)
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        plan=self.plan(t=[bumped])
+        self.assertEqual(plan['pending'],1)
+        self.assertNotEqual(old_cid,plan['groups'][0]['jobs'][0]['case_id'])
+    def test_timeout_bump_does_not_hide_semantic_change(self):
+        old=fixture();self.save_fixture_result(old)
+        changed=copy.deepcopy(old);changed['timeout_seconds']=120;changed['source']['new_information']='Ten minutes pass.'
+        self.assertEqual(self.plan(t=[changed])['pending'],1)
     def test_delete_is_rerun(self):
         j=self.plan()['groups'][0]['jobs'][0]
         path=self.store.save({'status':'completed','model_id':'demo-2b','case_id':j['case_id']})
