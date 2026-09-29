@@ -120,7 +120,7 @@ class DemoBackend:
                 event=source.get('new_information','')
             except Exception:
                 flat_text=source_text
-                match=re.search(r'(?m)^new_information:\\s*(.*)$',source_text)
+                match=re.search(r'(?m)^new_information:\s*(.*)$',source_text)
                 event=match.group(1) if match else ''
                 source={'initial_state':{},'new_information':event}
         else:
@@ -147,7 +147,7 @@ class DemoBackend:
                 if isinstance(item,dict) and item.get('ticket_id')==ticket_id:return str(key)
             if flat_text:
                 escaped=re.escape(ticket_id)
-                match=re.search(r'(?m)^(?:initial_state\\.)?tickets\\.(\\d+)\\.ticket_id:\\s*'+escaped+r'\\s*$',flat_text)
+                match=re.search(r'(?m)^(?:initial_state\.)?tickets\.(\d+)\.ticket_id:\s*'+escaped+r'\s*$',flat_text)
                 if match:return match.group(1)
             return None
         ticket_ids=re.findall(r'SR-[0-9]+',event)
