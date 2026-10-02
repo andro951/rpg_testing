@@ -46,10 +46,10 @@ def has_objective_oracle(test, variant):
     return 'expected_state' in test
 
 
-def build_matrix(records, specs, fingerprint, comparison_specs=()):
+def build_matrix(records, specs, fingerprint):
     definitions = {(t['id'], v['id']): experiment_spec(t, v) for t in specs for v in t.get('variants', [])}
     names = {(t['id'], v['id']): (t.get('name') or t['id'], v.get('name') or v['id']) for t in specs for v in t.get('variants', [])}
-    active_specs = list(specs) + list(comparison_specs)
+    active_specs = list(specs)
     active_definitions = {}
     definition_names = {}
     for test in active_specs:
@@ -109,7 +109,7 @@ def build_matrix(records, specs, fingerprint, comparison_specs=()):
         row = row_for(definition, workflow, record.get('repetition', 0), test_id, variant_id)
         summaries[cid] = {'case_id': cid, 'model': model, 'outcome': outcome(record), 'current': row['current'],
             'metadata': {key: record[key] for key in ('model_id', 'test_id', 'variant_id', 'repetition', 'status',
-                'score', 'timed_out', 'measurement_valid', 'error', 'reason', 'pipeline_seconds', 'execution_class',
+                'score', 'timed_out', 'timeout_seconds', 'watchdog_seconds', 'measurement_valid', 'error', 'reason', 'pipeline_seconds', 'execution_class',
                 'target', 'provenance', 'capability_policy', 'feature_applicability') if key in record},
             'output_preview': json.dumps(record.get('outputs', {}), ensure_ascii=False)[:4000],
             'oracle_preview': json.dumps({k: record.get('variant_definition', {}).get(k) for k in
@@ -146,4 +146,4 @@ def build_matrix(records, specs, fingerprint, comparison_specs=()):
     empty = {'ids': [], 'primary_ids': [], 'reference_ids': []}
     model_totals = {m['id']: totals([r['cells'].get(m['id'], empty) for r in ordered_rows], summaries) for m in ordered_models}
     return {'models': ordered_models, 'rows': ordered_rows, 'records': summaries, 'totals': model_totals, 'excluded_records': excluded,
-            'note': 'Only tests with a fixed answer or final-state oracle appear here. Named comparison definitions include the retained 60-second deadline and original flattened-format tests; saved prompts, deadlines and program versions are unchanged. Dialogue and other open-ended generation are reserved for a separate view; their saved evidence is preserved. Totals count unique saved observations. Reference cells do not add trials. All-results totals are descriptive across saved configurations; use Current definitions to exclude historical experiments. Colors use original exact-match scores. Not-recorded cells are not failures or necessarily pending work. Skipped, invalid and infrastructure failures remain separate from semantic failures.'}
+            'note': 'Only tests with a fixed answer or final-state oracle appear here. Timeout is a run limit, not part of test identity or row grouping. Actual deadlines remain in saved run evidence. Dialogue and other open-ended generation are reserved for a separate view; their saved evidence is preserved. Totals count unique saved observations. Reference cells do not add trials. All-results totals are descriptive across saved configurations; use Current definitions to exclude historical experiments. Colors use original exact-match scores. Not-recorded cells are not failures or necessarily pending work. Skipped, invalid and infrastructure failures remain separate from semantic failures.'}

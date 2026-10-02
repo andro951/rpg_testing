@@ -120,7 +120,7 @@ def classify(record, kind):
     return 'invalid_output' if score.get('valid') is False else 'incorrect_update'
 
 
-def build_report(records, specs, fingerprint=None, problems=None, comparison_specs=()):
+def build_report(records, specs, fingerprint=None, problems=None):
     fingerprint = fingerprint or code_fingerprint()
     definitions = {(test['id'], variant['id']): experiment_spec(test, variant)
                    for test in specs for variant in test.get('variants', [])}
@@ -193,7 +193,7 @@ def build_report(records, specs, fingerprint=None, problems=None, comparison_spe
                          'statuses': {s: sum(r.get('status') == s for r in remote) for s in ('completed','error','aborted')},
                          'timeouts': sum(bool(r.get('timed_out')) for r in remote)}
     return {'version': VERSION, 'fingerprint': fingerprint, 'models': models,
-            'matrix': build_matrix(list(seen.values()), specs, fingerprint, comparison_specs),
+            'matrix': build_matrix(list(seen.values()), specs, fingerprint),
             'remote_statistics': remote_statistics,
             'cohorts': sorted(cohorts.values(), key=lambda item: (-len(item['rows']), item['id'])),
             'historical': history, 'evidence': evidence, 'problems': problems or [],
@@ -224,20 +224,18 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=Path('results'), help='results directory or evidence ZIP')
     parser.add_argument('--specs', type=Path, default=Path('test_specs'))
-    parser.add_argument('--comparison-specs', type=Path, default=Path(__file__).with_name('comparison_specs'), help='named additional report comparisons; does not schedule inference')
     parser.add_argument('--output', type=Path, default=Path('.local/reports/statistics.html'))
     args = parser.parse_args(argv)
     records, problems = load_evidence(args.source)
     specs = [read_json(path) for path in sorted(args.specs.glob('*.json'))]
-    comparison_specs = [read_json(path) for path in sorted(args.comparison_specs.glob('*.json'))]
-    report = build_report(records, specs, problems=problems, comparison_specs=comparison_specs)
+    report = build_report(records, specs, problems=problems)
     if args.source.is_dir():
         for cid, summary in report['matrix']['records'].items():
             summary['source_uri'] = (args.source / summary['metadata']['model_id'] / (cid + '.json')).resolve().as_uri()
     else:
         for cid, summary in report['matrix']['records'].items():
             summary['source_archive'] = str(args.source.resolve()) + ' / ' + summary['metadata']['model_id'] + '/' + cid + '.json'
-    path = write_report(report, args.output, (args.source, args.specs, args.comparison_specs))
+    path = write_report(report, args.output, (args.source, args.specs))
     print(f'{path}: {len(report["matrix"]["records"])} total records, {len(report["evidence"])} long-array records, {len(report["cohorts"])} current cohorts, {len(problems)} unreadable files')
     return report
 

@@ -114,28 +114,28 @@ class ResultsMatrixTests(unittest.TestCase):
         self.assertEqual({m['label'] for m in matrix['models']}, {first['model_name'], second['model_name']})
         self.assertEqual(sum(t['observations'] for t in matrix['totals'].values()), 2)
 
-    def test_named_comparison_keeps_actual_settings_and_separate_totals(self):
+    def test_timeout_is_not_identity_row_group_or_reference(self):
+        from workbench.domain import case_id
         records, specs = fixture()
-        test = copy.deepcopy(specs[0]); test['timeout_seconds'] = 60
-        specs[0]['timeout_seconds'] = 120
-        test['name'] = 'Named 60-second deadline'
-        variant = test['variants'][0]
-        retained = []
-        for model in range(4):
-            record = copy.deepcopy(records[0])
-            record.update(case_id=digest(['named-comparison', model]), model_id=f'm{model}',
-                          test_definition=test, variant_definition=variant)
-            retained.append(record)
-        before = copy.deepcopy(retained)
-        ordinary = build_report(retained, specs)['matrix']
-        self.assertEqual(sum(not r['current'] for r in ordinary['rows']), 1)
-        matrix = build_report(retained, specs, comparison_specs=[test])['matrix']
-        self.assertFalse(any(not r['current'] for r in matrix['rows']))
-        rows = [r for r in matrix['rows'] if r['test_id'] == test['id'] and r['variant_id'] == variant['id']]
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(len({r['comparison_id'] for r in rows}), 2)
-        self.assertEqual([r['name'] for r in rows if r['cells']], ['Named 60-second deadline'])
-        self.assertEqual(sum(t['observations'] for t in matrix['totals'].values()), 4)
-        old = copy.deepcopy(retained[0]); old['provenance']['workflow_code'] = 'older-runner'
-        self.assertTrue(any(not r['current'] for r in build_report([old], specs, comparison_specs=[test])['matrix']['rows']))
-        self.assertEqual(before, retained)
+        record = records[0]
+        test = record['test_definition']; test['timeout_seconds'] = 60
+        current = copy.deepcopy(test); current['timeout_seconds'] = 120
+        model = {'id':record['model_id'], 'sha256':{}}
+        original = copy.deepcopy(record)
+        for seconds in (1, 60, 120, 600):
+            changed = copy.deepcopy(test); changed['timeout_seconds'] = seconds
+            self.assertEqual(case_id(model,test,record['variant_definition'],0,{}),
+                             case_id(model,changed,record['variant_definition'],0,{}))
+            self.assertEqual(experiment_spec(test,record['variant_definition']),
+                             experiment_spec(changed,record['variant_definition']))
+        for timed_out in (False, True):
+            record['timed_out'] = timed_out
+            matrix = build_report([record], [current])['matrix']
+            rows = [r for r in matrix['rows'] if r['variant_id'] == record['variant_id']]
+            self.assertEqual(len(rows), 1)
+            self.assertTrue(rows[0]['current'])
+            cell = next(iter(rows[0]['cells'].values()))
+            self.assertEqual(cell['primary_ids'], [record['case_id']])
+            self.assertEqual(cell['reference_ids'], [])
+        record.pop('timed_out')
+        self.assertEqual(original, record)

@@ -58,7 +58,7 @@ def identity(settings):
 def effective(test, variant):
     t, v = copy.deepcopy(test), copy.deepcopy(variant)
     t.pop('variants', None)
-    for key in ('id', 'name', 'description', 'enabled', 'repetitions', 'provenance'):
+    for key in ('id', 'name', 'description', 'enabled', 'repetitions', 'provenance', 'timeout_seconds'):
         t.pop(key, None)
         v.pop(key, None)
     v['cache'] = 'default'
@@ -87,12 +87,14 @@ def plan(tests, settings, target, store, selection):
             definition = effective(test, variant)
             #Client GPU/OS are provenance, not applied remote model conditions.
             cid = digest({'provider': provider, 'effective': definition})
-            group = groups.setdefault(cid, {'case_id': cid, 'test': test, 'variant': variant,
+            group = groups.setdefault(cid, {'case_id': cid, 'test': copy.deepcopy(test), 'variant': variant,
                                            'effective': definition, 'aliases': []})
+            group['test']['timeout_seconds'] = max(group['test']['timeout_seconds'], test['timeout_seconds'])
             for rep in range(test.get('repetitions', 1)):
                 group['aliases'].append({'test_id': test['id'], 'variant_id': variant['id'], 'repetition': rep,
                     'requested_id': digest({'provider': provider, 'definition': experiment_spec(test, variant), 'repetition': rep}),
                     'requested_definition': experiment_spec(test, variant),
+                    'requested_timeout_seconds': test['timeout_seconds'],
                     'observation_id': cid, 'collapsed_dimensions': list(UNAVAILABLE)})
     jobs, complete, requested = [], 0, 0
     for group in groups.values():

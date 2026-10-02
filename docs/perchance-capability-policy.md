@@ -27,7 +27,7 @@ Persist the collapse decision before execution so resume uses the same represent
 
 ## What stays distinct
 
-Preserve actual differences in source state/new information, prompt wording, representation (raw JSON/indexed objects/full paths), source length, supported applied controls, output instructions, conversation history, step ordering, branching, verification/repair/narration logic, scoring/oracle requirements, provider identity, and deadlines. Instructions referring to a control can alter the prompt even when the corresponding API knob is unavailable; those are prompt experiments, not verified knob experiments.
+Preserve actual differences in source state/new information, prompt wording, representation (raw JSON/indexed objects/full paths), source length, supported applied controls, output instructions, conversation history, step ordering, branching, verification/repair/narration logic, scoring/oracle requirements, and provider identity. Record client deadlines as execution metadata, not separate conditions. Instructions referring to a control can alter the prompt even when the corresponding API knob is unavailable; those are prompt experiments, not verified knob experiments.
 
 One baseline means one workflow execution, not necessarily one model call. A meaningful multi-step workflow can require several calls, branches, or loop iterations. Unsupported-control deduplication must not remove those steps or turn a repair/narration workflow into a different task.
 
@@ -58,7 +58,7 @@ The existing EmberAdventures worker sends instruction, startWith, hideStartWith,
 ## Required implementation tests
 
 - Unsupported temperature/cache/seed/repetition sweeps produce one actual baseline; the collapse mapping records all requested cases.
-- Supported applied controls, different prompts/states/representations, distinct output instructions/scoring requirements, workflow structures, and deadlines remain correctly distinguished.
+- Supported applied controls, different prompts/states/representations, distinct output instructions/scoring requirements, and workflow structures remain correctly distinguished; deadline changes do not split observations.
 - Multi-step workflows keep their required calls even when unsupported dimensions collapse whole-case variants.
 - Resume does not repeat terminal representative observations or turn collapsed aliases into fresh work. Wrong answers and timeouts do not trigger rerolls.
 - Unknown controls/defaults are recorded as unverified/unknown. Merely accepted or forwarded fields do not become verified capabilities.
@@ -67,3 +67,6 @@ The existing EmberAdventures worker sends instruction, startWith, hideStartWith,
 - Old local-model case IDs, raw results, scoring behavior and valid supported repetitions remain unchanged; the Perchance 8 GB rule rejects larger tiers.
 
 These acceptance requirements are covered in the integration preparation and review document. The user subsequently authorized implementation and testing. Real benchmark evidence must remain separate from simulated transport tests.
+
+
+Timeout is an execution watchdog, not an experimental control or identity dimension. Changing it changes only the allowed duration of pending executions, never the observation ID or terminal completion state. If otherwise equivalent requests have different deadlines, their single representative uses the largest requested deadline, and each requested deadline remains recorded in alias metadata.

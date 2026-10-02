@@ -93,8 +93,8 @@ def code_fingerprint():
 
 
 def experiment_spec(test: dict, variant: dict) -> dict:
-    """Only this variant and shared experimental fields, not neighboring variants/UI labels."""
-    presentation = {'variants', 'repetitions', 'enabled', 'name', 'description'}
+    """Experimental identity; watchdog duration and presentation metadata are run settings."""
+    presentation = {'variants', 'repetitions', 'enabled', 'name', 'description', 'timeout_seconds'}
     return {'test': {k: v for k, v in test.items() if k not in presentation},
             'variant': {k: v for k, v in variant.items() if k not in {'enabled', 'name', 'description'}}}
 

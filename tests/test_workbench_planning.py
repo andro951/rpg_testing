@@ -42,12 +42,13 @@ class PlanningTests(unittest.TestCase):
         new_cid=self.plan(t=[bumped])['groups'][0]['jobs'][0]['case_id'] if self.plan(t=[bumped])['pending'] else None
         self.assertNotEqual(old_cid,new_cid)
         self.assertEqual(self.plan(t=[bumped])['pending'],0)
-    def test_timeout_bump_reruns_timed_out_completion(self):
+    def test_timeout_bump_keeps_timed_out_completion(self):
         old=fixture();old_cid=self.save_fixture_result(old,True)
         bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
         plan=self.plan(t=[bumped])
-        self.assertEqual(plan['pending'],1)
-        self.assertNotEqual(old_cid,plan['groups'][0]['jobs'][0]['case_id'])
+        self.assertEqual(plan['pending'],0)
+        from workbench.domain import case_id
+        self.assertEqual(old_cid,case_id(model(),bumped,bumped['variants'][0],0,self.target))
     def test_timeout_bump_does_not_hide_semantic_change(self):
         old=fixture();self.save_fixture_result(old)
         changed=copy.deepcopy(old);changed['timeout_seconds']=120;changed['source']['new_information']='Ten minutes pass.'
@@ -75,13 +76,13 @@ class PlanningTests(unittest.TestCase):
         self.target['backend_version']='version: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
         bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
         self.assertEqual(self.plan(t=[bumped])['pending'],0)
-    def test_timed_out_history_reruns_after_backend_log_timestamp_change(self):
+    def test_timed_out_history_stays_complete_after_backend_log_timestamp_change(self):
         old=fixture()
         self.target['backend_version']='0.00.004.323 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
         self.save_fixture_result(old,True)
         self.target['backend_version']='version: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
         bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
-        self.assertEqual(self.plan(t=[bumped])['pending'],1)
+        self.assertEqual(self.plan(t=[bumped])['pending'],0)
     def test_delete_is_rerun(self):
         j=self.plan()['groups'][0]['jobs'][0]
         path=self.store.save({'status':'completed','model_id':'demo-2b','case_id':j['case_id']})
@@ -121,4 +122,13 @@ class PlanningTests(unittest.TestCase):
             m=model();m[key]=value
             with self.assertRaises(ValueError):validate_catalog([m])
         with self.assertRaises(ValueError):validate_catalog([model(),model()])
+
+    def test_pending_timeout_update_only_changes_watchdog(self):
+        old=fixture(); before=self.plan(t=[old])
+        changed=copy.deepcopy(old); changed['timeout_seconds']=120
+        after=self.plan(t=[changed])
+        self.assertEqual(before['groups'][0]['jobs'][0]['case_id'], after['groups'][0]['jobs'][0]['case_id'])
+        self.assertEqual((before['pending'], after['pending']), (1,1))
+        self.assertEqual(after['groups'][0]['jobs'][0]['test']['timeout_seconds'],120)
+
 if __name__=='__main__':unittest.main()

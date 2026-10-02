@@ -92,14 +92,13 @@ class PerchanceTests(unittest.TestCase):
         self.assertEqual(subset['groups'][0]['variant']['id'], 'a')
         self.assertEqual(len(full['groups'][0]['aliases']), 6)
 
-    def test_distinct_prompts_states_outputs_oracles_timeouts_and_workflows(self):
-        for field in ('prompt', 'state', 'schema', 'oracle', 'timeout', 'workflow', 'representation'):
+    def test_distinct_prompts_states_outputs_oracles_and_workflows(self):
+        for field in ('prompt', 'state', 'schema', 'oracle', 'workflow', 'representation'):
             other = copy.deepcopy(self.test); other['id'] = 'other'
             if field == 'prompt':other['variants'][0]['steps'][0]['prompt'] += ' Different.'
             elif field == 'state':other['source']['initial_state'] = {'n': 1}
             elif field == 'schema':other['variants'][0]['steps'][0]['output'] = {'type': 'boolean'}
             elif field == 'oracle':other['variants'][0]['expected_answers']['answer'] = 'OTHER'
-            elif field == 'timeout':other['timeout_seconds'] = 20
             elif field == 'representation':other['variants'][0]['state_presentation'] = 'raw_json'
             else:
                 other['variants'][0]['steps'].append({'id':'second','type':'generate','prompt':'Another step','output':{'type':'text'},'uses':['answer']})
@@ -145,15 +144,29 @@ class PerchanceTests(unittest.TestCase):
         self.assertEqual(summary['perchance']['independent_observations'], 1)
         self.assertEqual(summary['perchance']['mapped_requested_cases'], 3)
 
-    def test_wrong_answers_and_timeouts_are_terminal_and_partials_preserved(self):
+    def test_timeout_changes_watchdog_only_and_terminals_do_not_rerun(self):
+        before = self.make_plan()
+        changed = copy.deepcopy(self.test); changed['timeout_seconds'] = 120
+        after = self.make_plan([changed])
+        self.assertEqual(before['groups'][0]['case_id'], after['groups'][0]['case_id'])
+        self.assertEqual(before['groups'][0]['aliases'][0]['requested_id'], after['groups'][0]['aliases'][0]['requested_id'])
+        self.assertEqual(after['groups'][0]['test']['timeout_seconds'],120)
+        self.assertEqual(after['groups'][0]['aliases'][0]['requested_timeout_seconds'],120)
+        duplicate = copy.deepcopy(changed); duplicate['id'] = 'other'
+        combined = self.make_plan([self.test, duplicate])
+        self.assertEqual(combined['independent_observations'],1)
+        self.assertEqual(combined['groups'][0]['test']['timeout_seconds'],120)
+        self.assertEqual(self.test['timeout_seconds'],10)
         for failure in (None, provider.PerchanceTimeout):
-            other = copy.deepcopy(self.test); other['timeout_seconds'] += int(failure is not None)
-            FakeBackend.response = 'WRONG'; FakeBackend.failure = failure
-            pending = self.make_plan([other]); provider.run(self.app, {}, pending, FakeBackend)
-            record = self.app.store.read(self.app.store.path(provider.MODEL_ID, pending['groups'][0]['case_id']))
-            self.assertFalse(record['score']['exact_match'])
-            self.assertEqual(self.make_plan([other])['pending'], 0)
-            if failure:self.assertEqual(record['calls'][0]['text'], 'PARTIAL')
+            with self.subTest(failure=failure):
+                tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+                self.app.store = ResultStore(Path(tmp.name))
+                FakeBackend.response = 'WRONG'; FakeBackend.failure = failure
+                pending = self.make_plan(); provider.run(self.app, {}, pending, FakeBackend)
+                record = self.app.store.read(self.app.store.path(provider.MODEL_ID,pending['groups'][0]['case_id']))
+                self.assertFalse(record['score']['exact_match'])
+                self.assertEqual(self.make_plan([changed])['pending'],0)
+                if failure:self.assertEqual(record['calls'][0]['text'],'PARTIAL')
 
     def test_cancellation_and_infrastructure_attempts(self):
         FakeBackend.failure = provider.Cancelled
@@ -226,8 +239,8 @@ class PerchanceTests(unittest.TestCase):
                 self.assertEqual(caught.exception.partial_response['text'],'  RAW\n')
                 if mode!='error':self.assertTrue(page.closed)
 
-    def test_native_inference_fingerprint_unchanged(self):
-        self.assertEqual(code_fingerprint(), 'de9b98611a020972925a3a7f1a1cbb962e39bffbcaceb78d229610d4a2436d6d')
+    def test_native_identity_fingerprint_after_clean_reset(self):
+        self.assertEqual(code_fingerprint(), '56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787')
 
     def test_conditions_assignments_and_bounded_loops_keep_required_calls(self):
         variant=self.test['variants'][0]

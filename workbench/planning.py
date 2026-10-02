@@ -84,13 +84,6 @@ def validate_selection(selection, models, tests):
     return selection
 
 
-def _timeout_neutral_spec(test, variant):
-    """Experimental identity with only the watchdog duration removed."""
-    spec=copy.deepcopy(experiment_spec(test,variant))
-    spec['test'].pop('timeout_seconds',None)
-    return spec
-
-
 def stable_backend_version(value):
     """Strip volatile llama-server log timing while retaining build identity."""
     if not isinstance(value,str):
@@ -110,7 +103,7 @@ def _stable_target(target):
 
 
 def _model_history(store, model_id):
-    """Best-effort history for timeout compatibility; unrelated corrupt files stay isolated."""
+    """Best-effort history for stable backend build identity; unrelated corrupt files stay isolated."""
     records=[]
     directory=store.root / model_id
     if not directory.exists():
@@ -123,15 +116,9 @@ def _model_history(store, model_id):
     return records
 
 
-def _historical_timeout_result(records, model, test, variant, repetition, target, workflow_code):
-    """Reuse old results only when the sole experiment change is timeout_seconds.
-
-    Historical case IDs cannot be regenerated safely after timeout changes because
-    the ID itself includes the timeout. Compare the persisted identity inputs
-    directly instead: workflow fingerprint, model artifact, target, and the
-    timeout-neutral test/variant definition.
-    """
-    wanted=_timeout_neutral_spec(test,variant)
+def _compatible_completed_result(records, model, test, variant, repetition, target, workflow_code):
+    """Match persisted identity inputs while ignoring volatile backend log clocks."""
+    wanted=experiment_spec(test,variant)
     artifact_pin=model.get('artifact_identity') or model.get('sha256',{})
     matches=[]
     for record in records:
@@ -150,7 +137,7 @@ def _historical_timeout_result(records, model, test, variant, repetition, target
         if not isinstance(old_test,dict) or not isinstance(old_variant,dict):
             continue
         try:
-            if _timeout_neutral_spec(old_test,old_variant)!=wanted:
+            if experiment_spec(old_test,old_variant)!=wanted:
                 continue
         except (KeyError,TypeError,ValueError):
             continue
@@ -159,23 +146,7 @@ def _historical_timeout_result(records, model, test, variant, repetition, target
     if not matches:
         return None
 
-    def timed_out(record):
-        return bool(record.get('timed_out')) or record.get('reason')=='case_timeout'
-
-    # Any successful/non-timeout completion remains complete after a timeout-only bump.
-    non_timeout=[record for record in matches if not timed_out(record)]
-    if non_timeout:
-        return {'done':True,'record':max(non_timeout,key=lambda r:str(r.get('finished_at','')))}
-
-    def timeout(record):
-        value=record.get('timeout_seconds')
-        if type(value) not in (int,float):
-            value=record.get('test_definition',{}).get('timeout_seconds',0)
-        return value if type(value) in (int,float) else 0
-
-    latest=max(matches,key=lambda r:(timeout(r),str(r.get('finished_at',''))))
-    # A timed-out case becomes pending only when it is being given a larger watchdog.
-    return {'done':test['timeout_seconds']<=timeout(latest),'record':latest}
+    return {'done':True,'record':max(matches,key=lambda r:str(r.get('finished_at','')))}
 
 
 def pending_plan(models, tests, target, store, selection=None):
@@ -201,7 +172,7 @@ def pending_plan(models, tests, target, store, selection=None):
                 if selection and selection.get('variant_id',variant['id'])!=variant['id']:continue
                 for repetition in range(test.get('repetitions',1)):
                     cid=case_id(model,test,variant,repetition,target)
-                    if store.done(model['id'],cid):
+                    if store.done(model['id'],cid) and store.read(store.path(model['id'],cid)).get('provenance',{}).get('workflow_code',workflow_code)==workflow_code:
                         existing=store.read(store.path(model['id'],cid))
                         if existing['status']=='skipped' and existing.get('recovery_eligible') and not store.done(model['id'],fallback_id(cid)):
                             jobs.append({'case_id':cid,'model_id':model['id'],'test':test,'variant':variant,'repetition':repetition,'recovery_only':True})
@@ -209,7 +180,7 @@ def pending_plan(models, tests, target, store, selection=None):
                     else:
                         if model['id'] not in history:
                             history[model['id']]=_model_history(store,model['id'])
-                        prior=_historical_timeout_result(history[model['id']],model,test,variant,repetition,target,workflow_code)
+                        prior=_compatible_completed_result(history[model['id']],model,test,variant,repetition,target,workflow_code)
                         if prior and prior['done']:
                             done+=1;complete+=1
                         else:
