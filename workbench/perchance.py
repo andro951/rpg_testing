@@ -19,6 +19,7 @@ from .workflows import messages, condition, output_schema, evaluate, Cancelled, 
 from .scoring import parse
 
 MODEL_ID = 'perchance-text-generator'
+TIMEOUT_SECONDS = 300
 VERSION = 'perchance-capability-baseline-v1'
 DEFAULT_URL = 'https://perchance.org/056uh2nc6k'
 WORKER = Path(__file__).resolve().parents[1] / 'tools/perchance-text/worker.js'
@@ -89,7 +90,7 @@ def plan(tests, settings, target, store, selection):
             cid = digest({'provider': provider, 'effective': definition})
             group = groups.setdefault(cid, {'case_id': cid, 'test': copy.deepcopy(test), 'variant': variant,
                                            'effective': definition, 'aliases': []})
-            group['test']['timeout_seconds'] = max(group['test']['timeout_seconds'], test['timeout_seconds'])
+            group['test']['timeout_seconds'] = TIMEOUT_SECONDS
             for rep in range(test.get('repetitions', 1)):
                 group['aliases'].append({'test_id': test['id'], 'variant_id': variant['id'], 'repetition': rep,
                     'requested_id': digest({'provider': provider, 'definition': experiment_spec(test, variant), 'repetition': rep}),
@@ -150,9 +151,11 @@ def preflight(app, preparation=None, selection=None):
     result = plan(tests, app.settings, target, app.store, selection)
     if result['pending']:
         if importlib.util.find_spec('playwright') is None:
-            issues.append({'id': 'perchance_dependency', 'message': 'Install optional provider requirements: python -m pip install -r requirements-perchance.txt', 'level': 'blocked'})
+            issues.append({'id': 'perchance_dependency', 'message': 'Perchance needs its browser dependency. Open Worker setup and use Install optional Perchance dependency.',
+                           'level': 'blocked', 'label': 'Open Perchance setup', 'action': {'type': 'setup'}})
         if not browser_executable(app.settings):
-            issues.append({'id': 'perchance_browser', 'message': 'Install Edge/Chrome or configure an existing browser executable in Perchance setup.', 'level': 'blocked'})
+            issues.append({'id': 'perchance_browser', 'message': 'Install Edge/Chrome or configure an existing browser executable in Perchance setup.',
+                           'level': 'blocked', 'label': 'Open Perchance setup', 'action': {'type': 'setup'}})
         try:
             with tempfile.TemporaryFile(dir=app.store.root):
                 pass
@@ -341,13 +344,16 @@ def execute_job(job, backend, cancel, progress=None):
     return result
 
 
-def run(app, report, pending, backend_factory=BrowserBackend):
+def run(app, report, pending, backend_factory=BrowserBackend, append=False):
     jobs = [g for g in pending['groups'] if not g['done']]
-    app.run_total = len(jobs); app.run_processed = 0
+    if not append:
+        app.run_total = len(jobs); app.run_processed = 0
     artifact = app.data / 'perchance-plans' / (uuid.uuid4().hex + '.json')
     write_json(artifact, pending)
     if not jobs:
         return
+    if app.cancel_event.is_set():
+        raise Cancelled('Stopped before opening Perchance')
     backend = backend_factory({**app.settings, 'perchance_profile': str(app.data / 'perchance-profile')})
     app.backend = backend
     try:

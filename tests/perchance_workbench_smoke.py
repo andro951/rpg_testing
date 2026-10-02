@@ -23,13 +23,23 @@ def main():
         real_run=perchance.run
         FakeBackend.created=[];FakeBackend.response='READY';FakeBackend.failure=None
         try:
-            with patch('workbench.inventory.detect_gpus',return_value=[{'name':'TEST GPU','total_gib':8}]), patch.object(perchance,'browser_executable',return_value=__file__), patch.object(perchance,'run',side_effect=lambda a,r,p:real_run(a,r,p,FakeBackend)), sync_playwright() as playwright:
+            with patch('workbench.inventory.detect_gpus',return_value=[{'name':'TEST GPU','total_gib':8}]), patch.object(perchance,'browser_executable',return_value=__file__), patch.object(perchance,'run',side_effect=lambda a,r,p,**kwargs:real_run(a,r,p,FakeBackend,**kwargs)), sync_playwright() as playwright:
                 executable=os.environ.get('REPORT_BROWSER_EXECUTABLE')
                 browser=playwright.chromium.launch(headless=True,**({'executable_path':executable} if executable else {}))
                 page=browser.new_page(viewport={'width':1500,'height':1000});errors=[]
                 page.on('pageerror',lambda error:errors.append(str(error)))
                 page.goto(f'http://127.0.0.1:{server.server_port}/#key=smoke-key')
                 page.wait_for_function('() => state !== null && !state.busy')
+                # With no pending local jobs, Overview Run all still executes the final provider.
+                page.locator('#preflight').click()
+                page.wait_for_function('() => state?.report?.ready && !state.busy')
+                assert app.report['plan']['groups'][-1]['model_id']==perchance.MODEL_ID
+                assert app.report['plan']['pending']==1
+                page.locator('#run').click()
+                page.wait_for_function('() => state?.state==="finished" && !state.busy')
+                assert len(FakeBackend.created)==1
+                assert app.store.all()[0]['timeout_seconds']==300
+                assert app.report['plan']['pending']==0
                 page.evaluate('() => setPage("one-model")')
                 page.wait_for_function('() => runOptionsValid && !runOptionsLoading')
                 page.locator('#one-model-model').select_option(perchance.MODEL_ID)
@@ -41,13 +51,17 @@ def main():
                 assert app.report['plan']['independent_observations']==1
                 page.evaluate('() => setPage("one-model")')
                 page.wait_for_function('() => runOptionsValid && !runOptionsLoading')
-                page.locator('#one-model-run').click()
+                with page.expect_response(lambda response: response.url.endswith('/api/run') and response.request.method=='POST'):
+                    page.locator('#one-model-run').click()
+                page.evaluate('async () => render(await api("/api/state"))')
                 page.wait_for_function('() => state?.state==="finished" && !state.busy')
                 assert len(app.store.all())==1
                 assert len(FakeBackend.created[0].calls)==1
                 page.evaluate('() => setPage("one-model")')
                 page.wait_for_function('() => runOptionsValid && !runOptionsLoading')
-                page.locator('#one-model-run').click()
+                with page.expect_response(lambda response: response.url.endswith('/api/run') and response.request.method=='POST'):
+                    page.locator('#one-model-run').click()
+                page.evaluate('async () => render(await api("/api/state"))')
                 page.wait_for_function('() => state?.state==="finished" && !state.busy && state.completed_now===0')
                 assert len(FakeBackend.created)==1
                 page.evaluate('() => {setPage("results");return loadResults();}')
@@ -62,7 +76,7 @@ def main():
                 browser.close()
         finally:
             server.shutdown();server.server_close();thread.join(5)
-    print('Perchance Workbench browser smoke passed (simulated transport; one run plus resume)')
+    print('Perchance Workbench browser smoke passed (simulated transport; Overview Run all final provider, then targeted resume)')
 
 
 if __name__=='__main__':main()

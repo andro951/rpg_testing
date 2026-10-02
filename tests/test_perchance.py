@@ -150,12 +150,12 @@ class PerchanceTests(unittest.TestCase):
         after = self.make_plan([changed])
         self.assertEqual(before['groups'][0]['case_id'], after['groups'][0]['case_id'])
         self.assertEqual(before['groups'][0]['aliases'][0]['requested_id'], after['groups'][0]['aliases'][0]['requested_id'])
-        self.assertEqual(after['groups'][0]['test']['timeout_seconds'],120)
+        self.assertEqual(after['groups'][0]['test']['timeout_seconds'],300)
         self.assertEqual(after['groups'][0]['aliases'][0]['requested_timeout_seconds'],120)
         duplicate = copy.deepcopy(changed); duplicate['id'] = 'other'
         combined = self.make_plan([self.test, duplicate])
         self.assertEqual(combined['independent_observations'],1)
-        self.assertEqual(combined['groups'][0]['test']['timeout_seconds'],120)
+        self.assertEqual(combined['groups'][0]['test']['timeout_seconds'],300)
         self.assertEqual(self.test['timeout_seconds'],10)
         for failure in (None, provider.PerchanceTimeout):
             with self.subTest(failure=failure):

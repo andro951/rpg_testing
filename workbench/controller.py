@@ -230,7 +230,21 @@ class Controller(ModelManager):
     def build_preflight(self,preparation=None,selection=None,track_progress=True):
         from . import perchance
         if perchance.selected(selection):return perchance.preflight(self,preparation,selection)
-        return preflight.build(self,preparation,track_progress=track_progress,selection=selection)
+        report,plan=preflight.build(self,preparation,track_progress=track_progress,selection=selection)
+        # Overview Run all includes the remote baseline only on the assigned tier.
+        gpu=report.get('gpu',{})
+        from .domain import device_tier
+        if selection is None and not self.demo and device_tier(gpu.get('total_gib',0),gpu.get('name',''))==8:
+            remote_report,remote_plan=perchance.preflight(self,preparation,{'model_id':perchance.MODEL_ID})
+            plan={**plan,'perchance_plan':remote_plan,'perchance_report':remote_report,
+                  'pending':plan['pending']+remote_plan['pending'],'complete':plan['complete']+remote_plan['complete']}
+            report['plan']={**report['plan'],'pending':plan['pending'],'complete':plan['complete'],
+                            'groups':report['plan']['groups']+remote_report['plan']['groups']}
+            report['issues']+=remote_report['issues']
+            report['ready']=report['ready'] and remote_report['ready']
+            report['prepared']=report['prepared'] and remote_report['prepared']
+            report['note']+=' Perchance runs last with a 300-second limit; its counts are independent observations after unsupported controls/repetitions collapse.'
+        return report,plan
     def check(self,preparation=None,selection=None):
         self.message='Checking files, pending work, and backend readiness.'
         self.set_progress('preflight','Starting preflight',0,0,'Preparing readiness checks.')
@@ -416,10 +430,17 @@ class Controller(ModelManager):
             if report.get('remote_provider'):
                 from .perchance import run
                 run(self,report,self.plan)
-            else:Session(self,report,self.plan,DemoNative if self.demo else NativeBackend).run()
+            else:
+                Session(self,report,self.plan,DemoNative if self.demo else NativeBackend).run()
+                remote=self.plan.get('perchance_plan')
+                if remote and not self.stop_after_model and not self.cancel_event.is_set():
+                    self.set_progress('run','Starting final model: Perchance Text Generator',0,self.run_overall_percent(),
+                                      'Local model passes finished. Remote generation has a 300-second limit.')
+                    from .perchance import run
+                    run(self,self.plan['perchance_report'],remote,append=True)
         finally:self.finished=now();self.current=None
         self.state='finished' if not self.session_errors else 'finished_with_errors'
-        self.message='Run finished. Remote observations and collapsed cases are recorded separately.' if report.get('remote_provider') else 'Run finished. Full-GPU, skipped, and hybrid results are recorded separately.'
+        self.message='Run finished. Remote observations and collapsed cases are recorded separately.' if report.get('remote_provider') or self.plan.get('perchance_plan') else 'Run finished. Full-GPU, skipped, and hybrid results are recorded separately.'
         self.finish_progress('run','Benchmark run complete',self.message)
         self.report,self.plan=self.build_preflight(selection=selection,track_progress=False)
     def source_commit(self):

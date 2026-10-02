@@ -265,7 +265,7 @@ const PerchanceSetup = {
   const section=document.createElement('section');
   $('page-setup').append(section);
   const heading=document.createElement('h2');heading.textContent='Perchance Text Generator';section.append(heading);
-  const note=document.createElement('p');note.textContent='Select Perchance in Individual test or One model. It uses a remote service and is fixed to an 8 GB worker. Run all and All models remain local-only. Unsupported controls and repetitions collapse to one observation.';section.append(note);
+  const note=document.createElement('p');note.textContent='Select Perchance in Individual test or One model. It uses a remote service and is fixed to an 8 GB worker. Run all includes Perchance last on 8 GB workers. Larger workers and targeted All models runs remain local-only. Local tests use 120 seconds; Perchance uses 300 seconds. Unsupported controls and repetitions collapse to one observation.';section.append(note);
   const fields=[['perchance_url','Worker URL','url'],['perchance_browser','Browser executable (blank discovers Edge/Chrome)','text'],['perchance_epoch','Study epoch (change explicitly for a new provider study)','text'],['perchance_headless','Run worker without a visible window','checkbox'],['perchance_only','Skip local model-folder onboarding','checkbox']];
   PerchanceSetup.Inputs={};
   for(const [setting,text,type] of fields){

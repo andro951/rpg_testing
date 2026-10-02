@@ -49,7 +49,7 @@ Collapsed aliases are not missing results, model failures, successful controlled
 
 ## Current source findings
 
-The active suite has 59 enabled test definitions, 187 enabled variants and 387 requested cases per model. One hundred variants have three repetitions. If Perchance's seed control is unavailable, reducing repetitions to one leaves at most 187 observations before any further identical-effective-experiment grouping. This is a planning bound, not a completed Perchance run or a claim that every variant is compatible.
+The active suite has 58 enabled test definitions, 175 enabled variants and 357 requested cases per local model. Ninety-one variants have three repetitions. If Perchance's seed control is unavailable, reducing repetitions to one leaves at most 175 observations before any further identical-effective-experiment grouping. This is a planning bound, not a completed Perchance run or a claim that every variant is compatible.
 
 Every active variant currently uses cache=default and text output. Explicit cache-on/off variants exist in examples/cached_questions.json. Other examples include constrained boolean/string output. The current validator recognizes temperature, top_p, top_k, min_p, seed, and repeat_penalty; the workflow supplies default sampling values and derives a new seed per repetition.
 
@@ -69,4 +69,4 @@ The existing EmberAdventures worker sends instruction, startWith, hideStartWith,
 These acceptance requirements are covered in the integration preparation and review document. The user subsequently authorized implementation and testing. Real benchmark evidence must remain separate from simulated transport tests.
 
 
-Timeout is an execution watchdog, not an experimental control or identity dimension. Changing it changes only the allowed duration of pending executions, never the observation ID or terminal completion state. If otherwise equivalent requests have different deadlines, their single representative uses the largest requested deadline, and each requested deadline remains recorded in alias metadata.
+Timeout is an execution watchdog, not an experimental control or identity dimension. Changing it changes only the allowed duration of pending executions, never the observation ID or terminal completion state. Local test definitions use 120 seconds. Perchance uses a fixed 300-second whole-workflow deadline in every entry point; each requested local deadline remains recorded in alias metadata. Overview Run all remaining tests includes Perchance last on an actual 8 GB worker, after native GPU and recovery passes. Larger workers, simulated demo runs and targeted local/all-local selections exclude this automatic phase. Preflight counts and validates both phases; completed local cases do not block pending Perchance work. Cancellation or stop-after-model prevents starting the final phase. Provider baseline deduplication and terminal resume rules still apply.

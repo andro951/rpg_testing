@@ -75,3 +75,5 @@ Only synthetic benchmark data belongs in this public repository. Test outputs ma
 See [TEST_REPORT.md](docs/TEST_REPORT.md) for actual test evidence, [WORKBENCH_GUIDE.md](docs/WORKBENCH_GUIDE.md) for operation details, and [PLANNED_CHANGES.md](docs/PLANNED_CHANGES.md) for requirement coverage and validation limits. UI/subprocess fixtures are not real GPU inference.
 
 The old `rpgbench/`, `run_worker.py`, `fixtures/`, and `experiment.json` are retained only for historical reproduction. The active UI is `workbench/`, with native inference and an explicitly selected Perchance remote text provider.
+
+On 8 GB workers, Overview **Run all remaining tests** runs eligible local models first (including native recovery), then Perchance Text Generator. Local test definitions use a 120-second watchdog; Perchance uses 300 seconds. Completed local cases remain complete, so the same button can run only the remaining Perchance observations. Larger workers and explicitly targeted local runs do not include Perchance. Missing browser prerequisites appear in preflight with an Open Perchance setup action. Unsupported controls/repetitions still collapse to one recorded baseline.

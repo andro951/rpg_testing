@@ -17,3 +17,5 @@
 - Perchance is fixed to the 8 GB scheduling tier with an explicit exclusion of larger tiers; do not inherit the local-model one-tier-up exception. Its inference is a remote service, not measured local 8 GB GPU inference. Preserve existing local-model case identities and raw evidence when adding it. The adapter and capability-aware scheduling are implemented with unit and simulated browser coverage. Real service inference and Linux/Unity deployment remain unverified; do not treat mocks as live study observations.
 
 - User-directed clean reset on 2026-10-01: all saved benchmark results were deleted before adopting timeout-independent identity. Do not restore prior results or deadline-comparison catalogs from old report artifacts.
+
+- Local benchmark/example deadlines are 120 seconds; Perchance always uses 300 seconds. Overview Run all includes Perchance last only on the actual 8 GB tier, after native recovery. Keep stop/cancel, combined preflight counts and terminal resume working; never rerun saved local results just because the deadline changes.

@@ -64,7 +64,7 @@ class ResearchSpecTests(unittest.TestCase):
         }
         for name,(patch,ops) in cases.items():
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
-            self.assertEqual(test['timeout_seconds'],300)
+            self.assertEqual(test['timeout_seconds'],120)
             self.assertEqual(len(test['source']['initial_state']['tickets']),100)
             self.assertTrue(equal(apply(test['source']['initial_state'],patch,'json_patch'),test['expected_state']),name)
             self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays'])
@@ -84,7 +84,7 @@ class ResearchSpecTests(unittest.TestCase):
             original=read_json(ROOT/'test_specs'/companion)
             self.assertEqual(test['provenance']['companion_test'],original['id'])
             self.assertEqual(test['source'],{'initial_state':{},'new_information':''})
-            self.assertEqual(test['timeout_seconds'],300)
+            self.assertEqual(test['timeout_seconds'],120)
             self.assertEqual(test['repetitions'],original.get('repetitions',1))
             self.assertEqual([v['id'] for v in test['variants']],['raw_array_index','indexed_object_index','full_paths_index'])
             self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays','raw_json'])
@@ -152,10 +152,10 @@ class ResearchSpecTests(unittest.TestCase):
         expected_ids=['v1_original_clinical','v1_raw_json_control','v2_conversational','v3_only_changed',
                       'v4_smallest_patch','v5_change_rule','v6_one_example']
         expected_timeouts={
-            'prompt_calibration_001_time.json':300,
-            'prompt_calibration_002_boolean.json':300,
-            'prompt_calibration_003_nested.json':300,
-            'prompt_calibration_004_array.json':300,
+            'prompt_calibration_001_time.json':120,
+            'prompt_calibration_002_boolean.json':120,
+            'prompt_calibration_003_nested.json':120,
+            'prompt_calibration_004_array.json':120,
         }
         for name in names:
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
@@ -168,9 +168,9 @@ class ResearchSpecTests(unittest.TestCase):
         self.assertEqual(read_json(ROOT/'test_specs'/names[0])['variants'][0]['new_information_override'],
                          'Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes.')
 
-    def test_all_benchmark_and_example_timeouts_are_five_minutes(self):
+    def test_all_local_benchmark_and_example_timeouts_are_two_minutes(self):
         for folder in (ROOT/'test_specs',ROOT/'examples/test_specs'):
             for path in folder.glob('*.json'):
-                self.assertEqual(read_json(path)['timeout_seconds'],300,str(path))
+                self.assertEqual(read_json(path)['timeout_seconds'],120,str(path))
 
 if __name__=='__main__':unittest.main()
