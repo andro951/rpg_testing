@@ -64,7 +64,7 @@ class ResearchSpecTests(unittest.TestCase):
         }
         for name,(patch,ops) in cases.items():
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
-            self.assertEqual(test['timeout_seconds'],120)
+            self.assertEqual(test['timeout_seconds'],300)
             self.assertEqual(len(test['source']['initial_state']['tickets']),100)
             self.assertTrue(equal(apply(test['source']['initial_state'],patch,'json_patch'),test['expected_state']),name)
             self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays'])
@@ -84,7 +84,7 @@ class ResearchSpecTests(unittest.TestCase):
             original=read_json(ROOT/'test_specs'/companion)
             self.assertEqual(test['provenance']['companion_test'],original['id'])
             self.assertEqual(test['source'],{'initial_state':{},'new_information':''})
-            self.assertEqual(test['timeout_seconds'],120)
+            self.assertEqual(test['timeout_seconds'],300)
             self.assertEqual(test['repetitions'],original.get('repetitions',1))
             self.assertEqual([v['id'] for v in test['variants']],['raw_array_index','indexed_object_index','full_paths_index'])
             self.assertEqual([v['state_presentation'] for v in test['variants']],['raw_json','indexed_arrays','raw_json'])
@@ -132,10 +132,11 @@ class ResearchSpecTests(unittest.TestCase):
         self.assertEqual(variant['expected_answers'],{'index':'73'})
 
     def test_flattened_replace_paths_prompt_format(self):
-        test=read_json(ROOT/'test_specs/array_index_replace_flat_paths_018.json');validate_test(test)
+        test=read_json(ROOT/'test_specs/array_index_replace_explicit_minimal_017.json');validate_test(test)
         self.assertEqual(test.get('instructions'),'')
         self.assertEqual(len(test['variants']),3)
-        prompt=test['variants'][0]['steps'][0]['prompt']
+        variant=next(v for v in test['variants'] if v['id']=='full_paths_index_plain_question')
+        prompt=variant['steps'][0]['prompt']
         self.assertFalse('"' in prompt)
         self.assertIn('review_samples: []\n\nWhat is the index of this ticket: SR-60432?',prompt)
         self.assertTrue(prompt.startswith('queue_name: North Region Service Desk\n\nqueue_date: 2026-09-21\n\n'))
@@ -143,7 +144,7 @@ class ResearchSpecTests(unittest.TestCase):
         self.assertIn('tickets.73.ticket_id: SR-60432\n',prompt)
         self.assertIn('tickets.73.customer_contact: user73@example.test\n\ntickets.74.ticket_id:',prompt)
         self.assertTrue(prompt.endswith('What is the index of this ticket: SR-60432?'))
-        self.assertEqual(test['variants'][0]['expected_answers'],{'index':'73'})
+        self.assertEqual(variant['expected_answers'],{'index':'73'})
 
     def test_prompt_calibration_suite_is_balanced(self):
         names=['prompt_calibration_001_time.json','prompt_calibration_002_boolean.json',
@@ -151,25 +152,25 @@ class ResearchSpecTests(unittest.TestCase):
         expected_ids=['v1_original_clinical','v1_raw_json_control','v2_conversational','v3_only_changed',
                       'v4_smallest_patch','v5_change_rule','v6_one_example']
         expected_timeouts={
-            'prompt_calibration_001_time.json':60,
-            'prompt_calibration_002_boolean.json':60,
-            'prompt_calibration_003_nested.json':60,
-            'prompt_calibration_004_array.json':60,
+            'prompt_calibration_001_time.json':300,
+            'prompt_calibration_002_boolean.json':300,
+            'prompt_calibration_003_nested.json':300,
+            'prompt_calibration_004_array.json':300,
         }
         for name in names:
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
             self.assertEqual(test['timeout_seconds'],expected_timeouts[name])
             self.assertEqual(test['repetitions'],3)
             self.assertEqual([v['id'] for v in test['variants'][:len(expected_ids)]],expected_ids)
-            self.assertEqual(len(test['variants']),14)
+            self.assertEqual(len(test['variants']),14 if name==names[0] else 12)
             self.assertEqual(len(changes(test['source']['initial_state'],test['expected_state'])),1)
             self.assertTrue(all(v['result']['representation']=='json_patch' for v in test['variants']))
         self.assertEqual(read_json(ROOT/'test_specs'/names[0])['variants'][0]['new_information_override'],
                          'Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes.')
 
-    def test_runaway_generation_timeouts_stay_bounded(self):
-        for name in ['household_coat_add_003.json','household_coat_remove_002.json']:
-            self.assertEqual(read_json(ROOT/'test_specs'/name)['timeout_seconds'],60)
-        self.assertEqual(read_json(ROOT/'test_specs'/'dialogue_test 1_4.json')['timeout_seconds'],600)
+    def test_all_benchmark_and_example_timeouts_are_five_minutes(self):
+        for folder in (ROOT/'test_specs',ROOT/'examples/test_specs'):
+            for path in folder.glob('*.json'):
+                self.assertEqual(read_json(path)['timeout_seconds'],300,str(path))
 
 if __name__=='__main__':unittest.main()

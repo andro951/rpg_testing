@@ -36,7 +36,6 @@ class ThreeFormatMatrixTests(unittest.TestCase):
             'array_index_replace_010.json','array_index_remove_011.json','array_index_add_012.json',
             'array_index_move_013.json','array_index_copy_014.json','array_index_test_015.json',
             'array_index_replace_minimal_016.json','array_index_replace_explicit_minimal_017.json',
-            'array_index_replace_flat_paths_018.json',
         ]:
             test=read_json(ROOT/'test_specs'/name);validate_test(test)
             self.assertEqual(len(test['variants']),3,name)
@@ -63,7 +62,7 @@ class ThreeFormatMatrixTests(unittest.TestCase):
             self.assertEqual(companion['source'],base['source'])
             self.assertEqual(companion['expected_state'],base['expected_state'])
 
-    def test_prompt_calibration_has_three_formats_for_every_existing_prompt_variant(self):
+    def test_prompt_calibration_preserves_unique_prompts_in_three_formats(self):
         for name in [
             'prompt_calibration_001_time.json','prompt_calibration_002_boolean.json',
             'prompt_calibration_003_nested.json','prompt_calibration_004_array.json',
@@ -72,15 +71,19 @@ class ThreeFormatMatrixTests(unittest.TestCase):
             original_ids=['v1_original_clinical','v1_raw_json_control','v2_conversational',
                           'v3_only_changed','v4_smallest_patch','v5_change_rule','v6_one_example']
             ids={v['id'] for v in base['variants']}
-            self.assertEqual(len(base['variants']),14)
+            is_time=name=='prompt_calibration_001_time.json'
+            self.assertEqual(len(base['variants']),14 if is_time else 12)
             for logical in original_ids:
                 self.assertIn(logical,ids)
-                self.assertEqual(len([x for x in ids if x.startswith(logical+'__')]),1)
+                expected=1 if is_time or not logical.startswith('v1_') else 0
+                self.assertEqual(len([x for x in ids if x.startswith(logical+'__')]),expected)
             stem=Path(name).stem
             modern=read_json(ROOT/'test_specs'/(stem+'_full_paths.json'));validate_test(modern)
             legacy=read_json(ROOT/'test_specs'/(stem+'_v1_full_paths.json'));validate_test(legacy)
             full_ids={v['id'] for v in modern['variants']+legacy['variants']}
-            self.assertEqual(full_ids,{x+'__full_paths' for x in original_ids})
+            expected_full={x+'__full_paths' for x in original_ids}
+            if not is_time:expected_full.remove('v1_raw_json_control__full_paths')
+            self.assertEqual(full_ids,expected_full)
             for companion in (modern,legacy):
                 self.assertEqual(companion['source'],base['source'])
                 self.assertEqual(companion['expected_state'],base['expected_state'])

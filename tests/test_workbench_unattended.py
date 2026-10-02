@@ -100,16 +100,16 @@ class UnattendedTests(unittest.TestCase):
         def timeout_once(b,*a,**k):
             calls[b.mid]=calls.get(b.mid,0)+1
             if b.mid=='large' and calls[b.mid]==1:
-                exc=RuntimeStall('Operational watchdog expired',{'timeout_seconds':60})
+                exc=RuntimeStall('Operational watchdog expired',{'timeout_seconds':self.test['timeout_seconds']})
                 exc.partial_response={'text':'partial answer','reasoning_text':'','finish_reason':None,
-                                      'usage':{},'timings':{},'raw_chunks':[],'incomplete':True,'request_seconds':60}
+                                      'usage':{},'timings':{},'raw_chunks':[],'incomplete':True,'request_seconds':self.test['timeout_seconds']}
                 raise exc
             return original(b,*a,**k)
         with patch.object(Fake,'generate',timeout_once):Session(self.app,self.report,self.plan,Fake).run()
         large=[r for r in self.app.store.all() if r['model_id']=='large']
         self.assertEqual(len(large),2);timed=next(r for r in large if r.get('timed_out'))
         self.assertEqual(timed['status'],'completed');self.assertFalse(timed['score']['exact_match'])
-        self.assertEqual(timed['calls'][0]['text'],'partial answer');self.assertEqual(timed['timeout_seconds'],60)
+        self.assertEqual(timed['calls'][0]['text'],'partial answer');self.assertEqual(timed['timeout_seconds'],self.test['timeout_seconds'])
         self.assertEqual(calls['large'],2)
         self.assertEqual(pending_plan(self.models,[self.test],self.target,self.app.store)['pending'],0)
     def test_context_expands_once_and_preserves_attempt(self):

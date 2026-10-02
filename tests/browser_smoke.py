@@ -70,10 +70,10 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 assert len(unit_test_calls)==1, 'Run Unit Tests button must invoke the harness suite exactly once'
                 expect(page.locator('#pending')).to_have_text(str(base_case_count))
                 assert not app.store.all(),'Preflight must not run inference'
-                # The active suite grew to 387 cases; Windows evidence writes need a bounded longer wait.
+                # Full-catalog evidence writes and the final resume scan need bounded longer waits on Windows.
                 page.locator('#run').click();expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=120000)
                 expect(page.locator('#task-percent')).to_have_text('100.0%');expect(page.locator('#overall-percent')).to_have_text('100.0%')
-                expect(page.locator('#pending')).to_have_text('0');expect(page.locator('#complete')).to_have_text(str(base_case_count))
+                expect(page.locator('#pending')).to_have_text('0',timeout=60000);expect(page.locator('#complete')).to_have_text(str(base_case_count),timeout=60000)
                 screenshot=os.environ.get('WORKBENCH_SCREENSHOT')
                 if screenshot:page.screenshot(path=screenshot,full_page=True)
                 page.locator('nav button[data-page="results"]').click();expect(page.locator('.result-row')).to_have_count(base_case_count)
@@ -86,6 +86,7 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 expect(page.locator('#session-complete')).to_have_text('1',timeout=15000)
                 expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)
                 page.locator('#run').click();page.wait_for_timeout(1700)
+                expect(page.locator('#run')).to_be_enabled(timeout=60000)
                 expect(page.locator('#session-complete')).to_have_text('0')
                 page.locator('nav button[data-page="models"]').click();expect(page.locator('.model-card')).to_have_count(1)
                 select=page.locator('.model-card select');select.select_option('12');page.wait_for_timeout(1600)
