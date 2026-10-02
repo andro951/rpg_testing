@@ -70,7 +70,8 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 assert len(unit_test_calls)==1, 'Run Unit Tests button must invoke the harness suite exactly once'
                 expect(page.locator('#pending')).to_have_text(str(base_case_count))
                 assert not app.store.all(),'Preflight must not run inference'
-                page.locator('#run').click();expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)
+                # The active suite grew to 387 cases; Windows evidence writes need a bounded longer wait.
+                page.locator('#run').click();expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=120000)
                 expect(page.locator('#task-percent')).to_have_text('100.0%');expect(page.locator('#overall-percent')).to_have_text('100.0%')
                 expect(page.locator('#pending')).to_have_text('0');expect(page.locator('#complete')).to_have_text(str(base_case_count))
                 screenshot=os.environ.get('WORKBENCH_SCREENSHOT')
@@ -96,8 +97,8 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 expect(page.locator('#readiness')).to_have_text('Ready',timeout=15000)
                 expected_pending=app.plan['pending']
                 page.locator('#run').click()
-                expect(page.locator('#session-complete')).to_have_text(str(expected_pending),timeout=15000)
-                expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)
+                expect(page.locator('#session-complete')).to_have_text(str(expected_pending),timeout=120000)
+                expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=120000)
                 expect(page.locator('#run')).to_be_enabled(timeout=5000)
                 page.locator('nav button[data-page="analysis"]').click()
                 expect(page.locator('#analysis-list')).to_contain_text('full_gpu',timeout=20000)

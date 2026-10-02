@@ -135,6 +135,7 @@ window.fetch=async(path,options={})=>{const r=await window.workerBridge(path,opt
                 page.locator('nav button[data-page="runtime"]').click()
                 expect(page.locator('#runtime-installed')).to_contain_text('llama-server',timeout=10000)
                 assert Path(app.settings['llama_path']).is_relative_to(project)
+                page.wait_for_function('() => !!state?.report && !state.busy')
                 assert app.report is not None and not any(i['id']=='backend' for i in app.report['issues']), app.report['issues']
                 screenshot=os.environ.get('WORKBENCH_MODEL_SCREENSHOT')
                 page.locator('nav button[data-page="find"]').click()

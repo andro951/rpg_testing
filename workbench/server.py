@@ -146,6 +146,8 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/fix':app.start('fix',data);return self.send(202,{'started':True})
             if path=='/api/control':app.control(data['action']);return self.send(200,{'ok':True})
             if path=='/api/settings':app.configure(data);return self.send(200,{'ok':True})
+            if path=='/api/perchance/setup':app.start('perchance_setup',{});return self.send(202,{'started':True})
+            if path=='/api/perchance/connect':app.start('perchance_connect',{});return self.send(202,{'started':True})
             if path=='/api/model/assign':app.assign_model(data['id'],data['required_vram_gb']);return self.send(200,{'ok':True})
             if path=='/api/result/delete':app.delete_result(data['model_id'],data['case_id']);return self.send(200,{'ok':True})
             if path=='/api/test/save':

@@ -126,7 +126,7 @@ on('restart',async()=>{await api('/api/restart',{});toast('Restarting with the l
 let hubSignature='',runtimeSignature='',folderChoosing=false;
 for(const tier of [8,12,16,24,32,40,48,80])$('hub-tier').append(new Option(tier+' GiB',String(tier)));
 function folderPrompts(){
- if(!state||state.demo||state.busy||$('login').open||folderChoosing)return;
+ if(!state||state.demo||state.busy||$('login').open||folderChoosing||state.settings.perchance_only)return;
  const root=state.settings.model_root;
  if(!root){if(!$('folder-onboarding').open)$('folder-onboarding').showModal();return;}
  if($('folder-onboarding').open)$('folder-onboarding').close();
@@ -229,10 +229,12 @@ function renderRunControls(){
  $('one-model-toggle-tests').textContent=selectedTests.length?'Deselect all':'Select all';
  let notice=runOptionsLoading?'Loading models and tests…':!runOptionsValid?'Refresh choices when the current operation is finished.':!models.length?'No enabled catalogued models. Rescan and assign VRAM in Installed models.':!tests.length?'No enabled test definitions. Add or enable a test in Test definitions.':null;
  const count=test?test.repetitions*($('individual-variant').value?1:test.variants.length):0;
- const individualTotal=count*(individualAll?models.length:1),individualTarget=individualAll?'all '+models.length+' model(s)':individualModel?.name;
+ const individualTotal=count*(individualAll?models.filter(m=>m.id!=='perchance-text-generator').length:1),individualTarget=individualAll?'all local models':individualModel?.name;
  $('individual-summary').textContent=notice|| (individualReady?individualTotal+' configured case(s) on '+individualTarget+' · '+test.timeout_seconds+' s limit each. Only pending cases will run.':'Choose a model and test to see the scope.');
  const total=selectedTests.reduce((n,t)=>n+t.repetitions*t.variants.length,0);
  $('one-model-summary').textContent=notice|| (modelReady?selectedTests.length+' selected test definition(s), '+total+' configured case(s) on '+oneModel.name+'. Only pending cases will run.':oneModel&&!selectedTests.length?'Select at least one test.':'Choose a model to see the scope.');
+ if(individualModel?.id==='perchance-text-generator')$('individual-summary').textContent+=' Remote service · fixed 8 GB worker. Unsupported settings/repetitions collapse; check preflight for independent counts.';
+ if(oneModel?.id==='perchance-text-generator')$('one-model-summary').textContent+=' Unsupported settings/repetitions collapse; check preflight for independent counts.';
 }
 async function startTargetedRun(mode,operation){
  const individual=mode==='individual',chosenModel=$(individual?'individual-model':'one-model-model').value;
@@ -257,4 +259,46 @@ on('one-model-toggle-tests',()=>{
 for(const id of ['individual-model','one-model-model','individual-variant'])$(id).addEventListener('change',renderRunControls);
 $('individual-test').addEventListener('change',()=>{$('individual-variant').value='';renderRunVariants();renderRunControls();});
 
+//#region Perchance service setup
+const PerchanceSetup = {
+ Initialize: () => {
+  const section=document.createElement('section');
+  $('page-setup').append(section);
+  const heading=document.createElement('h2');heading.textContent='Perchance Text Generator';section.append(heading);
+  const note=document.createElement('p');note.textContent='Select Perchance in Individual test or One model. It uses a remote service and is fixed to an 8 GB worker. Run all and All models remain local-only. Unsupported controls and repetitions collapse to one observation.';section.append(note);
+  const fields=[['perchance_url','Worker URL','url'],['perchance_browser','Browser executable (blank discovers Edge/Chrome)','text'],['perchance_epoch','Study epoch (change explicitly for a new provider study)','text'],['perchance_headless','Run worker without a visible window','checkbox'],['perchance_only','Skip local model-folder onboarding','checkbox']];
+  PerchanceSetup.Inputs={};
+  for(const [setting,text,type] of fields){
+   const label=document.createElement('label');label.textContent=text+' ';
+   const input=document.createElement('input');input.type=type;input.setAttribute('aria-label',text);label.append(input);section.append(label,document.createElement('br'));
+   PerchanceSetup.Inputs[setting]=input;
+  }
+
+  const load=document.createElement('button');load.textContent='Load Perchance setup';load.addEventListener('click',()=>{
+   for(const [setting,input] of Object.entries(PerchanceSetup.Inputs)){
+    if(input.type==='checkbox')input.checked=!!state.settings[setting];
+    else input.value=state.settings[setting]||'';
+   }
+  });section.append(load);
+  for(const [text,path] of [['Install optional Perchance dependency','/api/perchance/setup'],['Verify Perchance connection','/api/perchance/connect']]){
+   const action=document.createElement('button');action.textContent=text;
+   action.addEventListener('click',()=>api(path,{}).then(poll).catch(error=>showAlert(error.message)));
+   section.append(action);
+  }
+  const save=document.createElement('button');save.textContent='Save Perchance setup';save.addEventListener('click',()=>{
+   const values={};
+   for(const [setting,input] of Object.entries(PerchanceSetup.Inputs)){
+    values[setting]=input.type==='checkbox'?input.checked:input.value.trim();
+   }
+
+   api('/api/settings',values).then(()=>{if(values.perchance_only)$('folder-onboarding').close();return poll();}).then(()=>toast('Perchance setup saved')).catch(error=>showAlert(error.message));
+  });section.append(save);
+  const defaults={perchance_url:'https://perchance.org/056uh2nc6k',perchance_epoch:'1'};
+  for(const [setting,value] of Object.entries(defaults)){
+   PerchanceSetup.Inputs[setting].value=value;
+  }
+ }
+};
+PerchanceSetup.Initialize();
+//#endregion
 if(!key)$('login').showModal();else poll();setInterval(poll,1200);

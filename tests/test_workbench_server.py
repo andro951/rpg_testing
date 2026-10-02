@@ -43,7 +43,8 @@ class ServerTests(unittest.TestCase):
         except urllib.error.HTTPError as r:return r.code,r.read(),dict(r.headers)
     def wait(self):
         if self.app.thread:
-            self.app.thread.join(30)
+            # The full 387-case demo writes evidence on Windows as well as Linux.
+            self.app.thread.join(120)
             self.assertFalse(self.app.thread.is_alive(),'Workbench operation did not finish')
         self.assertFalse(self.app.operation.locked())
     def test_no_auth_no_state(self):self.assertEqual(self.req('/api/state',auth=False)[0],403)

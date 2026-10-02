@@ -97,7 +97,7 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 page.locator('#individual-model').select_option('__all__')
                 page.locator('#individual-test').select_option('clothing_append')
                 page.locator('#individual-variant').select_option('direct_json_patch')
-                expect(page.locator('#individual-summary')).to_contain_text('2 configured case(s) on all 2 model(s)')
+                expect(page.locator('#individual-summary')).to_contain_text('2 configured case(s) on all local models')
                 page.locator('#individual-run').click()
                 expect(page.locator('#session-complete')).to_have_text('2',timeout=15000)
                 expect(page.locator('#state-badge')).to_have_text('FINISHED',timeout=15000)

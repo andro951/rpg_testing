@@ -64,7 +64,9 @@ class Controller(ModelManager):
         self.data=self.root/'.local'/('demo' if demo else 'workbench');self.data.mkdir(parents=True,exist_ok=True)
         self.settings_path=self.data/'settings.json'
         defaults={'backend':'llamacpp','model_root':'','confirmed_empty_folder':'','llama_path':'',
-                  'hf_token':'','sync_source':not demo,'publish_results':False,'remote_enabled':False,'models_folder_version':1}
+                  'hf_token':'','sync_source':not demo,'publish_results':False,'remote_enabled':False,'models_folder_version':1,
+                  'perchance_url':'https://perchance.org/056uh2nc6k','perchance_browser':'','perchance_headless':False,
+                  'perchance_only':False,'perchance_epoch':'1'}
         saved=read_json(self.settings_path) if self.settings_path.exists() else {}
         # Explicit consent for the new folder policy: no migration from LM Studio or guessed defaults.
         if saved.get('models_folder_version')!=1:saved.pop('model_root',None);saved.pop('confirmed_empty_folder',None)
@@ -213,7 +215,7 @@ class Controller(ModelManager):
     @exclusive_edit
     def run_options(self):
         """Small UI choices, without scanning weights or exposing fixture answers."""
-        models=self.catalog();tests=load_tests(self.root/'test_specs')
+        models=self.selection_models();tests=load_tests(self.root/'test_specs')
         return {'models':[{'id':m['id'],'name':m.get('base_model') or m['id'],
                            'quantization':m.get('quantization',''),'required_vram_gb':m.get('required_vram_gb')}
                           for m in models if m.get('enabled',True)],
@@ -222,10 +224,17 @@ class Controller(ModelManager):
                           'variants':[{'id':v['id'],'name':v.get('name') or v['id']}
                                       for v in t['variants'] if v.get('enabled',True)]}
                          for t in tests if any(v.get('enabled',True) for v in t['variants'])]}
+    def selection_models(self):
+        from .perchance import model
+        return self.catalog()+([] if self.demo else [model()])
+    def build_preflight(self,preparation=None,selection=None,track_progress=True):
+        from . import perchance
+        if perchance.selected(selection):return perchance.preflight(self,preparation,selection)
+        return preflight.build(self,preparation,track_progress=track_progress,selection=selection)
     def check(self,preparation=None,selection=None):
         self.message='Checking files, pending work, and backend readiness.'
         self.set_progress('preflight','Starting preflight',0,0,'Preparing readiness checks.')
-        report,plan=preflight.build(self,preparation,track_progress=True,selection=selection)
+        report,plan=self.build_preflight(preparation,selection)
         self.report,self.plan=report,plan
         self.record_preflight(report)
         self.message='Preparation checks passed; actual GPU checks remain.' if report['prepared'] else 'Ready.' if report['ready'] else 'Preflight found issues. Use the individual action buttons.'
@@ -242,7 +251,7 @@ class Controller(ModelManager):
                 allowed={'selection','preparation'} if kind=='preflight' else {'selection'}
                 if not isinstance(payload,dict) or set(payload)-allowed:raise ValueError('Unknown run/preflight option')
                 selection=normalize_selection(payload.get('selection'))
-                if selection is not None:validate_selection(selection,self.catalog(),load_tests(self.root/'test_specs'))
+                if selection is not None:validate_selection(selection,self.selection_models(),load_tests(self.root/'test_specs'))
                 if kind=='run':self.requested_run_selection=selection
             else:selection=None
             repair_selection=copy.deepcopy((self.report or {}).get('selection')) if kind=='fix' else None
@@ -265,6 +274,16 @@ class Controller(ModelManager):
                 elif kind=='runtime_list':self.list_runtimes()
                 elif kind=='runtime_install':self.install_runtime(payload)
                 elif kind=='scan':self.scan_folder()
+                elif kind=='perchance_connect':
+                    from .perchance import verify_connection
+                    verify_connection(self)
+                elif kind=='perchance_setup':
+                    flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
+                    installed=subprocess.run([sys.executable,'-m','pip','install','-r',str(self.root/'requirements-perchance.txt')],
+                                             capture_output=True,text=True,timeout=300,**flags)
+                    self.log('perchance_setup',installed.stdout+installed.stderr)
+                    if installed.returncode:raise RuntimeError('Optional provider setup failed; inspect Logs')
+                    self.message='Perchance browser dependency installed. Verify the connection before running.'
                 else:raise ValueError('Unknown operation')
             except Cancelled:self.state='stopped';self.message='Stopped. Unfinished cases remain pending.'
             except Exception as exc:self.state='error';self.message=str(exc);self.log('error',exc)
@@ -317,12 +336,20 @@ class Controller(ModelManager):
     @exclusive_edit
     def configure(self,values):
         values=dict(values)
-        allowed={'model_root','confirmed_empty_folder','llama_path','hf_token','sync_source','publish_results'}
-        if set(values)-allowed:raise ValueError('Unknown setting; native llama.cpp is the only backend and test settings belong in tests')
+        allowed={'model_root','confirmed_empty_folder','llama_path','hf_token','sync_source','publish_results',
+                 'perchance_url','perchance_browser','perchance_headless','perchance_only','perchance_epoch'}
+        if set(values)-allowed:raise ValueError('Unknown setting; test settings belong in tests')
         for key,val in values.items():
-            if key in ('sync_source','publish_results'):
+            if key in ('sync_source','publish_results','perchance_headless','perchance_only'):
                 if type(val)is not bool:raise ValueError('Expected boolean')
             elif not isinstance(val,str):raise ValueError('Expected text')
+        if 'perchance_url' in values:
+            from .perchance import validate_url
+            validate_url(values['perchance_url'])
+        if 'perchance_browser' in values and values['perchance_browser']:
+            path=Path(values['perchance_browser'])
+            if not path.is_absolute() or not path.is_file():raise ValueError('Choose an existing absolute browser executable')
+        if 'perchance_epoch' in values and not values['perchance_epoch'].strip():raise ValueError('Provider epoch must be nonempty')
         if 'model_root' in values and values['model_root']:
             folder=Path(values['model_root']).expanduser()
             if not folder.is_absolute() or not folder.is_dir():raise ValueError('Choose an existing absolute models folder')
@@ -339,6 +366,8 @@ class Controller(ModelManager):
         # Folder scanning is a separate background operation so saving a path returns promptly.
     @exclusive_edit
     def assign_model(self,mid,tier):
+        from .perchance import MODEL_ID
+        if mid==MODEL_ID:raise ValueError('Perchance has a fixed 8 GB scheduling assignment')
         if self.demo:raise ValueError('Demo model assignments are simulated and read-only.')
         if type(tier)is not int or tier not in TIERS:raise ValueError('Choose a supported VRAM tier.')
         item=next((m for m in self.last_models if m['id']==mid),None)
@@ -364,7 +393,7 @@ class Controller(ModelManager):
         else:raise ValueError('Unknown control')
     def run(self,selection=None):
         selection=normalize_selection(selection)
-        if selection is not None:validate_selection(selection,self.catalog(),load_tests(self.root/'test_specs'))
+        if selection is not None:validate_selection(selection,self.selection_models(),load_tests(self.root/'test_specs'))
         self.requested_run_selection=copy.deepcopy(selection)
         self.log('run_requested',json.dumps({'selection':selection},sort_keys=True))
         if not self.demo and self.settings['sync_source']:
@@ -383,12 +412,16 @@ class Controller(ModelManager):
         from .demo_native import DemoNative
         self.run_provenance={'backend_version':self.backend_version(),'python':platform.python_version(),
                              'source_commit':self.source_commit(),'workflow_code':self.workflow_code(),'selection':copy.deepcopy(selection)}
-        try:Session(self,report,self.plan,DemoNative if self.demo else NativeBackend).run()
+        try:
+            if report.get('remote_provider'):
+                from .perchance import run
+                run(self,report,self.plan)
+            else:Session(self,report,self.plan,DemoNative if self.demo else NativeBackend).run()
         finally:self.finished=now();self.current=None
         self.state='finished' if not self.session_errors else 'finished_with_errors'
-        self.message='Run finished. Full-GPU, skipped, and hybrid results are recorded separately.'
+        self.message='Run finished. Remote observations and collapsed cases are recorded separately.' if report.get('remote_provider') else 'Run finished. Full-GPU, skipped, and hybrid results are recorded separately.'
         self.finish_progress('run','Benchmark run complete',self.message)
-        self.report,self.plan=preflight.build(self,track_progress=False,selection=selection)
+        self.report,self.plan=self.build_preflight(selection=selection,track_progress=False)
     def source_commit(self):
         try:
             from .gitops import git
@@ -438,7 +471,7 @@ class Controller(ModelManager):
             for p in sorted(self.store.root.rglob('*')):
                 if p.is_file() and not p.is_symlink() and not p.name.startswith('.'):
                     z.write(p,(Path('results')/p.relative_to(self.store.root)).as_posix())
-            for folder in ('logs','preflight_reports'):
+            for folder in ('logs','preflight_reports','perchance-plans'):
                 for p in sorted((self.data/folder).rglob('*')):
                     if p.is_file() and not p.is_symlink() and not p.name.startswith('.'):
                         z.write(p,p.relative_to(self.data).as_posix())
@@ -456,7 +489,16 @@ class Controller(ModelManager):
                 except (ValueError,OSError,TypeError) as exc:reports.append({'file':path.name,'error':str(exc)})
             summary['preflight_reports']=reports
             summary['latest_preflight']=reports[-1] if reports else None
+            remote=[r for r in valid if r.get('execution_class')=='remote_service']
+            requested_remote=len({a['requested_id'] for r in remote for a in r.get('aliases',[])})
+            executed_remote=sum(bool(r.get('calls')) for r in remote)
+            summary['perchance']={'independent_observations':executed_remote,'observation_records':len(remote),
+                'mapped_requested_cases':len({a['requested_id'] for r in remote for a in r.get('aliases',[])}),
+                'collapsed_cases':max(0,requested_remote-len(remote)),
+                'statuses':{s:sum(r.get('status')==s for r in remote) for s in ('completed','error','aborted')},
+                'timeouts':sum(bool(r.get('timed_out')) for r in remote),
+                'note':'Aliases are references, not independent trials. Unsupported controls and remote defaults are unavailable.'}
             z.writestr('summary.json',json.dumps(summary,indent=2))
             z.writestr('summary.csv',csv_export(summary))
-            z.writestr('ABOUT.txt','SIMULATED DEMO\n' if self.demo else 'GPU-local benchmark evidence. See each result for provenance and unavailable metrics.\n')
+            z.writestr('ABOUT.txt','SIMULATED DEMO\n' if self.demo else 'Benchmark evidence. See each result for local or remote provenance and unavailable metrics.\n')
         return out.getvalue()

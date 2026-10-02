@@ -1,0 +1,9 @@
+# Completeness and repair usefulness
+
+This audit is useful for repair: each confirmed defect has a source anchor, concrete trigger, effect, smallest repair direction and regression check. It maps runtime, control/UI, identity/storage, downloads, scoring, scheduling, telemetry, Git, cluster scaffolding and the retained historical stack. The requirement checklist and ordered plan give later threads a testable sequence without requiring them to recover chat context.
+
+Coverage includes all tracked-file inventory, active module/entrypoint source review, legacy engine contracts, workflow/test family mapping, existing tests and CI, documentation reconciliation, strict parsing/schema validation of the enabled suite, and checksum/status/path validation for all 1,552 result files. Automated baseline preservation verifies old prompts/case identities and recorded-model plans. Full logs and reproductions are bundled as evidence.
+
+This is not a proof that every possible bug was found. Large repeated result files were inspected by machine validation and metadata analysis, not individually rejudged with real inference. Browser tests use Edge/Chromium on this desktop and synthetic fixtures, not a production llama.cpp model. Test failures are distinguished from environment setup and timing/race limits. Confirmed branch defects are stronger evidence than speculative operational risks.
+
+Unvalidated: real chosen GPU/model/runtime compatibility, independent Windows physical residency, actual native cache/token/latency behavior, live private/gated downloads, real remote network/pairing/firewall configuration, publisher concurrent-writer behavior and Unity job signaling/authorization. No fixes, commits or remote writes were made. Audit notes and ignored tooling are the only additions. A source manifest recheck and Git status verification close the audit; line anchors may drift after future repairs.

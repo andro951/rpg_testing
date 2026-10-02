@@ -22,7 +22,7 @@ This folder choice applies **only to model files and their partial downloads**. 
 
 ## Targeted runs
 
-**Run Individual Test** in the left sidebar selects one model—or **All** models—and one enabled test definition, with all enabled variants or one chosen variant. **Test One Model** shows every enabled test with a checkbox; all are selected by default, and you can run any checked subset for one model. Both keep the test's repetitions, seeds and sampling settings; only pending cases run. Use the page's check button to preflight that selection, or its run button to preflight and execute it. Progress and any repair actions appear in Overview; normal Results, Comparison and exports contain the evidence.
+**Run Individual Test** in the left sidebar selects one model—or **All** models—and one enabled test definition, with all enabled variants or one chosen variant. **Test One Model** shows every enabled test with a checkbox; all are selected by default, and you can run any checked subset for one model. Native-model runs keep the test's repetitions, seeds and sampling settings; only pending cases run. Perchance groups unavailable controls and repetitions into one baseline per effective workflow. Use the page's check button to preflight that selection, or its run button to preflight and execute it. Progress and any repair actions appear in Overview; normal Results, Comparison and exports contain the evidence.
 
 Selection is temporary and does not edit `models.json` or test files. Targeted and full runs share case IDs and context allocation, so finishing targeted cases removes that work from the normal queue. The selected model must still satisfy the normal hardware tier and runtime checks. Unrelated missing or unassigned models do not block a selected run. Source-update restarts and automatic repair preserve the selection; they never broaden it to the entire queue.
 
@@ -40,6 +40,8 @@ You can explicitly **Pause after case**, **Resume**, **Stop after model**, or **
 
 ## Results and visibility
 
+Generate a self-contained offline statistics dashboard from saved evidence with `python -m reporting.report`. Open `.local/reports/statistics.html` in a modern browser. It opens on a compact objective-results matrix with 24-pixel pass/fail squares, models as columns, variants/repetitions as rows, test subtotals and model totals. It includes tests with fixed answer or final-state oracles, current/historical scope filters and links to original evidence. Dialogue and other open-ended generation are excluded from this table and its totals, with saved evidence preserved for a separate view later. The existing long-array comparison, failure and latency views remain available. See [offline reporting](reporting/README.md) for ZIP input, matching rules and tests.
+
 Overview shows the current pass, execution class, reported GPU/CPU layer counts, and available whole-device memory samples. Layer reports do not prove that Windows will never page GPU allocations. CPU utilization, a host-pinned buffer, or a CPU-mapped model file alone is not proof of CPU model-layer execution.
 
 **Results** exposes raw prompts, responses, scores, attempts, timings and provenance. Delete a case file to make that case pending again. A failed primary qualification and a later hybrid result are separate records. Recovery interrupted before completion resumes as recovery work.
@@ -47,6 +49,12 @@ Overview shows the current pass, execution class, reported GPU/CPU layer counts,
 **Comparison** separates model files, test definitions, context configurations, hardware, software and execution classes. **Download all logs & results** exports JSON evidence, logs and CSV/JSON summaries. Application logging and Git writes occur outside timed workflows. GPU telemetry is sampled in memory through NVML; it is a sampled total-device peak, not exact model-only memory accounting.
 
 ## Tests and caching
+
+The Perchance Text Generator adapter follows the standing [provider capability policy](docs/perchance-capability-policy.md): unsupported or unverified setting/seed/repetition sweeps become one explicitly recorded baseline per distinct effective experiment, with collapsed cases mapped to that observation. They are never reported as independently executed controlled trials. The adapter is implemented and locally tested; real service inference remains unverified until connection setup succeeds.
+
+In **Worker setup**, use **Install optional Perchance dependency** if needed, then **Verify Perchance connection** and complete any site verification in the separate window. Select **Perchance Text Generator** under **Test One Model** or **Run Individual Test**, check the plan, then run. It requires exactly one detected NVIDIA GPU in the 8 GB tier; larger tiers are excluded. Choose **Skip local model-folder onboarding** for a remote-only worker. The browser window closes after the batch; its private profile under `.local/workbench/perchance-profile` retains site verification without sharing the EmberAdventures browser. No saved Perchance page is changed.
+
+Only distinct effective workflows run once. Requested temperature/cache/seed/schema constraints remain recorded as unavailable controls; ordinary-text schema answers are validated locally. Observation mappings are saved before generation and exported with results. **Run all** and **All models** keep their local-model scope. See [preparation and acceptance review](docs/perchance-integration-prep.md).
 
 All experimental settings live in `test_specs/*.json`, with a validating editor in the UI. The normal V2 model-facing state-update prompt uses short conversational wording: a plain-language request, a pretty-printed **Current State**, the **New Information**, and the requested output format. Four `prompt_calibration_*` tests preserve the historical V1 clinical prompt and compare it with V2 plus four controlled alternatives: **only changed fields**, **smallest patch**, **value-difference rule**, and **one example**. V1 Original also preserves the old indexed-array/SOURCE presentation and extra time-test wording; V1 Raw-JSON Control isolates the clinical wording from those representation differences. The defaults cover a time change, a clothing-array append without movement, and the retail inventory test. Examples can be imported for large shared-prefix cache-on/off questions, conditional follow-ups, verification/repair, and narration followed by state updating using the same model.
 
@@ -66,4 +74,4 @@ Only synthetic benchmark data belongs in this public repository. Test outputs ma
 
 See [TEST_REPORT.md](docs/TEST_REPORT.md) for actual test evidence, [WORKBENCH_GUIDE.md](docs/WORKBENCH_GUIDE.md) for operation details, and [PLANNED_CHANGES.md](docs/PLANNED_CHANGES.md) for requirement coverage and validation limits. UI/subprocess fixtures are not real GPU inference.
 
-The old `rpgbench/`, `run_worker.py`, `fixtures/`, and `experiment.json` are retained only for historical reproduction. The active UI is `workbench/` and native-only.
+The old `rpgbench/`, `run_worker.py`, `fixtures/`, and `experiment.json` are retained only for historical reproduction. The active UI is `workbench/`, with native inference and an explicitly selected Perchance remote text provider.
