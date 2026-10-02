@@ -22,6 +22,11 @@ This folder choice applies **only to model files and their partial downloads**. 
 
 ## Targeted runs
 
+For the objective results table, double-click **Open_Results_Table.bat**. It now has
+five grouping presets, an editable ordered grouping list, user-created/deletable
+presets, and percentage subtotals at the bottom of each collapsible group. See
+[results table grouping](docs/results-table-grouping.md) for controls and total rules.
+
 **Run Individual Test** in the left sidebar selects one model—or **All** models—and one enabled test definition, with all enabled variants or one chosen variant. **Test One Model** shows every enabled test with a checkbox; all are selected by default, and you can run any checked subset for one model. Native-model runs keep the test's repetitions, seeds and sampling settings; only pending cases run. Perchance groups unavailable controls and repetitions into one baseline per effective workflow. Use the page's check button to preflight that selection, or its run button to preflight and execute it. Progress and any repair actions appear in Overview; normal Results, Comparison and exports contain the evidence.
 
 Selection is temporary and does not edit `models.json` or test files. Targeted and full runs share case IDs and context allocation, so finishing targeted cases removes that work from the normal queue. The selected model must still satisfy the normal hardware tier and runtime checks. Unrelated missing or unassigned models do not block a selected run. Source-update restarts and automatic repair preserve the selection; they never broaden it to the entire queue.
@@ -77,3 +82,14 @@ See [TEST_REPORT.md](docs/TEST_REPORT.md) for actual test evidence, [WORKBENCH_G
 The old `rpgbench/`, `run_worker.py`, `fixtures/`, and `experiment.json` are retained only for historical reproduction. The active UI is `workbench/`, with native inference and an explicitly selected Perchance remote text provider.
 
 On 8 GB workers, Overview **Run all remaining tests** runs eligible local models first (including native recovery), then Perchance Text Generator. Local test definitions use a 120-second watchdog; Perchance uses 300 seconds. Completed local cases remain complete, so the same button can run only the remaining Perchance observations. Larger workers and explicitly targeted local runs do not include Perchance. Missing browser prerequisites appear in preflight with an Open Perchance setup action. Unsupported controls/repetitions still collapse to one recorded baseline.
+
+
+### Manual test judgements
+
+`Open_Results_Table.bat` opens a local viewer with separate Rejected, Needs review,
+and Accepted tables, in that order. Every definition initially needs review.
+Click a variant label or a test-version group's Judge action to record a decision.
+Rejected definitions stay saved but cannot run again; editing the execution
+definition creates a fresh Needs review definition. Grouping panels start collapsed
+and retain separate presets per table. Keep the launcher console open to save reviews.
+The offline HTML remains a read-only snapshot. See [review and grouping details](docs/results-table-grouping.md).

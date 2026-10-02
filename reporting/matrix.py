@@ -2,6 +2,8 @@
 from __future__ import annotations
 import json
 import re
+from reporting.grouping import row_grouping
+from reporting.timing import annotate as annotate_timing
 from workbench.domain import digest, experiment_spec
 
 
@@ -66,8 +68,9 @@ def build_matrix(records, specs, fingerprint):
         test = definition.get('test', {}); variant = definition.get('variant', {})
         labels = definition_names.get(digest(definition), names.get((test_id, variant_id), (test_id, variant_id)))
         row = rows.setdefault(key, {'id': key, 'test_id': test_id, 'variant_id': variant_id,
-            'name': labels[0], 'comparison_id': digest(test),
-            'variant_name': labels[1],
+            'name': labels[0], 'comparison_id': digest(test), 'definition_id': digest(definition),
+            'judgement': {'status': 'needs_review', 'blocked': False},
+            'variant_name': labels[1], 'grouping': row_grouping(test, variant, test_id, variant_id),
             'repetition': repetition, 'current': current, 'revision': digest([definition, workflow])[:8], 'cells': {}})
         return row
 
@@ -108,6 +111,8 @@ def build_matrix(records, specs, fingerprint):
         test_id = record.get('test_id', 'unknown'); variant_id = record.get('variant_id', 'unknown')
         row = row_for(definition, workflow, record.get('repetition', 0), test_id, variant_id)
         summaries[cid] = {'case_id': cid, 'model': model, 'outcome': outcome(record), 'current': row['current'],
+            'definition_id': digest(definition), 'execution_class': execution,
+            'timing_group': digest([definition, workflow, execution, simulated]),
             'metadata': {key: record[key] for key in ('model_id', 'test_id', 'variant_id', 'repetition', 'status',
                 'score', 'timed_out', 'timeout_seconds', 'watchdog_seconds', 'measurement_valid', 'error', 'reason', 'pipeline_seconds', 'execution_class',
                 'target', 'provenance', 'capability_policy', 'feature_applicability') if key in record},
@@ -145,5 +150,5 @@ def build_matrix(records, specs, fingerprint):
     ordered_rows = sorted(rows.values(), key=lambda r: (not r['current'], r['test_id'], r['comparison_id'], r['variant_id'], r['revision'], r['repetition']))
     empty = {'ids': [], 'primary_ids': [], 'reference_ids': []}
     model_totals = {m['id']: totals([r['cells'].get(m['id'], empty) for r in ordered_rows], summaries) for m in ordered_models}
-    return {'models': ordered_models, 'rows': ordered_rows, 'records': summaries, 'totals': model_totals, 'excluded_records': excluded,
-            'note': 'Only tests with a fixed answer or final-state oracle appear here. Timeout is a run limit, not part of test identity or row grouping. Actual deadlines remain in saved run evidence. Dialogue and other open-ended generation are reserved for a separate view; their saved evidence is preserved. Totals count unique saved observations. Reference cells do not add trials. All-results totals are descriptive across saved configurations; use Current definitions to exclude historical experiments. Colors use original exact-match scores. Not-recorded cells are not failures or necessarily pending work. Skipped, invalid and infrastructure failures remain separate from semantic failures.'}
+    return annotate_timing({'models': ordered_models, 'rows': ordered_rows, 'records': summaries, 'totals': model_totals, 'excluded_records': excluded,
+            'note': 'Only tests with a fixed answer or final-state oracle appear here. Timeout is a run limit, not part of test identity or row grouping. Actual deadlines remain in saved run evidence. Dialogue and other open-ended generation are reserved for a separate view; their saved evidence is preserved. Totals count unique saved observations. Reference cells do not add trials. All-results totals are descriptive across saved configurations; use Current definitions to exclude historical experiments. Colors use original exact-match scores. Not-recorded cells are not failures or necessarily pending work. Skipped, invalid and infrastructure failures remain separate from semantic failures.'}, specs)

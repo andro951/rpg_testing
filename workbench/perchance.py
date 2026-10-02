@@ -13,7 +13,8 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .domain import canonical, digest, code_fingerprint, experiment_spec, load_tests, device_tier, write_json
+from .judgements import load_tests, guarded_run, JudgementStore, definition_id
+from .domain import canonical, digest, code_fingerprint, experiment_spec, device_tier, write_json
 from .planning import validate_selection
 from .workflows import messages, condition, output_schema, evaluate, Cancelled, repetition_seed
 from .scoring import parse
@@ -344,8 +345,10 @@ def execute_job(job, backend, cancel, progress=None):
     return result
 
 
+@guarded_run
 def run(app, report, pending, backend_factory=BrowserBackend, append=False):
-    jobs = [g for g in pending['groups'] if not g['done']]
+    entries = JudgementStore(app.root).read()['entries']
+    jobs = [g for g in pending['groups'] if not g['done'] and not entries.get(definition_id(g['test'], g['variant']), {}).get('blocked')]
     if not append:
         app.run_total = len(jobs); app.run_processed = 0
     artifact = app.data / 'perchance-plans' / (uuid.uuid4().hex + '.json')

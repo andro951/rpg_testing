@@ -8,7 +8,8 @@ import shutil
 import socket
 import tempfile
 from pathlib import Path
-from .domain import ResultStore, load_tests, read_json, device_tier
+from .judgements import load_tests
+from .domain import ResultStore, read_json, device_tier
 from .inventory import automatic_context, command, detect_gpus, executable, scan_models
 from .planning import pending_plan, public_plan, requirements, validate_selection
 

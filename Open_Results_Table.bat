@@ -13,7 +13,7 @@ echo Generating the results table from saved results...
 "%REPORT_PYTHON%" -m reporting.report
 if errorlevel 1 goto failed
 
-start "" "%CD%\.local\reports\statistics.html"
+"%REPORT_PYTHON%" -m reporting.server
 if errorlevel 1 goto failed
 exit /b 0
 

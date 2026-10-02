@@ -17,7 +17,8 @@ import uuid
 import zipfile
 from datetime import datetime,timezone
 from pathlib import Path
-from .domain import ResultStore, TIERS, canonical, digest, read_json, safe_id, write_json, validate_test, load_tests
+from .judgements import load_tests, guarded_run
+from .domain import ResultStore, TIERS, canonical, digest, read_json, safe_id, write_json, validate_test
 from .inventory import command, executable, scan_models
 from .planning import stable_backend_version, validate_catalog, normalize_selection, validate_selection
 from . import preflight
@@ -405,6 +406,7 @@ class Controller(ModelManager):
             self.cancel_event.set();self.resume_event.set()
             if self.backend:self.backend.cancel()
         else:raise ValueError('Unknown control')
+    @guarded_run
     def run(self,selection=None):
         selection=normalize_selection(selection)
         if selection is not None:validate_selection(selection,self.selection_models(),load_tests(self.root/'test_specs'))

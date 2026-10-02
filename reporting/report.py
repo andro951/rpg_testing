@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from workbench.analysis import summarize
 from workbench.domain import ResultStore, canonical, code_fingerprint, digest, experiment_spec, read_json
 from .matrix import build_matrix
+from workbench.judgements import JudgementStore, annotate
 
 VERSION = 'all-results-report-v2'
 OPERATIONS = ('replace', 'remove', 'add', 'move', 'copy', 'test')
@@ -212,7 +213,7 @@ def write_report(report, output, protected=()):
         root = Path(root).resolve()
         if output == root or root in output.parents:
             raise ValueError('Report output must be outside evidence and test specs')
-    script = Path(__file__).with_name('matrix.js').read_text(encoding='utf-8') + '\n' + Path(__file__).with_name('report.js').read_text(encoding='utf-8')
+    script = '\n'.join(Path(__file__).with_name(name).read_text(encoding='utf-8') for name in ('groupings.js', 'judgements.js', 'matrix.js', 'report.js'))
     data = canonical(report).replace('<', '\\u003c').replace('\u2028', '\\u2028').replace('\u2029', '\\u2029')
     html = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RPG testing statistics</title><body><script type="application/json" id="evidence-data">' + data + '</script><script>' + script + '</script></body></html>'
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -229,6 +230,7 @@ def main(argv=None):
     records, problems = load_evidence(args.source)
     specs = [read_json(path) for path in sorted(args.specs.glob('*.json'))]
     report = build_report(records, specs, problems=problems)
+    annotate(report['matrix'], JudgementStore(args.specs.parent).read())
     if args.source.is_dir():
         for cid, summary in report['matrix']['records'].items():
             summary['source_uri'] = (args.source / summary['metadata']['model_id'] / (cid + '.json')).resolve().as_uri()
