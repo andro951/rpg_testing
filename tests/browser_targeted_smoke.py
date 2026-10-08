@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from workbench.controller import Controller
 from workbench.domain import load_tests as read_tests
 from workbench.server import WorkbenchServer
-from test_workbench_targeted import configure_demo
+from tests.test_workbench_targeted import configure_demo
 
 
 def main():
@@ -30,7 +30,8 @@ def main():
         app.selftest = no_unit_tests
         expected = sum(t.get('repetitions', 1) * sum(v.get('enabled', True) for v in t['variants']) for t in read_tests(project / 'test_specs'))
         original_files = {p: p.read_bytes() for p in (project / 'test_specs').glob('*.json')}
-        server = WorkbenchServer(('127.0.0.1', 0), app, 'targeted-browser-key')
+        selected_timeout = next(t['timeout_seconds'] for t in read_tests(project / 'test_specs') if t['id']=='time_only')
+        server = WorkbenchServer(('127.0.0.1', 0), app)
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         try:
             with sync_playwright() as p:
@@ -53,11 +54,9 @@ def main():
                     page.expose_function('targetedBridge',transport)
                     html=(root/'workbench/web/index.html').read_text().replace('<link rel="stylesheet" href="/style.css">','').replace('<script src="/app.js"></script>','')
                     page.set_content(html);page.add_style_tag(content=(root/'workbench/web/style.css').read_text())
-                    page.add_script_tag(content="""const testStore={'rpg-worker-key':'targeted-browser-key'};
-Object.defineProperty(window,'sessionStorage',{value:{getItem:k=>testStore[k]||null,setItem:(k,v)=>testStore[k]=v}});
-window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,options);return new Response(Uint8Array.from(atob(r.body),c=>c.charCodeAt(0)),{status:r.status,headers:{'Content-Type':r.type}})};""")
+                    page.add_script_tag(content="""window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,options);return new Response(Uint8Array.from(atob(r.body),c=>c.charCodeAt(0)),{status:r.status,headers:{'Content-Type':r.type}})};""")
                     page.add_script_tag(content=(root/'workbench/web/app.js').read_text())
-                else:page.goto(base+'/#key=targeted-browser-key')
+                else:page.goto(base+'/')
                 expect(page.locator('#connection')).to_contain_text('Connected')
                 page.get_by_role('button', name='Run Individual Test', exact=True).click()
                 expect(page.locator('#page-individual')).to_be_visible()
@@ -68,7 +67,7 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 page.locator('#individual-test').select_option('time_only')
                 page.locator('#individual-variant').select_option('direct_json_patch')
                 expect(page.locator('#individual-summary')).to_contain_text('1 configured case(s)')
-                expect(page.locator('#individual-summary')).to_contain_text('60 s limit each')
+                expect(page.locator('#individual-summary')).to_contain_text(f'{selected_timeout} s limit each')
                 page.wait_for_timeout(1500)
                 expect(page.locator('#individual-model')).to_have_value('beta')
                 expect(page.locator('#individual-variant')).to_have_value('direct_json_patch')
@@ -114,7 +113,7 @@ window.fetch=async(path,options={})=>{const r=await window.targetedBridge(path,o
                 assert page.locator('#one-model-tests input[type="checkbox"]:checked').count()==boxes.count()
                 expect(page.locator('#one-model-toggle-tests')).to_have_text('Deselect all')
                 expect(page.locator('#one-model-summary')).to_contain_text(str(expected) + ' configured case(s)')
-                expect(page.locator('#one-model-tests')).to_contain_text('60 s limit')
+                expect(page.locator('#one-model-tests')).to_contain_text(f'{selected_timeout} s limit')
                 page.locator('#one-model-toggle-tests').click()
                 assert page.locator('#one-model-tests input[type="checkbox"]:checked').count()==0
                 expect(page.locator('#one-model-toggle-tests')).to_have_text('Select all')

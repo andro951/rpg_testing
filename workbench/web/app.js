@@ -1,8 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-let key=sessionStorage.getItem('rpg-worker-key')||'';
-const fragment=new URLSearchParams(location.hash.slice(1));
-if(fragment.has('key')){key=fragment.get('key');sessionStorage.setItem('rpg-worker-key',key);history.replaceState(null,'',location.pathname);}
+if(new URLSearchParams(location.hash.slice(1)).has('key'))history.replaceState(null,'',location.pathname+location.search);
 let state=null,page='overview',records=[],testData=[],polling=false,setupDirty=false;const promptedRepairs=new Set();
 $('page-setup').addEventListener('input',()=>{setupDirty=true;});
 $('page-setup').addEventListener('change',()=>{setupDirty=true;});
@@ -10,6 +8,9 @@ const titles={overview:'Overview',individual:'Run Individual Test','one-model':'
 function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 function showAlert(message,title='Notice'){ $('alert-title').textContent=title;$('alert-text').textContent=message;if(!$('alert').open)$('alert').showModal(); }
 function toast(text){$('toast').textContent=text;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),3500);}
+//#region Private network access
+$('enable-remote').parentElement.querySelector('p.muted').textContent=`The workbench opens directly on this computer or through Tailscale. Your Tailscale access rules grant remote control. The service binds only to loopback and your Tailscale address.`;
+//#endregion
 async function offerAutomaticRepair(report){
  const issue=report?.issues?.find(i=>i.action?.type==='runtime_install'),rid=report?.report_id;
  if(!issue||!rid||state?.busy)return;
@@ -17,7 +18,20 @@ async function offerAutomaticRepair(report){
  if(!confirm('llama.cpp is required to run the benchmarks but is not installed.\n\nInstall an official llama.cpp GPU runtime under this Workbench repository now? GPU drivers will not be installed or changed.'))return;
  await api('/api/fix',{issue_id:issue.id});
 }
-async function api(path,body){const options={headers:{Authorization:'Bearer '+key}};if(body!==undefined){options.method='POST';options.headers['Content-Type']='application/json';options.body=JSON.stringify(body);}const r=await fetch(path,options);if(r.status===403){if(!$('login').open)$('login').showModal();throw Error('Pair this browser with the worker.');}if(!r.ok){let msg='Request failed';try{msg=(await r.json()).error||msg;}catch{}throw Error(msg);}if(r.headers.get('Content-Type')?.includes('application/json'))return r.json();return r.blob();}
+const api=async(path,body)=>{
+    const options={headers:{}};
+    if(body!==undefined){
+        options.method='POST';options.headers['Content-Type']='application/json';options.body=JSON.stringify(body);
+    }
+
+    const response=await fetch(path,options);
+    if(!response.ok){
+        const data=await response.json();
+        throw Error(data.error||`Request failed (${response.status})`);
+    }
+
+    return response.headers.get('Content-Type')?.includes('application/json')?response.json():response.blob();
+};
 function on(id,fn){$(id).addEventListener('click',async()=>{try{await fn();}catch(e){showAlert(e.message);}});}
 function button(text,fn,cls){const b=el('button',text,cls);b.addEventListener('click',async()=>{try{await fn();}catch(e){showAlert(e.message);}});return b;}
 function setPage(name){page=name;document.querySelectorAll('.page').forEach(n=>n.classList.toggle('hidden',n.id!=='page-'+name));document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('selected',n.dataset.page===name));$('page-title').textContent=titles[name];if(name==='tests')loadTests().catch(e=>showAlert(e.message));if(name==='results')loadResults().catch(e=>showAlert(e.message));if(name==='analysis')loadAnalysis().catch(e=>showAlert(e.message));if(name==='individual'||name==='one-model')loadRunOptions().catch(e=>showAlert(e.message));}
@@ -36,7 +50,7 @@ queueMicrotask(()=>offerAutomaticRepair(s.report).catch(e=>showAlert(e.message,'
 $('folder-note').textContent=s.report?.folder?.path?('Active folder: '+s.report.folder.path+' · '+s.report.folder.source):'No active model folder detected yet.';
 renderModels();$('log-view').textContent=s.logs.map(l=>l.time+' ['+l.category+'] '+l.message).join('\n');$('remote-url').textContent=s.remote?.url||'';
 if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=s.settings.publish_results; }
-renderHub();renderRuntimes();renderRunControls();folderPrompts();
+renderHub();renderRuntimes();renderRunControls();PerchanceInstall.Render(s.perchance_setup_prompt);folderPrompts();
 const scope=s.report?.selection;let scopeTests='all enabled tests';if(scope?.test_id)scopeTests=scope.test_id;else if(scope?.test_ids)scopeTests=scope.test_ids.length+' selected test(s)';const scopeModel=scope?.all_models?'all eligible models':scope?.model_id;$('run-scope').textContent=scope?('Scope: '+scopeModel+' · '+scopeTests+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
 }
 let modelRenderSignature='',modelVramDrafts=new Map();
@@ -79,13 +93,12 @@ function renderModels(){
  }
  if(!state.models.length)list.append(el('article',state.state==='scanning'?'Scanning the selected models folder…':'No discovered models yet. Choose or rescan the active folder.'));
 }
-async function poll(){if(polling||!key)return;polling=true;try{render(await api('/api/state'));if($('login').open)$('login').close();}catch(e){$('connection').textContent='● Worker disconnected';}finally{polling=false;}}
+async function poll(){if(polling)return;polling=true;try{render(await api('/api/state'));}catch(e){$('connection').textContent='● Worker disconnected';}finally{polling=false;}}
 async function loadTests(){if(state?.busy){$('test-list').replaceChildren(el('article','Test-file editing is available when the current operation has finished.'));return;}const data=await api('/api/tests');testData=data.tests;$('example-select').replaceChildren(...data.examples.map(x=>new Option(x,x)));const list=$('test-list');list.replaceChildren();for(const t of data.tests){const card=el('article');card.append(el('h3',t.name||t.id),el('p',t.id+' · '+t.variants.length+' workflow variants · '+(t.repetitions||1)+' repetition(s) · '+t.timeout_seconds+' s limit · '+(t.enabled===false?'Disabled':'Enabled')));card.append(button('View / edit JSON',()=>openEditor(t)),el('p',t.variants.map(v=>v.id+' ('+v.steps.length+' top-level steps)').join(' · '),'muted'));list.append(card);}}
 function openEditor(t){$('test-json').value=JSON.stringify(t,null,2);$('editor').showModal();}
 async function loadResults(){if(state?.busy){$('result-list').replaceChildren(el('article','Stop or finish the active run before loading results from disk. Live progress remains available in Overview.'));return;}records=await api('/api/results');renderResults();}
 function renderResults(){const search=$('result-filter').value.toLowerCase();const list=$('result-list');list.replaceChildren();for(const r of records.filter(r=>[r.model_id,r.test_id,r.variant_id].join(' ').toLowerCase().includes(search))){const card=el('article',undefined,'result-row');const title=el('div');title.append(el('b',r.model_id),el('p',r.test_id+' / '+r.variant_id,'muted'));const correct=r.score?.exact_match;let label=r.status!=='completed'?r.status:(correct===true?'PASS':correct===false?'FAIL':'NO EXACT ORACLE');if(r.timed_out)label+=' · TIMEOUT';if(r.measurement_valid===false&&r.status==='completed')label+=' · INVALID MEASUREMENT';label+=' · '+(r.execution_class||'legacy_unverified');card.append(title,el('span',label,correct===true?'success':'error'),el('span',typeof r.pipeline_seconds==='number'?r.pipeline_seconds.toFixed(3)+' s':'—'));const act=el('div',undefined,'actions');act.append(button('Inspect',()=>{$('result-json').textContent=JSON.stringify(r,null,2);$('inspect').showModal();}),button('Delete / rerun',async()=>{if(!confirm('Delete this result and make the case pending again? This action is recorded in the audit log.'))return;await api('/api/result/delete',{model_id:r.model_id,case_id:r.case_id});await loadResults();},'danger'));card.append(act);list.append(card);}if(!list.children.length)list.append(el('article','No matching result files.'));}
 async function download(path,name){const blob=await api(path);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-on('login-submit',async()=>{key=$('login-key').value.trim();sessionStorage.setItem('rpg-worker-key',key);try{render(await api('/api/state'));$('login').close();}catch(e){$('login-error').textContent=e.message;}});
 on('preflight',async()=>{await api('/api/preflight',{});await poll();});on('unit-tests',async()=>{await api('/api/unit-tests',{});await poll();});on('rescan',async()=>{await scanModelsInBackground();});on('run',async()=>{await api('/api/run',{});await poll();});
 for(const [id,action] of [['pause','pause'],['resume','resume'],['stop-model','stop_after_model'],['stop','stop']])on(id,()=>api('/api/control',{action}));
 on('prepare',()=>api('/api/preflight',{preparation:{gpu_name:$('target-name').value,vram_gb:Number($('target-tier').value)}}));
@@ -115,9 +128,8 @@ async function chooseLlamaServer(){
 }
 on('save-setup',async()=>{const previousRoot=state.settings.model_root;const values={model_root:$('model-root').value.trim(),llama_path:$('llama-path').value.trim(),sync_source:$('sync-source').checked,publish_results:$('publish-results').checked};if($('api-token').value)values.hf_token=$('api-token').value;if(values.publish_results&&!state.settings.publish_results&&!confirm('Publish only synthetic safe-for-work results to the public GitHub repository? Do not enable for private data.'))return;await api('/api/settings',values);setupDirty=false;$('api-token').value='';toast('Worker setup saved.');if(values.model_root&&values.model_root!==previousRoot){toast('Models folder saved. Scanning it now…');await scanModelsInBackground();}else{await poll();}});
 on('browse-models',chooseModelsFolder);on('browse-llama',chooseLlamaServer);
-on('enable-remote',async()=>{const r=await api('/api/remote/enable',{});$('remote-url').textContent=r.url;toast('Private controller enabled. Pair your laptop at the displayed address.');});
+on('enable-remote',async()=>{const r=await api('/api/remote/enable',{});$('remote-url').textContent=r.url;toast('Private controller enabled. Open the displayed address on your laptop through Tailscale.');});
 on('disable-remote',async()=>{if(confirm('Disable remote access? A laptop connection will disconnect, but the local workbench stays available.'))await api('/api/remote/disable',{});});
-on('pairing',async()=>{$('pairing-value').textContent=(await api('/api/pairing-key')).key;});
 on('close-worker',async()=>{if(confirm('Close the worker service? Remote controls will stop working until it is started again.'))await api('/api/shutdown',{});});
 on('restart',async()=>{await api('/api/restart',{});toast('Restarting with the latest code…');setTimeout(()=>location.reload(),2500);});
 
@@ -126,7 +138,7 @@ on('restart',async()=>{await api('/api/restart',{});toast('Restarting with the l
 let hubSignature='',runtimeSignature='',folderChoosing=false;
 for(const tier of [8,12,16,24,32,40,48,80])$('hub-tier').append(new Option(tier+' GiB',String(tier)));
 function folderPrompts(){
- if(!state||state.demo||state.busy||$('login').open||folderChoosing||state.settings.perchance_only)return;
+ if(!state||state.demo||state.busy||folderChoosing||state.settings.perchance_only)return;
  const root=state.settings.model_root;
  if(!root){if(!$('folder-onboarding').open)$('folder-onboarding').showModal();return;}
  if($('folder-onboarding').open)$('folder-onboarding').close();
@@ -260,6 +272,55 @@ for(const id of ['individual-model','one-model-model','individual-variant'])$(id
 $('individual-test').addEventListener('change',()=>{$('individual-variant').value='';renderRunVariants();renderRunControls();});
 
 //#region Perchance service setup
+const PerchanceInstall = {
+ Initialize: () => {
+  const dialog=el(`dialog`);dialog.id=`perchance-install`;
+  const heading=el(`h2`,`Install Perchance browser dependency?`);
+  const note=el(`p`,`Perchance is scheduled for this run, but its browser setup needs repair. Install Playwright and, if needed, Chromium on the worker computer, then verify browser launch?`);
+  const reason=el(`p`);reason.id=`perchance-install-reason`;reason.className=`muted`;
+  const scope=el(`p`,`No skips Perchance for this run. We will ask again on the next run if setup is still needed.`);
+  const actions=el(`div`);actions.className=`actions`;
+  const accept=button(`Yes, install`,()=>PerchanceInstall.Answer(true),`primary`);accept.id=`perchance-install-yes`;
+  const decline=button(`No, skip this run`,()=>PerchanceInstall.Answer(false));decline.id=`perchance-install-no`;
+  actions.append(accept,decline);dialog.append(heading,note,reason,scope,actions);document.body.append(dialog);
+  dialog.addEventListener(`cancel`,event=>{
+   event.preventDefault();
+   PerchanceInstall.Answer(false).catch(error=>showAlert(error.message));
+  });
+ },
+ Render: prompt => {
+  const dialog=$(`perchance-install`);
+  if(!prompt){
+   if(dialog.open)
+    dialog.close();
+
+   return;
+  }
+
+  if(dialog.dataset.promptId!==prompt.id){
+   dialog.dataset.promptId=prompt.id;
+   $(`perchance-install-reason`).textContent=prompt.reason;
+   $(`perchance-install-yes`).disabled=false;$(`perchance-install-no`).disabled=false;
+  }
+
+  if(PerchanceInstall.Submitted===prompt.id)
+   return;
+
+  if(!dialog.open)
+   dialog.showModal();
+ },
+ Answer: async approved => {
+  const dialog=$(`perchance-install`),id=dialog.dataset.promptId;
+  $(`perchance-install-yes`).disabled=true;$(`perchance-install-no`).disabled=true;
+  await api(`/api/perchance/setup-choice`,{id,approved}).catch(error=>{
+   $(`perchance-install-yes`).disabled=false;$(`perchance-install-no`).disabled=false;
+   throw error;
+  });
+  PerchanceInstall.Submitted=id;
+  dialog.close();await poll();
+ }
+};
+PerchanceInstall.Initialize();
 const PerchanceSetup = {
  Initialize: () => {
   const section=document.createElement('section');
@@ -301,4 +362,4 @@ const PerchanceSetup = {
 };
 PerchanceSetup.Initialize();
 //#endregion
-if(!key)$('login').showModal();else poll();setInterval(poll,1200);
+poll();setInterval(poll,1200);

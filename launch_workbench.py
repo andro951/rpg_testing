@@ -21,12 +21,12 @@ def current_head(root):
 def reopen_existing_worker(root,args,data):
     from workbench.backends import Transport
     keyfile=data/'control.key'
-    if not keyfile.exists():raise RuntimeError('Another worker owns this repository, but its control key is missing.')
-    token=keyfile.read_text().strip();port=8766 if args.demo else 8765
+    # Only an older, still-running worker needs its saved key during upgrade.
+    token=keyfile.read_text().strip() if keyfile.exists() else '';port=8766 if args.demo else 8765
     def get_state():return Transport(f'http://127.0.0.1:{port}',token,timeout=5).request('/api/state')
     info=get_state();head=current_head(root);loaded=info.get('process_source_commit')
     # A pre-version-reporting worker is necessarily older than this launcher and must restart once.
-    if loaded is None or (head and loaded!=head):
+    if loaded is None or (head and loaded!=head) or info.get('control_access')!='private_network':
         try:Transport(f'http://127.0.0.1:{port}',token,timeout=5).request('/api/restart',{})
         except Exception as exc:raise RuntimeError('An older Workbench is still running. Close it once, then start Workbench again.') from exc
         import time
@@ -35,10 +35,10 @@ def reopen_existing_worker(root,args,data):
             time.sleep(.25)
             try:
                 refreshed=get_state()
-                if 'process_source_commit' in refreshed and (not head or refreshed.get('process_source_commit')==head):break
+                if 'process_source_commit' in refreshed and (not head or refreshed.get('process_source_commit')==head) and refreshed.get('control_access')=='private_network':break
             except Exception:continue
         else:raise RuntimeError('Workbench update was pulled, but the older worker did not restart. Close it once, then start Workbench again.')
-    if not args.no_browser:webbrowser.open(f'http://127.0.0.1:{port}/#key={token}')
+    if not args.no_browser:webbrowser.open(f'http://127.0.0.1:{port}/')
     return 0
 
 

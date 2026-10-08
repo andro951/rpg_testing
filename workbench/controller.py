@@ -90,6 +90,8 @@ class Controller(ModelManager):
         self.logs=[];self.pending_logs=[];self.completed_now=0;self.session_errors=0;self.current=None;self.restart_required=False
         self.started=None;self.finished=None;self.publisher=None;self.last_publish=0;self.version_cache=None
         self.on_shutdown=None;self.remote_info=None;self.requested_run_selection=None
+        self.perchance_setup_decision=None;self.perchance_setup_prompt=None;self.perchance_setup_event=None
+        self.perchance_setup_answer=None
         self.store.root.mkdir(parents=True,exist_ok=True)
         for name in ('logs','preflight_reports'):(self.data/name).mkdir(exist_ok=True)
         self.process_source_commit=self.source_commit()
@@ -134,6 +136,7 @@ class Controller(ModelManager):
                 'issues':copy.deepcopy(report.get('issues',[])),
                 'plan':copy.deepcopy(report.get('plan',{})),'gpu':copy.deepcopy(report.get('gpu')),
                 'folder':copy.deepcopy(report.get('folder')),'note':report.get('note')}
+        record['perchance_setup']=copy.deepcopy(report.get('perchance_setup'))
         write_json(self.data/'preflight_reports'/(stamp+'.json'),record)
         if record['issues']:
             for item in record['issues']:self.log('preflight_issue',json.dumps(item,sort_keys=True,ensure_ascii=False))
@@ -230,12 +233,18 @@ class Controller(ModelManager):
         return self.catalog()+([] if self.demo else [model()])
     def build_preflight(self,preparation=None,selection=None,track_progress=True):
         from . import perchance
+        from .perchance_setup import skipped
+        omit_perchance=skipped(self,selection,preparation)
+        if perchance.selected(selection) and omit_perchance:
+            return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'selection':selection,
+                    'issues':[],'plan':{'pending':0,'complete':0,'groups':[]},
+                    'note':'Perchance was skipped for this run. Its unfinished observations remain pending.'}, {'pending':0,'complete':0,'groups':[]}
         if perchance.selected(selection):return perchance.preflight(self,preparation,selection)
         report,plan=preflight.build(self,preparation,track_progress=track_progress,selection=selection)
         # Overview Run all includes the remote baseline only on the assigned tier.
         gpu=report.get('gpu',{})
         from .domain import device_tier
-        if selection is None and not self.demo and device_tier(gpu.get('total_gib',0),gpu.get('name',''))==8:
+        if selection is None and not self.demo and not omit_perchance and device_tier(gpu.get('total_gib',0),gpu.get('name',''))==8:
             remote_report,remote_plan=perchance.preflight(self,preparation,{'model_id':perchance.MODEL_ID})
             plan={**plan,'perchance_plan':remote_plan,'perchance_report':remote_report,
                   'pending':plan['pending']+remote_plan['pending'],'complete':plan['complete']+remote_plan['complete']}
@@ -245,14 +254,24 @@ class Controller(ModelManager):
             report['ready']=report['ready'] and remote_report['ready']
             report['prepared']=report['prepared'] and remote_report['prepared']
             report['note']+=' Perchance runs last with a 300-second limit; its counts are independent observations after unsupported controls/repetitions collapse.'
+        if omit_perchance:report['note']+=' Perchance was skipped for this run; its unfinished observations remain pending.'
         return report,plan
-    def check(self,preparation=None,selection=None):
+    def check(self,preparation=None,selection=None,setup=True):
+        if setup:
+            from .perchance_setup import prepare
+            prepare(self,preparation,selection)
         self.message='Checking files, pending work, and backend readiness.'
         self.set_progress('preflight','Starting preflight',0,0,'Preparing readiness checks.')
         report,plan=self.build_preflight(preparation,selection)
+        report['perchance_setup']=copy.deepcopy(self.perchance_setup_decision)
+        if self.perchance_setup_decision and self.perchance_setup_decision['status']=='failed':
+            report['issues'].append(preflight.issue('perchance_setup_failed',self.perchance_setup_decision['reason']))
+            report['ready']=False;report['prepared']=False
         self.report,self.plan=report,plan
         self.record_preflight(report)
         self.message='Preparation checks passed; actual GPU checks remain.' if report['prepared'] else 'Ready.' if report['ready'] else 'Preflight found issues. Use the individual action buttons.'
+        if self.perchance_setup_decision and self.perchance_setup_decision['status']=='declined':
+            self.message=('Ready for local tests. ' if report['ready'] else '' if not report['issues'] else self.message+' ')+'Perchance was skipped for this run. It will be offered again on the next run.'
         self.log('preflight',self.message)
         self.finish_progress('preflight','Preflight complete',self.message)
         self.flush_logs();return report
@@ -281,7 +300,7 @@ class Controller(ModelManager):
             try:
                 if kind=='preflight':self.check(payload.get('preparation'),selection=selection)
                 elif kind=='unit_tests':self.selftest()
-                elif kind=='fix':self.fix(payload);self.check(selection=repair_selection)
+                elif kind=='fix':self.fix(payload);self.check(selection=repair_selection,setup=False)
                 elif kind=='run':self.run(selection=selection)
                 elif kind=='hub_search':self.search_hub(payload)
                 elif kind=='hub_inspect':self.inspect_hub(payload)
@@ -293,11 +312,9 @@ class Controller(ModelManager):
                     from .perchance import verify_connection
                     verify_connection(self)
                 elif kind=='perchance_setup':
-                    flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
-                    installed=subprocess.run([sys.executable,'-m','pip','install','-r',str(self.root/'requirements-perchance.txt')],
-                                             capture_output=True,text=True,timeout=300,**flags)
-                    self.log('perchance_setup',installed.stdout+installed.stderr)
-                    if installed.returncode:raise RuntimeError('Optional provider setup failed; inspect Logs')
+                    from .perchance_setup import install
+                    status=install(self)
+                    if not status['ready']:raise RuntimeError('Perchance browser setup failed: '+status['reason'])
                     self.message='Perchance browser dependency installed. Verify the connection before running.'
                 else:raise ValueError('Unknown operation')
             except Cancelled:self.state='stopped';self.message='Stopped. Unfinished cases remain pending.'
@@ -412,11 +429,13 @@ class Controller(ModelManager):
         if selection is not None:validate_selection(selection,self.selection_models(),load_tests(self.root/'test_specs'))
         self.requested_run_selection=copy.deepcopy(selection)
         self.log('run_requested',json.dumps({'selection':selection},sort_keys=True))
+        from .perchance_setup import prepare
+        prepare(self,selection=selection,reuse=True)
         if not self.demo and self.settings['sync_source']:
             from .gitops import pull
             if pull(self.root):
                 self.restart_required=True;raise RuntimeError('Source changed before the run. Restart with the new version before starting tests.')
-        report=self.check(selection=selection)
+        report=self.check(selection=selection,setup=False)
         if not report['ready']:
             self.log('run_blocked',json.dumps({'issue_ids':[i.get('id') for i in report.get('issues',[])],
                                                'issues':report.get('issues',[])},sort_keys=True,ensure_ascii=False))
@@ -443,8 +462,10 @@ class Controller(ModelManager):
         finally:self.finished=now();self.current=None
         self.state='finished' if not self.session_errors else 'finished_with_errors'
         self.message='Run finished. Remote observations and collapsed cases are recorded separately.' if report.get('remote_provider') or self.plan.get('perchance_plan') else 'Run finished. Full-GPU, skipped, and hybrid results are recorded separately.'
+        if self.perchance_setup_decision and self.perchance_setup_decision['status']=='declined':self.message+=' Perchance was skipped for this run; its observations remain pending.'
         self.finish_progress('run','Benchmark run complete',self.message)
         self.report,self.plan=self.build_preflight(selection=selection,track_progress=False)
+        self.report['perchance_setup']=copy.deepcopy(self.perchance_setup_decision)
     def source_commit(self):
         try:
             from .gitops import git
@@ -464,6 +485,7 @@ class Controller(ModelManager):
     def snapshot(self):
         with self.lock:
             return {'state':self.state,'busy':self.operation.locked(),'message':self.message,'report':copy.deepcopy(self.report),
+                    'perchance_setup_prompt':copy.deepcopy(self.perchance_setup_prompt),
                     'models':copy.deepcopy(self.last_models),'current':copy.deepcopy(self.current),'completed_now':self.completed_now,
                     'session_errors':self.session_errors,'demo':self.demo,'run_total':self.run_total,'run_processed':self.run_processed,
                     'telemetry':self.monitor.snapshot() if self.monitor else self.last_telemetry,

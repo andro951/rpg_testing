@@ -33,15 +33,16 @@ def main():
         base_tests=[t for t in base_tests if t.get('enabled',True)]
         base_test_count=len(base_tests)
         base_case_count=sum(t.get('repetitions',1)*sum(v.get('enabled',True) for v in t['variants']) for t in base_tests)
-        server=WorkbenchServer(('127.0.0.1',0),app,'browser-test-key')
+        server=WorkbenchServer(('127.0.0.1',0),app)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
             with patch('workbench.server.select_directory',return_value=str(project)),sync_playwright() as p:
                 executable=os.environ.get('CHROME_PATH') or shutil.which('chromium') or shutil.which('google-chrome')
                 kwargs={'executable_path':executable} if executable else {}
                 browser=p.chromium.launch(headless=True,args=['--no-sandbox'],**kwargs)
-                page=browser.new_page(viewport={'width':1440,'height':1060});errors=[]
+                page=browser.new_page(viewport={'width':1440,'height':1060});errors=[];request_auth=[]
                 page.on('pageerror',lambda err:errors.append(str(err)))
+                page.on('request',lambda request:request_auth.append(request.headers.get('authorization')) if '/api/' in request.url else None)
                 base=f'http://127.0.0.1:{server.server_port}'
                 bridge=os.environ.get('WORKBENCH_BROWSER_BRIDGE')=='1'
                 if bridge:
@@ -57,11 +58,9 @@ def main():
                     html=(root/'workbench/web/index.html').read_text().replace('<link rel="stylesheet" href="/style.css">','').replace('<script src="/app.js"></script>','')
                     page.set_content(html)
                     page.add_style_tag(content=(root/'workbench/web/style.css').read_text())
-                    page.add_script_tag(content='''const store={'rpg-worker-key':'browser-test-key'};
-Object.defineProperty(window,'sessionStorage',{value:{getItem:k=>store[k]||null,setItem:(k,v)=>store[k]=v}});
-window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(path,options);return new Response(Uint8Array.from(atob(r.body),c=>c.charCodeAt(0)),{status:r.status,headers:{'Content-Type':r.type}})};''')
+                    page.add_script_tag(content='''window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(path,options);return new Response(Uint8Array.from(atob(r.body),c=>c.charCodeAt(0)),{status:r.status,headers:{'Content-Type':r.type}})};''')
                     page.add_script_tag(content=(root/'workbench/web/app.js').read_text())
-                else:page.goto(base+'/#key=browser-test-key')
+                else:page.goto(base+'/')
                 expect(page.locator('#connection')).to_contain_text('Connected')
                 page.locator('#preflight').click();expect(page.locator('#readiness')).to_have_text('Ready',timeout=15000)
                 assert unit_test_calls==[], 'Preflight must not run Workbench unit/smoke tests'
@@ -116,13 +115,15 @@ window.fetch=async(path,options={})=>{const r=await window.localHttpTestBridge(p
                 page.locator('nav button[data-page="overview"]').click();page.wait_for_timeout(1500)
                 page.locator('nav button[data-page="setup"]').click()
                 expect(page.locator('#model-root')).to_have_value('/example/unsaved-model-folder')
-                page.locator('#pairing').click();expect(page.locator('#pairing-value')).to_have_text('browser-test-key')
+                expect(page.locator('#pairing')).to_have_count(0);expect(page.locator('#login')).to_have_count(0)
+                expect(page.locator('#page-setup')).to_contain_text('Your Tailscale access rules grant remote control.')
                 page.set_viewport_size({'width':800,'height':1000})
                 page.locator('nav button[data-page="overview"]').click()
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'Horizontal overflow'
                 assert not errors,errors
+                assert not any(request_auth),'The browser must not send a pairing key'
                 browser.close()
-                print(('LOCAL HTTP BRIDGE; browser networking not exercised. ' if bridge else '')+'PASS: browser pairing, preflight separated from explicit unit tests, run, resume, deletion/rerun, models, stable dropdown, cached workflow import, export, native folder picker, nonblocking model scan, pairing display and responsive layout.')
+                print(('LOCAL HTTP BRIDGE; browser networking not exercised. ' if bridge else '')+'PASS: direct access without pairing, preflight separated from explicit unit tests, run, resume, deletion/rerun, models, stable dropdown, cached workflow import, export, native folder picker, nonblocking model scan and responsive layout.')
         finally:
             app.control('stop')
             if app.thread:app.thread.join(5)

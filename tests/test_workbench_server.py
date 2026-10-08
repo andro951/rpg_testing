@@ -25,14 +25,14 @@ class ServerTests(unittest.TestCase):
         self.root=Path(self.tmp.name);shutil.copytree(ROOT/'test_specs',self.root/'test_specs')
         shutil.copytree(ROOT/'examples',self.root/'examples')
         self.app=Controller(self.root,True);self.app.selftest=lambda:None
-        self.server=WorkbenchServer(('127.0.0.1',0),self.app,'testing-key')
+        self.server=WorkbenchServer(('127.0.0.1',0),self.app)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.addCleanup(self.close);self.url=f'http://127.0.0.1:{self.server.server_port}'
     def close(self):
         self.app.control('stop')
         if self.app.thread:self.app.thread.join(5)
         self.server.shutdown();self.server.server_close();self.thread.join(5)
-    def req(self,path,body=None,headers=None,auth=True):
+    def req(self,path,body=None,headers=None,auth=False):
         hs={'Authorization':'Bearer testing-key'} if auth else {}
         hs.update(headers or {})
         if body is not None:
@@ -47,8 +47,11 @@ class ServerTests(unittest.TestCase):
             self.app.thread.join(120)
             self.assertFalse(self.app.thread.is_alive(),'Workbench operation did not finish')
         self.assertFalse(self.app.operation.locked())
-    def test_no_auth_no_state(self):self.assertEqual(self.req('/api/state',auth=False)[0],403)
-    def test_bad_key(self):self.assertEqual(self.req('/api/state',headers={'Authorization':'Bearer wrong'})[0],403)
+    def test_state_opens_without_a_key(self):
+        status,body,_=self.req('/api/state')
+        self.assertEqual(status,200);self.assertEqual(json.loads(body)['control_access'],'private_network')
+    def test_obsolete_authorization_header_is_not_required(self):
+        self.assertEqual(self.req('/api/state',headers={'Authorization':'Bearer wrong'})[0],200)
     def test_bad_origin(self):self.assertEqual(self.req('/api/run',{},headers={'Origin':'http://evil.example'})[0],403)
     def test_bad_host(self):self.assertEqual(self.req('/api/state',headers={'Host':'evil.example'})[0],403)
     def test_running_server_freezes_static_assets_to_loaded_code(self):
@@ -67,13 +70,13 @@ class ServerTests(unittest.TestCase):
             self.assertIn('Content-Security-Policy',hs)
     def test_no_public_binding(self):
         for host in ['0.0.0.0','192.168.1.1','8.8.8.8']:
-            with self.assertRaises(ValueError):WorkbenchServer((host,0),self.app,'x')
+            with self.assertRaises(ValueError):WorkbenchServer((host,0),self.app)
     def test_json_content_type_required(self):self.assertEqual(self.req('/api/run',{},headers={'Content-Type':'text/plain'})[0],400)
     def test_preflight_does_not_run_model(self):
         self.assertEqual(self.req('/api/preflight',{})[0],202);self.wait()
         self.assertEqual(self.app.store.all(),[]);self.assertTrue(self.app.report['ready'])
     def test_targeted_run_options_and_authorization(self):
-        self.assertEqual(self.req('/api/run-options',auth=False)[0],403)
+        self.assertEqual(self.req('/api/run-options',auth=False)[0],200)
         status,data,_=self.req('/api/run-options');self.assertEqual(status,200)
         options=json.loads(data);self.assertEqual(options['models'][0]['id'],'demo-2b')
         self.assertNotIn('expected_state',str(options))
@@ -131,9 +134,29 @@ class ServerTests(unittest.TestCase):
         with patch('workbench.server.select_directory',return_value=None):
             status,body,_=self.req('/api/picker/models',{'initial':''})
         self.assertEqual(status,200);self.assertTrue(json.loads(body)['cancelled'])
-    def test_pairing_requires_existing_auth(self):
-        self.assertEqual(self.req('/api/pairing-key',auth=False)[0],403)
-        self.assertEqual(json.loads(self.req('/api/pairing-key')[1])['key'],'testing-key')
+    def test_pairing_endpoint_and_controls_are_removed(self):
+        self.assertEqual(self.req('/api/pairing-key')[0],404)
+        html=self.req('/')[1]
+        for marker in (b'id="pairing"',b'id="login"',b'Pairing key'):
+            self.assertNotIn(marker,html)
+        self.assertFalse((self.app.data/'control.key').exists())
+    def test_same_origin_post_needs_no_key(self):
+        status,_,_=self.req('/api/settings',{'publish_results':False},headers={'Origin':self.url})
+        self.assertEqual(status,200)
+    def test_null_and_foreign_origins_are_rejected_without_a_key(self):
+        for origin in ('null','http://evil.example','https://'+self.url.split('://')[1]):
+            self.assertEqual(self.req('/api/control',{'action':'stop'},headers={'Origin':origin})[0],403)
+    def test_tailnet_client_access_and_other_network_clients(self):
+        from types import SimpleNamespace
+        from workbench.server import Handler,Forbidden
+        handler=Handler.__new__(Handler)
+        handler.server=SimpleNamespace(server_address=('100.101.102.103',),server_port=8765)
+        handler.headers={'Host':'100.101.102.103:8765','Origin':'http://100.101.102.103:8765'}
+        for peer in ('100.64.0.1','100.127.255.254','127.0.0.1'):
+            handler.client_address=(peer,12345);handler.authorize()
+        for peer in ('192.168.1.10','8.8.8.8','100.63.255.255','100.128.0.0'):
+            handler.client_address=(peer,12345)
+            with self.assertRaises(Forbidden):handler.authorize()
     def test_busy_disk_read_blocked(self):
         self.app.operation.acquire()
         try:self.assertEqual(self.req('/api/results')[0],409)
@@ -145,4 +168,19 @@ class ServerTests(unittest.TestCase):
     def test_remote_enable_fails_cleanly_without_install(self):
         from unittest.mock import patch
         with patch('workbench.server.executable',return_value=None):self.assertEqual(self.req('/api/remote/enable',{})[0],400)
+    def test_remote_enable_uses_only_the_detected_tailscale_address(self):
+        from unittest.mock import patch,Mock
+        remote=Mock()
+        with patch('workbench.server.executable',return_value='tailscale'),patch('workbench.server.command',return_value='100.101.102.103\n'),patch('workbench.server.WorkbenchServer',return_value=remote) as factory:
+            status,body,_=self.req('/api/remote/enable',{})
+        self.server.remote_server=None
+        self.assertEqual(status,200)
+        factory.assert_called_once_with(('100.101.102.103',self.server.server_port),self.app)
+        info=json.loads(body);self.assertEqual(info['url'],f'http://100.101.102.103:{self.server.server_port}/')
+        self.assertNotIn('pairing',info['note']);self.assertTrue(self.app.settings['remote_enabled'])
+    def test_remote_enable_rejects_an_unexpected_interface(self):
+        from unittest.mock import patch
+        with patch('workbench.server.executable',return_value='tailscale'),patch('workbench.server.command',return_value='192.168.1.10\n'),patch('workbench.server.WorkbenchServer') as factory:
+            self.assertEqual(self.req('/api/remote/enable',{})[0],400)
+            factory.assert_not_called()
 if __name__=='__main__':unittest.main()

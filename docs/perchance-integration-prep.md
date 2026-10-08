@@ -1,5 +1,11 @@
 # Perchance integration preparation and acceptance review
 
+## October 8, 2026: browser setup consent before preflight
+
+User-directed amendment: dependency setup is now the first preflight stage. Determine whether the scope has pending Perchance observations on an eligible 8 GB worker, then check the dependency and launch a temporary headless local browser without visiting Perchance. This replaces the earlier no-browser dependency check. Missing/broken setup opens a server-owned Yes/No popup, including through remote control. Yes installs into the worker Python environment, supplies managed Chromium when needed, verifies launch, and continues. No is recorded in logs and the preflight report, excludes Perchance from one upcoming matching run, and leaves all remote observations pending. Every subsequent run checks again; there is no permanent opt-out. A cancelled prompt is never treated as an answer.
+
+Preparation/implementation review: keep setup in `perchance_setup.py` and controller/UI orchestration, outside adapter and workflow fingerprints. Preserve provider conditions, terminal resume, the fixed 8 GB scheduling assignment and 300-second deadline. Check completed/excluded scopes before any install offer. Failed installation blocks inference with explicit evidence. Recheck healthy preflight dependencies when Run starts, since an executable/package may have changed. Keep interactive remediation before inference, never between benchmark cases. Tests cover declined preflight-to-run reuse, next-run prompts, direct and targeted runs, installation/recheck failures, stale answers, cancellation, changed browser health, and simulated run/resume. Browser smoke uses real local HTTP and a real browser with simulated installation/inference; a separate real local probe verifies Playwright/Edge launch. No live Perchance generation is performed by these checks.
+
 Prepared October 1, 2026, before implementation. Authority: user requested a copy of the EmberAdventures harness adapted as a selectable Perchance Text Generator, fixed to 8 GB workers, with one observation per effective condition when controls are unavailable. See perchance-capability-policy.md and AGENTS.md. Preparation was source-reviewed before implementation; the final acceptance review appears below.
 
 ## Source and boundaries

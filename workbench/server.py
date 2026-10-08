@@ -1,11 +1,8 @@
-"""Authenticated loopback/private-Tailscale browser UI; no public bind or shell API."""
+"""Loopback/private-Tailscale browser UI; network access grants control."""
 from __future__ import annotations
 import functools
-import hmac
 import ipaddress
 import json
-import os
-import secrets
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,11 +17,11 @@ class Forbidden(Exception):pass
 
 class WorkbenchServer(ThreadingHTTPServer):
     daemon_threads=True
-    def __init__(self,address,app,token):
+    def __init__(self,address,app):
         host=ipaddress.ip_address(address[0])
         if not host.is_loopback and host not in ipaddress.ip_network('100.64.0.0/10'):
             raise ValueError('Control server must bind to loopback or a Tailscale IPv4 address')
-        self.app=app;self.token=token;self.remote_server=None;self.exit_requested=False;self.owner=self;self.update_coordinator=None
+        self.app=app;self.remote_server=None;self.exit_requested=False;self.owner=self;self.update_coordinator=None
         webroot=Path(__file__).parent/'web'
         self.static_assets={
             '/':(webroot/'index.html').read_bytes(),
@@ -40,11 +37,11 @@ class WorkbenchServer(ThreadingHTTPServer):
         if not tailscale:raise ValueError('Install and sign in to Tailscale first.')
         ip=command([tailscale,'ip','-4']).splitlines()[0].strip()
         if ipaddress.ip_address(ip) not in ipaddress.ip_network('100.64.0.0/10'):raise ValueError('Tailscale did not return a private tailnet IPv4 address')
-        remote=WorkbenchServer((ip,self.server_port),self.app,self.token)
+        remote=WorkbenchServer((ip,self.server_port),self.app)
         self.remote_server=remote;remote.owner=self
         threading.Thread(target=remote.serve_forever,daemon=True).start()
         self.app.settings['remote_enabled']=True;self.app.save_settings()
-        self.app.remote_info={'url':f'http://{ip}:{self.server_port}/','note':'Open this address on your laptop and enter the pairing key. Keep the desktop awake.'}
+        self.app.remote_info={'url':f'http://{ip}:{self.server_port}/','note':'Open this address on your laptop while connected to Tailscale. Keep the desktop awake.'}
         self.app.log('network','Enabled private Tailscale controller at '+ip)
         return self.app.remote_info
     def disable_remote(self):
@@ -63,14 +60,15 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version='HTTP/1.0'
     def log_message(self,*args):pass
     def authorize(self):
+        peer=ipaddress.ip_address(self.client_address[0])
+        if not peer.is_loopback and peer not in ipaddress.ip_network('100.64.0.0/10'):
+            raise Forbidden('Connect through loopback or Tailscale')
         host=self.headers.get('Host','')
         allowed={f'{self.server.server_address[0]}:{self.server.server_port}'}
         if self.server.server_address[0]=='127.0.0.1':allowed.add(f'localhost:{self.server.server_port}')
         if host not in allowed:raise Forbidden('Unrecognized Host header')
         origin=self.headers.get('Origin')
         if origin is not None and origin!='http://'+host:raise Forbidden('Cross-origin requests are not allowed')
-        auth=self.headers.get('Authorization','')
-        if not hmac.compare_digest(auth,'Bearer '+self.server.token):raise Forbidden('Pair this browser with the worker first.')
     def send(self,status,data,kind='application/json; charset=utf-8',filename=None):
         if not isinstance(data,bytes):data=json.dumps(data,ensure_ascii=False,allow_nan=False).encode()
         self.send_response(status)
@@ -90,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
                 kind={'/':'text/html; charset=utf-8','/app.js':'application/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[path]
                 return self.send(200,self.server.static_assets[path],kind)
             self.authorize()
-            if path=='/api/state':return self.send(200,app.snapshot())
+            if path=='/api/state':return self.send(200,{**app.snapshot(),'control_access':'private_network'})
             if path=='/api/run-options':return self.send(200,app.run_options())
             if path=='/api/results':return self.send(200,app.result_records())
             if path=='/api/analysis':
@@ -101,9 +99,6 @@ class Handler(BaseHTTPRequestHandler):
                 if app.operation.locked():raise RuntimeError('Wait until the operation finishes before reading test files.')
                 return self.send(200,{'tests':[read_json(p) for p in sorted((app.root/'test_specs').glob('*.json'))],
                     'examples':[p.stem for p in sorted((app.root/'examples/test_specs').glob('*.json'))]})
-            if path=='/api/pairing-key':
-                if not ipaddress.ip_address(self.client_address[0]).is_loopback:raise Forbidden('Display the pairing key on the host computer.')
-                return self.send(200,{'key':self.server.token})
             if path=='/api/unity-script':
                 from .unity import make_script
                 return self.send(200,make_script(q.get('tier',['16'])[0]).encode(),'text/plain; charset=utf-8','rpg-unity-job.sh')
@@ -146,6 +141,9 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/fix':app.start('fix',data);return self.send(202,{'started':True})
             if path=='/api/control':app.control(data['action']);return self.send(200,{'ok':True})
             if path=='/api/settings':app.configure(data);return self.send(200,{'ok':True})
+            if path=='/api/perchance/setup-choice':
+                from .perchance_setup import answer
+                answer(app,data.get('id'),data.get('approved'));return self.send(200,{'ok':True})
             if path=='/api/perchance/setup':app.start('perchance_setup',{});return self.send(202,{'started':True})
             if path=='/api/perchance/connect':app.start('perchance_connect',{});return self.send(202,{'started':True})
             if path=='/api/model/assign':app.assign_model(data['id'],data['required_vram_gb']);return self.send(200,{'ok':True})
@@ -185,19 +183,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(root,demo=False,port=8765,open_browser=True):
-    app=Controller(Path(root),demo=demo);keyfile=app.data/'control.key'
-    if keyfile.exists():token=keyfile.read_text().strip()
-    else:
-        token=secrets.token_urlsafe(32);keyfile.write_text(token)
-        try:os.chmod(keyfile,0o600)
-        except OSError:pass
-    server=WorkbenchServer(('127.0.0.1',port),app,token)
+    app=Controller(Path(root),demo=demo)
+    server=WorkbenchServer(('127.0.0.1',port),app)
     if app.settings.get('remote_enabled'):
         try:server.enable_remote()
         except Exception as exc:app.log('network','Could not restore previously approved Tailscale binding: '+str(exc))
     from .restarts import UpdateCoordinator
     server.update_coordinator=UpdateCoordinator(server).start()
-    if open_browser:webbrowser.open(f'http://127.0.0.1:{server.server_port}/#key={token}')
+    if open_browser:webbrowser.open(f'http://127.0.0.1:{server.server_port}/')
     try:server.serve_forever()
     finally:
         if server.update_coordinator:server.update_coordinator.stop.set()

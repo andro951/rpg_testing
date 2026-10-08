@@ -12,23 +12,24 @@ from workbench.controller import Controller
 from workbench.domain import write_json
 from workbench.server import WorkbenchServer
 from workbench import perchance
+from workbench import perchance_setup
 
 
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         root=Path(tmp);write_json(root/'test_specs/fixture.json',fixture())
         app=Controller(root);app.settings.update(sync_source=False,perchance_only=True)
-        server=WorkbenchServer(('127.0.0.1',0),app,'smoke-key')
+        server=WorkbenchServer(('127.0.0.1',0),app)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         real_run=perchance.run
         FakeBackend.created=[];FakeBackend.response='READY';FakeBackend.failure=None
         try:
-            with patch('workbench.inventory.detect_gpus',return_value=[{'name':'TEST GPU','total_gib':8}]), patch.object(perchance,'browser_executable',return_value=__file__), patch.object(perchance,'run',side_effect=lambda a,r,p,**kwargs:real_run(a,r,p,FakeBackend,**kwargs)), sync_playwright() as playwright:
+            with patch('workbench.inventory.detect_gpus',return_value=[{'name':'TEST GPU','total_gib':8}]), patch.object(perchance,'browser_executable',return_value=__file__), patch.object(perchance_setup,'health',return_value={'ready':True,'reason':''}), patch.object(perchance,'run',side_effect=lambda a,r,p,**kwargs:real_run(a,r,p,FakeBackend,**kwargs)), sync_playwright() as playwright:
                 executable=os.environ.get('REPORT_BROWSER_EXECUTABLE')
                 browser=playwright.chromium.launch(headless=True,**({'executable_path':executable} if executable else {}))
                 page=browser.new_page(viewport={'width':1500,'height':1000});errors=[]
                 page.on('pageerror',lambda error:errors.append(str(error)))
-                page.goto(f'http://127.0.0.1:{server.server_port}/#key=smoke-key')
+                page.goto(f'http://127.0.0.1:{server.server_port}/')
                 page.wait_for_function('() => state !== null && !state.busy')
                 # With no pending local jobs, Overview Run all still executes the final provider.
                 page.locator('#preflight').click()

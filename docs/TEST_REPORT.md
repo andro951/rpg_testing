@@ -2,6 +2,24 @@
 
 Date: 2026-09-21. Functional-code checkpoint: **`4f2f4acd9d7fb84f256b3a878387263ad3761be6`**.
 
+## Local update — 2026-10-08: Perchance setup prompt before preflight
+
+Preflight first checks whether Perchance is eligible and pending, then verifies Playwright and local browser launch. Missing or broken prerequisites open a Yes/No install popup. Yes installs and rechecks on the worker; No is recorded and excludes Perchance from one upcoming matching run while leaving its observations pending. The next run asks again if setup is still needed. Declines are never stored as permanent settings or benchmark outcomes. Setup is isolated from provider/inference identity.
+
+Final validation: **461 tests ran in 550.305 seconds: 457 passed, four platform tests skipped.** The 19 focused setup/combined-run tests passed, including cancellation, failed installation, stale choices, changed browser health, one-run decline reuse and terminal resume. `tests/perchance_setup_browser_smoke.py` passed through actual Edge-to-loopback HTTP, exercising the popup before normal preflight, decline, next-run offer, approval, resume, broken browser, reload and cancellation. Its installer and inference are simulated; no fresh package/browser download or live Perchance inference was claimed. The existing Perchance Workbench browser smoke and native model-management browser smoke also passed with fixture-backed external services. A separate real local probe successfully imported Playwright and launched/closed Edge. The new popup browser smoke is included in CI, but CI was not run remotely in this session.
+
+User-requested finished-repository retest: **461 tests ran in 496.353 seconds: 457 passed, four Bash checks skipped under the default PATH.** Installed Git Bash was subsequently found at `D:/Program Files/Git/bin/bash.exe`; adding its directory to the test process PATH allowed all four omitted checks to pass. The separate shell/restart test run passed all 12 tests without skips (eight repeat checks plus those four), so every one of the 461 unit/integration tests has executed successfully. **All 11 browser smoke scripts passed**, covering native setup/run/resume, model/VRAM management, targeted runs, Perchance worker/setup/run, report grouping, evidence, judgements and timing. The targeted browser test's obsolete 60-second expectation was corrected to assert the timeout from its selected definition; its helper import now supports both module and direct script invocation. Runtime code, deadlines and benchmark evidence were unchanged by that test correction. Logs are retained under `.local/all-tests-finished-unit-tests.log`, `.local/finished-shell-and-restart-tests.log` and `.local/finished-*-smoke.log`.
+
+Python compile checks, JavaScript syntax and `git diff --check` passed. The inference fingerprint remains `56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787`; the Perchance adapter/worker, saved results and test definitions are unchanged. Earlier dated validation checkpoints below retain their original results.
+
+## Local update — 2026-10-08: direct private-network access
+
+At the user's request, the Workbench no longer requires a browser pairing key. The UI opens directly on loopback or the enabled Tailscale address. Pairing controls, the login dialog, the pairing API and new key generation are removed. Tailnet access rules govern remote control; Host/Origin checks, loopback/Tailscale client checks, JSON request requirements and private-interface binding remain enforced. The launcher can use an existing old key only to restart a previously running worker into the new policy.
+
+Validation: **449 unit tests ran in 536.480 seconds: 445 passed, four platform tests skipped.** JavaScript syntax validation and `git diff --check` passed. `tests/browser_smoke.py` passed through real Edge-to-loopback HTTP with a clean URL and no Authorization header, including simulated run/resume, deletion/rerun, export and removed pairing controls. `tests/browser_model_smoke.py` also passed through real Edge-to-loopback HTTP, including first-run model-folder setup and fixture-backed model/runtime management. Simulated tailnet tests cover the permitted address, absence of key requirements, and rejected outside-range clients/interfaces. These checks did not validate the user's physical laptop-to-desktop Tailscale/firewall route.
+
+The inference fingerprint remains `56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787`. This control-UI change does not change benchmark case identity or rewrite saved inference evidence. The older checkpoint and CI results below describe the earlier pairing-based version.
+
 ## GitHub Actions: completed successfully
 
 Run **35612367369**, attempt 2, completed with overall **success**:

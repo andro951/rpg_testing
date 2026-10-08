@@ -44,7 +44,7 @@ def main():
             time.sleep(.75)
             return real_scan()
         app.scan_folder=slow_scan
-        server=WorkbenchServer(('127.0.0.1',0),app,'model-browser-key')
+        server=WorkbenchServer(('127.0.0.1',0),app)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         def opener(*args,**kwargs):
             response=io.BytesIO(data);response.headers={'Content-Length':str(len(data))};return response
@@ -63,6 +63,7 @@ def main():
                  patch('workbench.runtimes.install',side_effect=fixture_runtime), \
                  patch('workbench.native.capabilities',return_value={'version':'TEST FIXTURE'}), \
                  patch('workbench.preflight.detect_gpus',return_value=[{'name':'NVIDIA GeForce GTX 1080','uuid':'fixture','total_gib':8,'free_gib':8,'driver':'fixture'}]), \
+                 patch('workbench.perchance_setup.health',return_value={'ready':True,'reason':''}), \
                  patch('workbench.server.select_directory',return_value=str(models)),sync_playwright() as p:
                 exe=os.environ.get('CHROME_PATH') or shutil.which('chromium') or shutil.which('google-chrome')
                 browser=p.chromium.launch(headless=True,args=['--no-sandbox'],**({'executable_path':exe} if exe else {}))
@@ -80,11 +81,9 @@ def main():
                     page.expose_function('workerBridge',bridge)
                     html=(root/'workbench/web/index.html').read_text().replace('<link rel="stylesheet" href="/style.css">','').replace('<script src="/app.js"></script>','')
                     page.set_content(html);page.add_style_tag(content=(root/'workbench/web/style.css').read_text())
-                    page.add_script_tag(content="""const store={'rpg-worker-key':'model-browser-key'};
-Object.defineProperty(window,'sessionStorage',{value:{getItem:k=>store[k]||null,setItem:(k,v)=>store[k]=v}});
-window.fetch=async(path,options={})=>{const r=await window.workerBridge(path,options);return new Response(Uint8Array.from(atob(r.body),c=>c.charCodeAt(0)),{status:r.status,headers:{'Content-Type':r.type}})};""")
+                    page.add_script_tag(content="""window.fetch=async(path,options={})=>{const r=await window.workerBridge(path,options);return new Response(Uint8Array.from(atob(r.body),c=>c.charCodeAt(0)),{status:r.status,headers:{'Content-Type':r.type}})};""")
                     page.add_script_tag(content=(root/'workbench/web/app.js').read_text())
-                else:page.goto(base+'/#key=model-browser-key')
+                else:page.goto(base+'/')
                 expect(page.locator('#folder-onboarding')).to_be_visible()
                 assert app.settings['model_root']==''
                 page.locator('#onboarding-choose').click()

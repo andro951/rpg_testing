@@ -2,6 +2,8 @@
 
 Standing user requirement recorded on October 1, 2026. This policy governs the Perchance Text Generator adapter, its scheduler, results, exports, UI, and study analysis. The adapter now implements grouping and explicit unavailable capabilities; live inference remains unverified.
 
+October 8 setup rule: before the other preflight checks, determine whether Perchance is eligible and pending, then verify its dependency and local browser launch. Offer installation through a Yes/No popup if setup is missing or broken. Yes installs and rechecks. No is recorded for one upcoming matching run and skips Perchance without writing a benchmark observation or making pending work complete. Ask again on the next run if setup is still needed. Keep consent and dependency setup outside provider identity; scope exclusions and completed observations must not cause unnecessary installation.
+
 ## One observation for one effective condition
 
 If Perchance cannot actually apply an experimental control, run one representative baseline for the distinct effective prompt/workflow/condition. Do not execute nominally different temperature, caching, seed, or other settings when they would send the same effective experiment to the service. Do not repeat that baseline just because the provider is stochastic. Additional independent trials require explicit user direction.

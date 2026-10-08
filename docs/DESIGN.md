@@ -1,6 +1,6 @@
 # Current native-workbench architecture
 
-The GPU host owns the controller, native inference process and scheduler. A browser on that host or a paired laptop sends only control requests. The active application has no LM Studio backend.
+The GPU host owns the controller, native inference process and scheduler. A browser on that host or a laptop connected through Tailscale sends only control requests. Workbench access relies on loopback/private Tailscale connectivity, with Host/Origin checks and no separate browser pairing key. The active application has no LM Studio backend.
 
 ## Components
 

@@ -12,6 +12,7 @@ from workbench.controller import Controller
 from workbench.domain import load_tests as load_catalog, write_json
 from workbench.planning import pending_plan, public_plan
 from workbench.workflows import Cancelled
+from workbench import perchance_setup
 
 
 class RunAllPerchanceTests(unittest.TestCase):
@@ -34,6 +35,7 @@ class RunAllPerchanceTests(unittest.TestCase):
             patch('workbench.inventory.detect_gpus', side_effect=lambda: [{'name': 'TEST GPU', 'total_gib': self.tier}]),
             patch.object(perchance, 'browser_executable', return_value=__file__),
             patch.object(perchance.importlib.util, 'find_spec', return_value=object()),
+            patch.object(perchance_setup, 'health', return_value={'ready': True, 'reason': ''}),
             patch('workbench.scheduler.Session', side_effect=self.native_session),
         ]
         real_remote_run = perchance.run
@@ -110,12 +112,115 @@ class RunAllPerchanceTests(unittest.TestCase):
         self.app.demo = True
         self.assertNotIn('perchance_plan', self.app.build_preflight()[1])
 
-    def test_missing_remote_dependency_blocks_combined_run_before_execution(self):
-        with patch.object(perchance.importlib.util, 'find_spec', return_value=None):
-            self.app.run()
-        self.assertEqual(self.app.state, 'idle')
-        self.assertFalse(self.events)
-        self.assertTrue(any(i['id'] == 'perchance_dependency' for i in self.app.report['issues']))
+    def wait_prompt(self):
+        deadline = time.monotonic() + 5
+        while not self.app.snapshot()['perchance_setup_prompt'] and time.monotonic() < deadline:
+            time.sleep(.01)
+        prompt = self.app.snapshot()['perchance_setup_prompt']
+        self.assertIsNotNone(prompt, self.app.message)
+        return prompt
+
+    def finish(self):
+        self.app.thread.join(10)
+        self.assertFalse(self.app.thread.is_alive(), self.app.message)
+        self.assertFalse(self.app.operation.locked())
+
+    def test_decline_preflight_applies_once_to_run_then_asks_again(self):
+        with patch.object(perchance_setup, 'health', return_value={'ready': False, 'reason': 'missing dependency'}), \
+             patch.object(perchance_setup, 'install', return_value={'ready': True, 'reason': ''}) as install:
+            self.app.start('preflight')
+            first = self.wait_prompt()
+            self.assertIsNone(self.app.report, 'Prompt precedes normal preflight')
+            self.assertFalse(self.events)
+            perchance_setup.answer(self.app, first['id'], False)
+            self.finish()
+            self.assertTrue(self.app.report['ready'])
+            self.assertEqual(self.app.report['plan']['pending'], 3)
+            self.assertEqual(self.app.report['perchance_setup']['status'], 'declined')
+            self.assertIs(self.app.report['perchance_setup']['approved'], False)
+            self.assertIsNone(Controller(self.root).perchance_setup_decision, 'Decline is not a persisted preference')
+            saved = next((self.app.data / 'preflight_reports').glob('*.json'))
+            import json
+            self.assertEqual(json.loads(saved.read_text())['perchance_setup']['status'], 'declined')
+            self.app.start('run'); self.finish()
+            self.assertEqual(self.events, ['local'] * 3)
+            self.assertFalse(FakeBackend.created)
+            install.assert_not_called()
+            self.app.start('run')
+            second = self.wait_prompt()
+            self.assertNotEqual(first['id'], second['id'])
+            with self.assertRaises(ValueError):perchance_setup.answer(self.app, first['id'], True)
+            perchance_setup.answer(self.app, second['id'], True)
+            self.finish()
+            install.assert_called_once()
+            self.assertEqual(self.events, ['local'] * 3 + ['perchance'])
+            self.assertEqual(len(FakeBackend.created), 1)
+            self.app.start('run'); self.finish()
+            self.assertEqual(len(FakeBackend.created), 1, 'Resume must not duplicate remote observations')
+
+    def test_direct_run_decline_skips_only_perchance_and_reprompts(self):
+        with patch.object(perchance_setup, 'health', return_value={'ready': False, 'reason': 'missing'}):
+            for count in (1, 2):
+                self.app.start('run')
+                prompt = self.wait_prompt()
+                perchance_setup.answer(self.app, prompt['id'], False); self.finish()
+                self.assertEqual(self.app.state, 'finished')
+                self.assertFalse(FakeBackend.created)
+            self.assertEqual(len(self.events), 3)
+
+    def test_targeted_perchance_decline_never_executes_and_next_run_reprompts(self):
+        with patch.object(perchance_setup, 'health', return_value={'ready': False, 'reason': 'missing'}):
+            for count in (1, 2):
+                self.app.start('run', {'selection': {'model_id': perchance.MODEL_ID}})
+                prompt = self.wait_prompt()
+                perchance_setup.answer(self.app, prompt['id'], False); self.finish()
+                self.assertFalse(self.app.store.all())
+                self.assertFalse(self.events)
+                self.assertEqual(self.app.report['perchance_setup']['status'], 'declined')
+
+    def test_cancel_while_waiting_and_invalid_or_duplicate_answers(self):
+        with patch.object(perchance_setup, 'health', return_value={'ready': False, 'reason': 'missing'}):
+            self.app.start('run'); prompt = self.wait_prompt()
+            with self.assertRaises(ValueError):perchance_setup.answer(self.app, prompt['id'], 'yes')
+            self.app.control('stop'); self.finish()
+            self.assertEqual(self.app.state, 'stopped')
+            self.assertIsNone(self.app.snapshot()['perchance_setup_prompt'])
+            self.assertFalse(self.events)
+            with self.assertRaises(ValueError):perchance_setup.answer(self.app, prompt['id'], True)
+
+    def test_cancelled_preflight_does_not_suppress_next_run_install_offer(self):
+        with patch.object(perchance_setup, 'health', return_value={'ready': False, 'reason': 'missing'}):
+            self.app.start('preflight'); self.wait_prompt()
+            self.app.control('stop'); self.finish()
+            self.app.start('run'); prompt = self.wait_prompt()
+            perchance_setup.answer(self.app, prompt['id'], False); self.finish()
+            self.assertEqual(self.events, ['local'] * 3)
+
+    def test_browser_health_is_rechecked_when_run_follows_ready_preflight(self):
+        self.app.check()
+        with patch.object(perchance_setup, 'health', return_value={'ready': False, 'reason': 'browser removed'}):
+            self.app.start('run'); prompt = self.wait_prompt()
+            self.assertEqual(prompt['reason'], 'browser removed')
+            perchance_setup.answer(self.app, prompt['id'], False); self.finish()
+            self.assertFalse(FakeBackend.created)
+
+    def test_failed_installation_blocks_run_and_is_recorded(self):
+        with patch.object(perchance_setup, 'health', return_value={'ready': False, 'reason': 'broken browser'}), \
+             patch.object(perchance_setup, 'install', side_effect=RuntimeError('download failed')):
+            self.app.start('run'); prompt = self.wait_prompt()
+            perchance_setup.answer(self.app, prompt['id'], True); self.finish()
+            self.assertFalse(self.app.report['ready'])
+            self.assertIn('perchance_setup_failed', [i['id'] for i in self.app.report['issues']])
+            self.assertEqual(self.app.report['perchance_setup']['status'], 'failed')
+            self.assertFalse(self.events)
+
+    def test_dependency_check_excludes_larger_demo_and_local_selections(self):
+        with patch.object(perchance_setup, 'health') as health:
+            self.tier = 12; perchance_setup.prepare(self.app)
+            self.tier = 8; perchance_setup.prepare(self.app, selection={'model_id': self.model['id']})
+            perchance_setup.prepare(self.app, selection={'all_models': True})
+            self.app.demo = True; perchance_setup.prepare(self.app)
+            health.assert_not_called()
 
     def test_cancel_before_standalone_remote_open(self):
         plan = self.app.build_preflight()[1]['perchance_plan']

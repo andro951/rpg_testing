@@ -31,7 +31,7 @@ def main():
         app=Controller(project);app.selftest=lambda:None;app.configure({'sync_source':False,'model_root':str(models)});app.scan_folder()
         # If VRAM assignment accidentally tries to fingerprint weights, fail immediately.
         app.fingerprint=lambda item: (_ for _ in ()).throw(AssertionError('VRAM assignment hashed model weights'))
-        server=WorkbenchServer(('127.0.0.1',0),app,'vram-key')
+        server=WorkbenchServer(('127.0.0.1',0),app)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
             with sync_playwright() as p:
@@ -51,12 +51,10 @@ def main():
                     page.expose_function('workerBridge',bridge)
                     html=(root/'workbench/web/index.html').read_text().replace('<link rel="stylesheet" href="/style.css">','').replace('<script src="/app.js"></script>','')
                     page.set_content(html);page.add_style_tag(content=(root/'workbench/web/style.css').read_text())
-                    page.add_script_tag(content="""const store={'rpg-worker-key':'vram-key'};
-Object.defineProperty(window,'sessionStorage',{value:{getItem:k=>store[k]||null,setItem:(k,v)=>store[k]=v}});
-window.fetch=async(path,options={})=>{const r=await window.workerBridge(path,options);return new Response(Uint8Array.from(atob(r.body),c=>c.charCodeAt(0)),{status:r.status,headers:{'Content-Type':r.type}})};""")
+                    page.add_script_tag(content="""window.fetch=async(path,options={})=>{const r=await window.workerBridge(path,options);return new Response(Uint8Array.from(atob(r.body),c=>c.charCodeAt(0)),{status:r.status,headers:{'Content-Type':r.type}})};""")
                     page.add_script_tag(content=(root/'workbench/web/app.js').read_text())
                 else:
-                    page.goto(base+'/#key=vram-key')
+                    page.goto(base+'/')
                 page.locator('nav button[data-page="models"]').click()
                 cards=page.locator('.model-card');expect(cards).to_have_count(3)
                 for i in range(3):
