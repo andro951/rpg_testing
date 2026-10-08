@@ -23,7 +23,7 @@ class BrowserSetupTests(unittest.TestCase):
              patch.object(setup.perchance, 'browser_executable', return_value='fixture.exe'), \
              patch.object(setup, 'process', return_value=(1, '', 'broken driver')) as process:
             self.assertEqual(setup.health(self.app), {'ready': False, 'reason': 'broken driver'})
-            self.assertIn('headless=True', process.call_args.args[1][2])
+            self.assertIn('perchance_connection import probe', process.call_args.args[1][2])
         with patch.object(setup.importlib.util, 'find_spec', return_value=object()), \
              patch.object(setup.perchance, 'browser_executable', return_value='fixture.exe'), \
              patch.object(setup, 'process', side_effect=RuntimeError('launch timed out')):

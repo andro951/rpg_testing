@@ -41,6 +41,7 @@ class RunAllPerchanceTests(unittest.TestCase):
         real_remote_run = perchance.run
         def remote_run(app, report, plan, **kwargs):
             if plan['pending']: self.events.append('perchance')
+            kwargs.pop('backend_factory', None)
             return real_remote_run(app, report, plan, FakeBackend, **kwargs)
         patches.append(patch.object(perchance, 'run', side_effect=remote_run))
         for item in patches:
@@ -213,6 +214,44 @@ class RunAllPerchanceTests(unittest.TestCase):
             self.assertIn('perchance_setup_failed', [i['id'] for i in self.app.report['issues']])
             self.assertEqual(self.app.report['perchance_setup']['status'], 'failed')
             self.assertFalse(self.events)
+
+    def test_remote_startup_failure_is_visible_and_progress_stops(self):
+        with patch.object(perchance, 'run', side_effect=RuntimeError('Perchance security verification blocked startup.')):
+            self.app.start('run'); self.finish()
+        snapshot=self.app.snapshot()
+        self.assertEqual(snapshot['state'],'error')
+        self.assertIn('security verification',snapshot['failure']['message'])
+        self.assertEqual(snapshot['failure']['operation'],'run')
+        self.assertFalse(snapshot['progress']['active'])
+        self.assertEqual(snapshot['progress']['task'],'Operation stopped by an error')
+        self.assertIsNone(snapshot['current'])
+        self.assertEqual(self.events,['local']*3)
+        self.assertFalse(FakeBackend.created)
+        failure_id=snapshot['failure']['id']
+        self.assertEqual(self.app.snapshot()['failure']['id'],failure_id)
+        import io,json,zipfile
+        archive=zipfile.ZipFile(io.BytesIO(self.app.export()))
+        summary=json.loads(archive.read('summary.json'))
+        self.assertEqual(summary['worker_status']['failure']['id'],failure_id)
+        self.assertEqual(summary['worker_status']['state'],'error')
+        self.app.start('preflight');self.finish()
+        self.assertIsNone(self.app.snapshot()['failure'])
+
+    def test_saved_provider_errors_show_finished_with_errors_notice_and_resume(self):
+        FakeBackend.failure=RuntimeError
+        self.app.start('run');self.finish()
+        self.assertEqual(self.app.state,'finished_with_errors')
+        self.assertIn('1 infrastructure error',self.app.snapshot()['failure']['message'])
+        record=next(r for r in self.app.store.all() if r['model_id']==perchance.MODEL_ID)
+        self.assertEqual(record['status'],'error')
+        self.assertIn('PARTIAL',record['calls'][0]['text'])
+        FakeBackend.failure=None
+        self.events.clear();self.app.start('run');self.finish()
+        self.assertEqual(self.events,['perchance'])
+        self.assertIsNone(self.app.snapshot()['failure'])
+        record=next(r for r in self.app.store.all() if r['model_id']==perchance.MODEL_ID)
+        self.assertEqual(record['status'],'completed')
+        self.assertEqual(record['attempts'][0]['status'],'error')
 
     def test_dependency_check_excludes_larger_demo_and_local_selections(self):
         with patch.object(perchance_setup, 'health') as health:

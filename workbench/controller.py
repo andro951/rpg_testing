@@ -67,7 +67,7 @@ class Controller(ModelManager):
         defaults={'backend':'llamacpp','model_root':'','confirmed_empty_folder':'','llama_path':'',
                   'hf_token':'','sync_source':not demo,'publish_results':False,'remote_enabled':False,'models_folder_version':1,
                   'perchance_url':'https://perchance.org/056uh2nc6k','perchance_browser':'','perchance_headless':False,
-                  'perchance_only':False,'perchance_epoch':'1'}
+                  'perchance_only':False,'perchance_epoch':'1','perchance_cdp_port':9223}
         saved=read_json(self.settings_path) if self.settings_path.exists() else {}
         # Explicit consent for the new folder policy: no migration from LM Studio or guessed defaults.
         if saved.get('models_folder_version')!=1:saved.pop('model_root',None);saved.pop('confirmed_empty_folder',None)
@@ -92,6 +92,7 @@ class Controller(ModelManager):
         self.on_shutdown=None;self.remote_info=None;self.requested_run_selection=None
         self.perchance_setup_decision=None;self.perchance_setup_prompt=None;self.perchance_setup_event=None
         self.perchance_setup_answer=None
+        self.failure=None
         self.store.root.mkdir(parents=True,exist_ok=True)
         for name in ('logs','preflight_reports'):(self.data/name).mkdir(exist_ok=True)
         self.process_source_commit=self.source_commit()
@@ -292,9 +293,13 @@ class Controller(ModelManager):
         except Exception:
             self.operation.release();raise
         self.state='checking' if kind=='preflight' else 'testing' if kind=='unit_tests' else 'fixing' if kind=='fix' else 'scanning' if kind=='scan' else 'running'
+        self.failure=None
         if kind=='scan':
             self.message='Scanning the selected models folder…'
             self.set_progress('scan','Scanning model folder',0,0,'Discovering GGUF files.')
+        elif kind=='perchance_connect':
+            self.set_progress('perchance_connect','Opening Perchance on the host',0,0,
+                              'Complete any security verification on the PC hosting the worker. This check does not generate an answer.')
         self.cancel_event.clear()
         def work():
             try:
@@ -309,8 +314,9 @@ class Controller(ModelManager):
                 elif kind=='runtime_install':self.install_runtime(payload)
                 elif kind=='scan':self.scan_folder()
                 elif kind=='perchance_connect':
-                    from .perchance import verify_connection
+                    from .perchance_connection import verify_connection
                     verify_connection(self)
+                    self.finish_progress('perchance_connect','Perchance browser connected',self.message)
                 elif kind=='perchance_setup':
                     from .perchance_setup import install
                     status=install(self)
@@ -318,7 +324,11 @@ class Controller(ModelManager):
                     self.message='Perchance browser dependency installed. Verify the connection before running.'
                 else:raise ValueError('Unknown operation')
             except Cancelled:self.state='stopped';self.message='Stopped. Unfinished cases remain pending.'
-            except Exception as exc:self.state='error';self.message=str(exc);self.log('error',exc)
+            except Exception as exc:
+                self.state='error';self.message=str(exc);self.log('error',exc)
+                self.current=None
+                self.failure={'id':uuid.uuid4().hex,'operation':kind,'outcome':'error','message':str(exc),'time':now()}
+                self.set_progress(kind,'Operation stopped by an error',detail=str(exc),active=False)
             finally:
                 if kind!='run' and self.state not in ('error','stopped'):self.state='idle'
                 try:self.flush_logs()
@@ -369,10 +379,13 @@ class Controller(ModelManager):
     def configure(self,values):
         values=dict(values)
         allowed={'model_root','confirmed_empty_folder','llama_path','hf_token','sync_source','publish_results',
-                 'perchance_url','perchance_browser','perchance_headless','perchance_only','perchance_epoch'}
+                 'perchance_url','perchance_browser','perchance_headless','perchance_only','perchance_epoch','perchance_cdp_port'}
         if set(values)-allowed:raise ValueError('Unknown setting; test settings belong in tests')
         for key,val in values.items():
-            if key in ('sync_source','publish_results','perchance_headless','perchance_only'):
+            if key == 'perchance_cdp_port':
+                from .perchance_connection import endpoint
+                endpoint(val)
+            elif key in ('sync_source','publish_results','perchance_headless','perchance_only'):
                 if type(val)is not bool:raise ValueError('Expected boolean')
             elif not isinstance(val,str):raise ValueError('Expected text')
         if 'perchance_url' in values:
@@ -449,7 +462,7 @@ class Controller(ModelManager):
                              'source_commit':self.source_commit(),'workflow_code':self.workflow_code(),'selection':copy.deepcopy(selection)}
         try:
             if report.get('remote_provider'):
-                from .perchance import run
+                from .perchance_connection import run
                 run(self,report,self.plan)
             else:
                 Session(self,report,self.plan,DemoNative if self.demo else NativeBackend).run()
@@ -457,11 +470,14 @@ class Controller(ModelManager):
                 if remote and not self.stop_after_model and not self.cancel_event.is_set():
                     self.set_progress('run','Starting final model: Perchance Text Generator',0,self.run_overall_percent(),
                                       'Local model passes finished. Remote generation has a 300-second limit.')
-                    from .perchance import run
+                    from .perchance_connection import run
                     run(self,self.plan['perchance_report'],remote,append=True)
         finally:self.finished=now();self.current=None
         self.state='finished' if not self.session_errors else 'finished_with_errors'
         self.message='Run finished. Remote observations and collapsed cases are recorded separately.' if report.get('remote_provider') or self.plan.get('perchance_plan') else 'Run finished. Full-GPU, skipped, and hybrid results are recorded separately.'
+        if self.session_errors:
+            self.message=f'Run finished with {self.session_errors} infrastructure error(s). Open Results or Logs for the saved details. Unfinished cases remain pending.'
+            self.failure={'id':uuid.uuid4().hex,'operation':'run','outcome':self.state,'message':self.message,'time':now()}
         if self.perchance_setup_decision and self.perchance_setup_decision['status']=='declined':self.message+=' Perchance was skipped for this run; its observations remain pending.'
         self.finish_progress('run','Benchmark run complete',self.message)
         self.report,self.plan=self.build_preflight(selection=selection,track_progress=False)
@@ -486,6 +502,7 @@ class Controller(ModelManager):
         with self.lock:
             return {'state':self.state,'busy':self.operation.locked(),'message':self.message,'report':copy.deepcopy(self.report),
                     'perchance_setup_prompt':copy.deepcopy(self.perchance_setup_prompt),
+                    'failure':copy.deepcopy(self.failure),
                     'models':copy.deepcopy(self.last_models),'current':copy.deepcopy(self.current),'completed_now':self.completed_now,
                     'session_errors':self.session_errors,'demo':self.demo,'run_total':self.run_total,'run_processed':self.run_processed,
                     'telemetry':self.monitor.snapshot() if self.monitor else self.last_telemetry,
@@ -534,6 +551,8 @@ class Controller(ModelManager):
                 except (ValueError,OSError,TypeError) as exc:reports.append({'file':path.name,'error':str(exc)})
             summary['preflight_reports']=reports
             summary['latest_preflight']=reports[-1] if reports else None
+            summary['worker_status']={'state':self.state,'message':self.message,
+                                      'failure':copy.deepcopy(self.failure),'progress':copy.deepcopy(self.progress)}
             remote=[r for r in valid if r.get('execution_class')=='remote_service']
             requested_remote=len({a['requested_id'] for r in remote for a in r.get('aliases',[])})
             executed_remote=sum(bool(r.get('calls')) for r in remote)

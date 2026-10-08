@@ -50,7 +50,7 @@ queueMicrotask(()=>offerAutomaticRepair(s.report).catch(e=>showAlert(e.message,'
 $('folder-note').textContent=s.report?.folder?.path?('Active folder: '+s.report.folder.path+' · '+s.report.folder.source):'No active model folder detected yet.';
 renderModels();$('log-view').textContent=s.logs.map(l=>l.time+' ['+l.category+'] '+l.message).join('\n');$('remote-url').textContent=s.remote?.url||'';
 if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=s.settings.publish_results; }
-renderHub();renderRuntimes();renderRunControls();PerchanceInstall.Render(s.perchance_setup_prompt);folderPrompts();
+renderHub();renderRuntimes();renderRunControls();PerchanceInstall.Render(s.perchance_setup_prompt);WorkerFailure.Render(s.failure);folderPrompts();
 const scope=s.report?.selection;let scopeTests='all enabled tests';if(scope?.test_id)scopeTests=scope.test_id;else if(scope?.test_ids)scopeTests=scope.test_ids.length+' selected test(s)';const scopeModel=scope?.all_models?'all eligible models':scope?.model_id;$('run-scope').textContent=scope?('Scope: '+scopeModel+' · '+scopeTests+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
 }
 let modelRenderSignature='',modelVramDrafts=new Map();
@@ -138,7 +138,7 @@ on('restart',async()=>{await api('/api/restart',{});toast('Restarting with the l
 let hubSignature='',runtimeSignature='',folderChoosing=false;
 for(const tier of [8,12,16,24,32,40,48,80])$('hub-tier').append(new Option(tier+' GiB',String(tier)));
 function folderPrompts(){
- if(!state||state.demo||state.busy||folderChoosing||state.settings.perchance_only)return;
+ if(!state||state.demo||state.busy||state.failure||folderChoosing||state.settings.perchance_only)return;
  const root=state.settings.model_root;
  if(!root){if(!$('folder-onboarding').open)$('folder-onboarding').showModal();return;}
  if($('folder-onboarding').open)$('folder-onboarding').close();
@@ -272,6 +272,50 @@ for(const id of ['individual-model','one-model-model','individual-variant'])$(id
 $('individual-test').addEventListener('change',()=>{$('individual-variant').value='';renderRunVariants();renderRunControls();});
 
 //#region Perchance service setup
+const WorkerFailure = {
+ Initialize: () => {
+  const banner=el(`article`);banner.id=`worker-failure`;banner.hidden=true;banner.setAttribute(`role`,`alert`);
+  const heading=el(`h3`,`Operation stopped`),message=el(`p`);heading.id=`worker-failure-heading`;message.id=`worker-failure-message`;
+  banner.append(heading,message);$(`page-overview`).prepend(banner);
+  const dialog=el(`dialog`);dialog.id=`worker-failure-dialog`;dialog.setAttribute(`aria-labelledby`,`worker-failure-title`);
+  const title=el(`h2`,`Operation stopped`);title.id=`worker-failure-title`;
+  const reason=el(`p`);reason.id=`worker-failure-reason`;
+  const host=el(`p`,`Perchance's browser opens on the PC hosting the worker. Complete security verification on that PC's screen, or through your own remote desktop connection. The Tailscale control page does not display the PC's browser window.`);host.id=`worker-failure-host`;
+  const retry=el(`p`,`Saved results and failed-attempt evidence are retained. Connection verification does not generate an answer or automatically retry your tests.`);retry.id=`worker-failure-retry`;
+  const actions=el(`div`);actions.className=`actions`;
+  const verify=button(`Verify Perchance on host`,async()=>{
+   await api(`/api/perchance/connect`,{});dialog.close();setPage(`overview`);await poll();
+  },`primary`);verify.id=`worker-failure-verify`;
+  const logs=button(`View logs`,()=>{dialog.close();setPage(`logs`);});
+  const close=button(`Close`,()=>dialog.close());
+  actions.append(verify,logs,close);dialog.append(title,reason,host,retry,actions);document.body.append(dialog);
+ },
+ Render: failure => {
+  const banner=$(`worker-failure`),dialog=$(`worker-failure-dialog`);
+  banner.hidden=!failure;
+  if(!failure){
+   if(dialog.open)
+    dialog.close();
+
+   return;
+  }
+
+  $(`worker-failure-message`).textContent=failure.message;
+  if(WorkerFailure.Shown===failure.id)
+   return;
+
+  const perchance=/perchance/i.test(failure.message)||failure.operation===`perchance_connect`;
+  const title=perchance?`Perchance needs attention`:failure.outcome===`finished_with_errors`?`Run finished with errors`:`Operation stopped`;
+  $(`worker-failure-title`).textContent=title;$(`worker-failure-heading`).textContent=title;
+  $(`worker-failure-reason`).textContent=failure.message;
+  $(`worker-failure-host`).hidden=!perchance;$(`worker-failure-retry`).hidden=!perchance;$(`worker-failure-verify`).hidden=!perchance;
+  if(document.querySelector(`dialog[open]`))
+   return;
+
+  WorkerFailure.Shown=failure.id;dialog.showModal();
+ }
+};
+WorkerFailure.Initialize();
 const PerchanceInstall = {
  Initialize: () => {
   const dialog=el(`dialog`);dialog.id=`perchance-install`;
@@ -327,7 +371,7 @@ const PerchanceSetup = {
   $('page-setup').append(section);
   const heading=document.createElement('h2');heading.textContent='Perchance Text Generator';section.append(heading);
   const note=document.createElement('p');note.textContent='Select Perchance in Individual test or One model. It uses a remote service and is fixed to an 8 GB worker. Run all includes Perchance last on 8 GB workers. Larger workers and targeted All models runs remain local-only. Local tests use 120 seconds; Perchance uses 300 seconds. Unsupported controls and repetitions collapse to one observation.';section.append(note);
-  const fields=[['perchance_url','Worker URL','url'],['perchance_browser','Browser executable (blank discovers Edge/Chrome)','text'],['perchance_epoch','Study epoch (change explicitly for a new provider study)','text'],['perchance_headless','Run worker without a visible window','checkbox'],['perchance_only','Skip local model-folder onboarding','checkbox']];
+  const fields=[['perchance_url','Worker URL','url'],['perchance_browser','Browser executable (blank discovers Edge/Chrome)','text'],['perchance_cdp_port','Local browser connection port','number'],['perchance_epoch','Study epoch (change explicitly for a new provider study)','text'],['perchance_only','Skip local model-folder onboarding','checkbox']];
   PerchanceSetup.Inputs={};
   for(const [setting,text,type] of fields){
    const label=document.createElement('label');label.textContent=text+' ';
@@ -349,12 +393,12 @@ const PerchanceSetup = {
   const save=document.createElement('button');save.textContent='Save Perchance setup';save.addEventListener('click',()=>{
    const values={};
    for(const [setting,input] of Object.entries(PerchanceSetup.Inputs)){
-    values[setting]=input.type==='checkbox'?input.checked:input.value.trim();
+    values[setting]=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value.trim();
    }
 
    api('/api/settings',values).then(()=>{if(values.perchance_only)$('folder-onboarding').close();return poll();}).then(()=>toast('Perchance setup saved')).catch(error=>showAlert(error.message));
   });section.append(save);
-  const defaults={perchance_url:'https://perchance.org/056uh2nc6k',perchance_epoch:'1'};
+  const defaults={perchance_url:'https://perchance.org/056uh2nc6k',perchance_epoch:'1',perchance_cdp_port:9223};
   for(const [setting,value] of Object.entries(defaults)){
    PerchanceSetup.Inputs[setting].value=value;
   }

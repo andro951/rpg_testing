@@ -1,6 +1,6 @@
 # Perchance capability policy
 
-Standing user requirement recorded on October 1, 2026. This policy governs the Perchance Text Generator adapter, its scheduler, results, exports, UI, and study analysis. The adapter now implements grouping and explicit unavailable capabilities; live inference remains unverified.
+Standing user requirement recorded on October 1, 2026. This policy governs the Perchance Text Generator adapter, its scheduler, results, exports, UI, and study analysis. The adapter implements grouping and explicit unavailable capabilities. One harmless live Windows text request through normal browser/CDP succeeded on October 8, 2026; full benchmark execution and unavailable controls remain unverified. The connectivity evidence is separate from scored study results.
 
 October 8 setup rule: before the other preflight checks, determine whether Perchance is eligible and pending, then verify its dependency and local browser launch. Offer installation through a Yes/No popup if setup is missing or broken. Yes installs and rechecks. No is recorded for one upcoming matching run and skips Perchance without writing a benchmark observation or making pending work complete. Ask again on the next run if setup is still needed. Keep consent and dependency setup outside provider identity; scope exclusions and completed observations must not cause unnecessary installation.
 

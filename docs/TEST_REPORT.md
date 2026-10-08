@@ -2,6 +2,16 @@
 
 Date: 2026-09-21. Functional-code checkpoint: **`4f2f4acd9d7fb84f256b3a878387263ad3761be6`**.
 
+## Local update — 2026-10-08: visible Perchance runtime failures
+
+The user-supplied laptop-controlled/PC-hosted export contains one empty Perchance provider error after 42.703 seconds, followed by a security-verification block on the next startup. It contains no successful Perchance observations and retains all 1,428 local observations. The original provider error does not expose its underlying cause. See `perchance-failure-diagnostics.md` for the evidence and distinction between the attempted request and blocked next startup.
+
+Controller failures now produce a popup and persistent Overview notice on the controlling browser, deactivate stale progress and include final `worker_status` in exports. Host verification guidance explains where the browser window opens. Verification and resume require explicit actions; polling/reload never retry generation. The saved attempts remain intact.
+
+Final validation: **all 463 unit/integration tests passed in 557.571 seconds, with no skips**, using the installed Git Bash directory on the test process PATH. **All 12 browser smoke scripts passed**, including the new empty-provider-error/security-blocked-reset reproduction, popup dismissal/reload, explicit connection verification, retained attempts and finished-with-errors notification. Browser tests use real Edge-to-loopback HTTP with simulated external services; no live Perchance generation, security challenge completion or physical laptop-to-PC route was tested. The new smoke is configured in GitHub Actions; remote CI was not run in this session.
+
+Python compile checks, JavaScript syntax validation and `git diff --check` passed. The inference fingerprint remains `56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787`. The Perchance adapter/worker, benchmark definitions and saved results were unchanged. The supplied ZIP was inspected read-only. Test logs are retained under `.local/perchance-failure-unit-tests.log` and `.local/failure-check-*.log`.
+
 ## Local update — 2026-10-08: Perchance setup prompt before preflight
 
 Preflight first checks whether Perchance is eligible and pending, then verifies Playwright and local browser launch. Missing or broken prerequisites open a Yes/No install popup. Yes installs and rechecks on the worker; No is recorded and excludes Perchance from one upcoming matching run while leaving its observations pending. The next run asks again if setup is still needed. Declines are never stored as permanent settings or benchmark outcomes. Setup is isolated from provider/inference identity.

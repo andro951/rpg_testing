@@ -32,7 +32,7 @@ def main():
                  patch.object(perchance, 'browser_executable', return_value=__file__), \
                  patch.object(perchance_setup, 'health', side_effect=lambda owner: dict(status)), \
                  patch.object(perchance_setup, 'install', side_effect=installed) as install, \
-                 patch.object(perchance, 'run', side_effect=lambda a, r, p, **kw: real_run(a, r, p, FakeBackend, **kw)), \
+                 patch.object(perchance, 'run', side_effect=lambda a, r, p, **kw: real_run(a, r, p, FakeBackend, **{k:v for k,v in kw.items() if k!='backend_factory'})), \
                  sync_playwright() as playwright:
                 executable = os.environ.get('REPORT_BROWSER_EXECUTABLE') or os.environ.get('CHROME_PATH')
                 browser = playwright.chromium.launch(headless=True, **({'executable_path': executable} if executable else {}))

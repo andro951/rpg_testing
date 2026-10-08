@@ -43,12 +43,13 @@ def health(app):
     browser = perchance.browser_executable(app.settings)
     if not browser:
         return {'ready': False, 'reason': 'A usable browser executable is missing.'}
-    #A fresh interpreter catches broken imports and verifies launch without calling the service.
-    script = ('from playwright.sync_api import sync_playwright; import sys; '
-              'p=sync_playwright().start(); b=p.chromium.launch(executable_path=sys.argv[1],headless=True); '
-              'b.close(); p.stop()')
+    #The production connection uses a separately launched browser and CDP, not Playwright launch.
+    from pathlib import Path
+    script = ('import sys; sys.path.insert(0,sys.argv[2]); '
+              'from workbench.perchance_connection import probe; probe(sys.argv[1])')
     try:
-        code, out, err = process(app, [sys.executable, '-c', script, browser], timeout=45)
+        code, out, err = process(app, [sys.executable, '-c', script, browser,
+                                     str(Path(__file__).resolve().parents[1])], timeout=45)
     except (RuntimeError, OSError) as exc:
         return {'ready': False, 'reason': str(exc)}
     return {'ready': code == 0, 'reason': '' if code == 0 else (err or out or 'Browser launch failed')[-2000:]}
