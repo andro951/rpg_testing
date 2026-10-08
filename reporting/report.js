@@ -100,6 +100,7 @@ const StatisticsReport = {
         StatisticsReport.Element("h2", parent, `Evidence ${id}`);
         const summary = StatisticsReport.Data.matrix.records[id];
         StatisticsReport.Element("p", parent, `${summary.outcome.toUpperCase()} · ${summary.metadata.model_id} · ${summary.metadata.test_id} / ${summary.metadata.variant_id}`);
+        StatisticsReport.EvaluationFeedback(parent, summary);
         if (summary.source_uri) {
             const link = StatisticsReport.Element("a", parent, "Open complete original result JSON");
             link.href = summary.source_uri;
@@ -134,7 +135,7 @@ const StatisticsReport = {
             const section = StatisticsReport.Element("details", calls);
             section.open = index === 0;
             StatisticsReport.Element("summary", section, `Call ${index + 1}${call.step ? ` · ${call.step}` : ""}`);
-            for (const [number, message] of (call.messages || []).entries()) {
+            for (const [number, message] of (call.request_messages || call.messages || []).entries()) {
                 StatisticsReport.Element("h4", section, `Message ${number + 1} · ${message.role || "unknown role"}`);
                 StatisticsReport.EvidenceText(section, message.content);
             }
@@ -152,6 +153,33 @@ const StatisticsReport = {
         const raw = StatisticsReport.Element("details", parent);
         StatisticsReport.Element("summary", raw, "Complete raw record (JSON)");
         StatisticsReport.EvidenceText(raw, record);
+    },
+    EvaluationFeedback: (parent, summary) => {
+        const evaluation = summary.evaluation;
+        if (!evaluation) {
+            StatisticsReport.Element(`p`, parent, `Detailed evaluator feedback is unavailable in this older report. Regenerate the results table to include it.`);
+            return;
+        }
+
+        const section = StatisticsReport.Element(`section`, parent);
+        section.dataset.evaluatorFeedback = `true`;
+        StatisticsReport.Element(`h3`, section, `Evaluator ${evaluation.objective_outcome}`);
+        StatisticsReport.Element(`p`, section, evaluation.reason);
+        if (evaluation.score_comparison === `disagreement`)
+            StatisticsReport.Element(`p`, section, `The detailed evaluator disagrees with the saved score. The table retains the original recorded score; review this evidence.`);
+
+        const checks = StatisticsReport.Element(`details`, section);
+        StatisticsReport.Element(`summary`, checks, `Detailed checks (${evaluation.checks.length})`);
+        for (const check of evaluation.checks) {
+            const detail = StatisticsReport.Element(`details`, checks);
+            const step = check.step ? ` · ${check.step}` : ``;
+            const status = {passed: `PASS`, failed: `FAIL`, not_evaluated: `NOT EVALUATED`, not_applicable: `NOT APPLICABLE`}[check.status] || check.status;
+            StatisticsReport.Element(`summary`, detail, `${status} · ${check.code}${step} — ${check.explanation}`);
+            const values = Object.fromEntries(Object.entries(check).filter(([key]) => ![`status`, `code`, `step`, `explanation`].includes(key)));
+            StatisticsReport.EvidenceValue(detail, values);
+        }
+
+        StatisticsReport.Element(`small`, section, `Evaluator diagnostics are separate from manual test judgements. Cell colors and totals retain saved scores.${evaluation.evaluator_version ? ` Evaluator: ${evaluation.evaluator_version}.` : ``}`);
     },
     Inspect: async id => {
         const request = (StatisticsReport.EvidenceRequest || 0) + 1;

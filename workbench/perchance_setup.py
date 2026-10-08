@@ -83,7 +83,7 @@ def install(app):
     return health(app)
 
 
-def prepare(app, preparation=None, selection=None, reuse=False):
+def prepare(app, preparation=None, selection=None, reuse=False, force_pending=False):
     context = {'selection': copy.deepcopy(selection), 'preparation': copy.deepcopy(preparation)}
     previous = app.perchance_setup_decision
     if reuse and previous and previous['context'] == context and not previous['consumed'] and previous['status'] == 'declined':
@@ -105,7 +105,7 @@ def prepare(app, preparation=None, selection=None, reuse=False):
     target = {'backend': 'perchance', 'vram_gb': 8, 'gpu_name': gpus[0]['name']}
     plan = perchance.plan(load_tests(app.root / 'test_specs'), app.settings, target, app.store,
                          selection or {'model_id': perchance.MODEL_ID})
-    if not plan['pending']:
+    if not plan['pending'] and not force_pending:
         decision['status'] = 'no_pending_work'
         return
     app.set_progress('preflight', 'Checking Perchance browser dependency', 0, 0,

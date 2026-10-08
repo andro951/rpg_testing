@@ -72,6 +72,17 @@ class ServerTests(unittest.TestCase):
         for host in ['0.0.0.0','192.168.1.1','8.8.8.8']:
             with self.assertRaises(ValueError):WorkbenchServer((host,0),self.app)
     def test_json_content_type_required(self):self.assertEqual(self.req('/api/run',{},headers={'Content-Type':'text/plain'})[0],400)
+    def test_rejected_post_bodies_return_http_errors_without_socket_resets(self):
+        body={'action':'stop','padding':'x'*32768}
+        for unused in range(8):
+            self.assertEqual(self.req('/api/control',body,headers={'Origin':'http://evil.example'})[0],403)
+            self.assertEqual(self.req('/api/control',body,headers={'Content-Type':'text/plain'})[0],400)
+        self.assertFalse(self.app.cancel_event.is_set())
+        self.assertFalse(self.app.operation.locked())
+    def test_optimizer_routes_reject_unknown_options_and_unsafe_evidence_paths(self):
+        self.assertEqual(self.req('/api/optimization/run',{'settings':{'test_reasoning':True}})[0],400)
+        self.assertEqual(self.req('/api/optimization/evidence?id=../escape&key=bad')[0],400)
+        self.assertEqual(self.req('/optimization.js')[0],200)
     def test_preflight_does_not_run_model(self):
         self.assertEqual(self.req('/api/preflight',{})[0],202);self.wait()
         self.assertEqual(self.app.store.all(),[]);self.assertTrue(self.app.report['ready'])

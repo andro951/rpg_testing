@@ -26,6 +26,7 @@ class WorkbenchServer(ThreadingHTTPServer):
         self.static_assets={
             '/':(webroot/'index.html').read_bytes(),
             '/app.js':(webroot/'app.js').read_bytes(),
+            '/optimization.js':(webroot/'optimization.js').read_bytes(),
             '/style.css':(webroot/'style.css').read_bytes(),
         }
         super().__init__(address,Handler)
@@ -77,18 +78,41 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Referrer-Policy','no-referrer');self.send_header('X-Frame-Options','DENY')
         self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         if filename:self.send_header('Content-Disposition','attachment; filename="'+filename+'"')
-        self.end_headers()
-        try:self.wfile.write(data)
-        except (BrokenPipeError,ConnectionResetError):pass
+        try:
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):
+            # A browser may cancel a polling response while navigating/closing.
+            # There is no live connection on which to send a second HTTP error.
+            return
     def do_GET(self):
         try:
             url=urlsplit(self.path);path=url.path;q=parse_qs(url.query);app=self.server.app
-            if path in ('/','/app.js','/style.css'):
-                name={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}[path]
-                kind={'/':'text/html; charset=utf-8','/app.js':'application/javascript; charset=utf-8','/style.css':'text/css; charset=utf-8'}[path]
+            if path in self.server.static_assets:
+                kind='text/html; charset=utf-8' if path=='/' else 'text/css; charset=utf-8' if path=='/style.css' else 'application/javascript; charset=utf-8'
                 return self.send(200,self.server.static_assets[path],kind)
             self.authorize()
             if path=='/api/state':return self.send(200,{**app.snapshot(),'control_access':'private_network'})
+            if path=='/api/optimization/options':
+                from optimization.runtime import discover
+                if app.operation.locked():raise RuntimeError('Wait until the current operation finishes before rescanning host models.')
+                options=discover(app)
+                from optimization.engine import DEFAULTS
+                # Paths are host paths; never send saved credentials/settings.
+                return self.send(200,{**options,'defaults':DEFAULTS})
+            if path=='/api/optimization/sessions':
+                from optimization.storage import Store
+                return self.send(200,{'sessions':[{k:s.get(k) for k in ('id','created','status','message','generator_id')} for s in Store(app.root).list()]})
+            if path=='/api/optimization/session':
+                from optimization.engine import view
+                return self.send(200,view(app,q['id'][0]))
+            if path=='/api/optimization/evidence':
+                from optimization.storage import Store
+                return self.send(200,Store(app.root).get_evidence(q['id'][0],q['key'][0]))
+            if path=='/api/optimization/export':
+                from optimization.storage import Store
+                if app.operation.locked():raise RuntimeError('Pause and stop the operation before exporting a consistent session.')
+                return self.send(200,Store(app.root).export(q['id'][0]),'application/zip','prompt-optimization-session.zip')
             if path=='/api/run-options':return self.send(200,app.run_options())
             if path=='/api/results':return self.send(200,app.result_records())
             if path=='/api/analysis':
@@ -109,12 +133,18 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:self.server.app.log('http_error',exc);self.send(500,{'error':'Internal error; inspect Logs.'})
     def do_POST(self):
         try:
-            self.authorize();app=self.server.app;path=urlsplit(self.path).path
-            if self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('Use application/json')
+            app=self.server.app;path=urlsplit(self.path).path
             size=int(self.headers.get('Content-Length','0'))
             if not 0<=size<=16*1024**2:raise ValueError('Invalid request size')
+            # Consume bounded request bytes before sending a rejection. Closing
+            # with unread POST bytes can reset TCP on Windows, losing the 4xx.
+            self.connection.settimeout(10)
+            raw=self.rfile.read(size) if size else b''
+            if len(raw)!=size:raise ValueError('Incomplete request body')
+            self.authorize()
+            if self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('Use application/json')
             from .scoring import parse
-            data=parse(self.rfile.read(size).decode()) if size else {}
+            data=parse(raw.decode()) if size else {}
             if not isinstance(data,dict):raise ValueError('Request body must be an object')
             if path=='/api/picker/models':
                 if not ipaddress.ip_address(self.client_address[0]).is_loopback:
@@ -138,6 +168,21 @@ class Handler(BaseHTTPRequestHandler):
                 app.start(operations[path],data);return self.send(202,{'started':True})
             if path=='/api/unit-tests':app.start('unit_tests');return self.send(202,{'started':True})
             if path=='/api/run':app.start('run',data);return self.send(202,{'started':True})
+            if path=='/api/optimization/run':app.start('optimization',data);return self.send(202,{'started':True})
+            if path=='/api/optimization/settings':
+                from optimization.engine import update_settings
+                if set(data)!={'session_id','settings'}:raise ValueError('Expected session_id and settings')
+                if not app.operation.acquire(blocking=False):raise RuntimeError('Stop the active operation before changing generator settings.')
+                try:update_settings(app,data['session_id'],data['settings'])
+                finally:app.operation.release()
+                return self.send(200,{'ok':True})
+            if path=='/api/optimization/import':
+                import base64
+                from optimization.storage import Store
+                if not app.operation.acquire(blocking=False):raise RuntimeError('Wait until the active operation finishes.')
+                try:session_id=Store(app.root).import_archive(base64.b64decode(data['archive'],validate=True))
+                finally:app.operation.release()
+                return self.send(200,{'id':session_id})
             if path=='/api/fix':app.start('fix',data);return self.send(202,{'started':True})
             if path=='/api/control':app.control(data['action']);return self.send(200,{'ok':True})
             if path=='/api/settings':app.configure(data);return self.send(200,{'ok':True})

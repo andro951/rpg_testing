@@ -13,7 +13,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-BASELINE = '78c6b154c8668fca7db128923d2d7893342baf8e'
+# The earlier recovery baseline predates the user-approved test/identity reset.
+# Pin the reviewed current suite; do not weaken the audit to whichever HEAD runs.
+BASELINE = 'b51542e6e8554127dbe69ad7e82202e59ce27d26'
 FINGERPRINT_FILES = (
     'domain.py', 'workflows.py', 'scoring.py', 'backends.py', 'inventory.py',
     'presentation.py', 'seedcheck.py', 'native.py', 'scheduler.py',
@@ -61,7 +63,8 @@ def audit(root: Path, baseline: str) -> dict:
             before.append(definition)
     after = load_tests(root / 'test_specs')
     by_id = {t['id']: t for t in after}
-    context_old = automatic_context(before, {'planning.context_length': 2**63 - 1})['allocated_tokens']
+    context_old = automatic_context(_context_planning_tests(before),
+                                    {'planning.context_length': 2**63 - 1})['allocated_tokens']
     context_new = automatic_context(_context_planning_tests(after),
                                     {'planning.context_length': 2**63 - 1})['allocated_tokens']
     require(context_old == context_new, f'Context recipe changed: {context_old} -> {context_new}')

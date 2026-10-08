@@ -47,6 +47,8 @@ You can explicitly **Pause after case**, **Resume**, **Stop after model**, or **
 
 Detailed objective-test diagnostics can be generated offline with `python -m evaluation`. Reports explain format, operation structure, pointer resolution, requested changes, array order/content and final-state checks, while keeping saved scores and raw evidence unchanged. See [evaluator instructions](evaluation/README.md) and [coverage review](docs/evaluator-plan/implementation-review.md).
 
+Prompt-sharing metadata lives in [optimization/sharing.json](optimization/sharing.json). It records reviewed instruction locations, compatible component families and ordered expansion scopes for future prompt optimization. Validate it with `python -m optimization`; see [catalog instructions](optimization/README.md). Metadata does not start optimization runs or alter existing benchmark prompts.
+
 Generate a self-contained offline statistics dashboard from saved evidence with `python -m reporting.report`. Open `.local/reports/statistics.html` in a modern browser. It opens on a compact objective-results matrix with 24-pixel pass/fail squares, models as columns, variants/repetitions as rows, test subtotals and model totals. It includes tests with fixed answer or final-state oracles, current/historical scope filters and links to original evidence. Dialogue and other open-ended generation are excluded from this table and its totals, with saved evidence preserved for a separate view later. The existing long-array comparison, failure and latency views remain available. See [offline reporting](reporting/README.md) for ZIP input, matching rules and tests.
 
 Overview shows the current pass, execution class, reported GPU/CPU layer counts, and available whole-device memory samples. Layer reports do not prove that Windows will never page GPU allocations. CPU utilization, a host-pinned buffer, or a CPU-mapped model file alone is not proof of CPU model-layer execution.
@@ -97,3 +99,8 @@ Rejected definitions stay saved but cannot run again; editing the execution
 definition creates a fresh Needs review definition. Grouping panels start collapsed
 and retain separate presets per table. Keep the launcher console open to save reviews.
 The offline HTML remains a read-only snapshot. See [review and grouping details](docs/results-table-grouping.md).
+
+
+### Prompt Optimization
+
+Open the **Prompt Optimization** Workbench tab. Refresh host models, choose the prompt-writing model (highest-parameter available Qwen 3.5 defaults when detected) and starting-case model, then start a session. The pilot optimizes Array move JSON Patch instructions: an origin pass opens all matching task-type tests across every runnable host model. Only complete host-cohort candidates qualify for the top three. Generator controls default to 20 attempts, temperature 0.5–0.9, reasoning off; benchmark reasoning always stays off. Sessions, raw proposals and objective feedback are stored separately under `optimization_results/`. Export/import sessions and **Evaluate remaining on this machine** support other hosts without generating new candidates. See [the optimization plan](docs/prompt-optimization/optimization-plan.md).

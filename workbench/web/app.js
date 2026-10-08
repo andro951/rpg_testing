@@ -406,4 +406,5 @@ const PerchanceSetup = {
 };
 PerchanceSetup.Initialize();
 //#endregion
+const optimizationScript=el(`script`);optimizationScript.src=`/optimization.js`;document.body.append(optimizationScript);
 poll();setInterval(poll,1200);

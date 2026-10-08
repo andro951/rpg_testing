@@ -6,6 +6,7 @@ from reporting.grouping import row_grouping
 from reporting.timing import annotate as annotate_timing
 from workbench.domain import digest, experiment_spec
 from workbench.perchance_trials import observation_aliases, model_conditions
+from reporting.feedback import summarize as evaluation_feedback
 
 
 def outcome(record):
@@ -114,6 +115,7 @@ def build_matrix(records, specs, fingerprint):
         test_id = record.get('test_id', 'unknown'); variant_id = record.get('variant_id', 'unknown')
         row = row_for(definition, workflow, record.get('repetition', 0), test_id, variant_id)
         summaries[cid] = {'case_id': cid, 'model': model, 'outcome': outcome(record), 'current': row['current'],
+            'evaluation': evaluation_feedback(record),
             'definition_id': digest(definition), 'execution_class': execution,
             'timing_group': digest([definition, workflow, execution, simulated]),
             'metadata': {key: record[key] for key in ('model_id', 'test_id', 'variant_id', 'repetition', 'status',

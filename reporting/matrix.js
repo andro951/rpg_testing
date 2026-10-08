@@ -39,6 +39,20 @@ const ResultsMatrix = {
         const text = `${counts.pass} PASS / ${counts.fail} FAIL${scored ? ` · ${(counts.pass / scored * 100).toFixed(1)}%` : " · unscored"}`;
         return text + extras.filter(([key]) => counts[key]).map(([key, label]) => `\n${counts[key]} ${label}`).join("");
     },
+    ReasonsText: ids => {
+        const reasons = new Map();
+        for (const id of new Set(ids)) {
+            const evaluation = StatisticsReport.Data.matrix.records[id]?.evaluation;
+            if (evaluation) {
+                const reason = `Evaluator ${evaluation.objective_outcome}: ${evaluation.reason}`;
+                reasons.set(reason, (reasons.get(reason) || 0) + 1);
+            }
+        }
+
+        const ordered = [...reasons.entries()].sort((left, right) => right[1] - left[1]);
+        return ordered.slice(0, 5).map(([reason, count]) => `${ordered.length > 1 || count > 1 ? `${count} × ` : ``}${reason}`).join(`\n`) +
+            (ordered.length > 5 ? `\n${ordered.length - 5} more reasons; open evidence for all checks.` : ``);
+    },
     Inspect: (ids, heading) => {
         const parent = StatisticsReport.Details;
         parent.replaceChildren();
@@ -128,6 +142,10 @@ const ResultsMatrix = {
         cell.style.boxSizing = "border-box";
         cell.dataset.outcome = state;
         cell.title = `${heading}\n${ResultsMatrix.CountsText(counts)}\nTotals count unique independently executed observations.`;
+        const reasons = ResultsMatrix.ReasonsText(ids);
+        if (reasons)
+            cell.title += `\n${reasons}`;
+
         ResultsMatrix.TimingMarker(cell, ids);
 
         if (!ids.length) {

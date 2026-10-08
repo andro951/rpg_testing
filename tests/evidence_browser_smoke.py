@@ -44,6 +44,9 @@ def main():
                     # Most objective records are summaries: fetch the complete saved file.
                     page.evaluate('(id) => StatisticsReport.Inspect(id)', first_id)
                     expect(page.locator('#drilldown')).to_contain_text('Requests and responses (1)')
+                    expect(page.locator('#drilldown [data-evaluator-feedback]')).to_contain_text('Evaluator INCONCLUSIVE')
+                    expect(page.locator('#drilldown [data-evaluator-feedback]')).to_contain_text('Detailed checks')
+                    assert page.locator('td[title*="Evaluator INCONCLUSIVE"]').count() > 0
                     prompt = page.locator('#drilldown pre').filter(has_text='Current State:').first
                     assert prompt.text_content() == text
                     assert '\\n' not in prompt.text_content()

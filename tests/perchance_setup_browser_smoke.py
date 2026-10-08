@@ -57,13 +57,14 @@ def main():
                 page.locator('#run').click()
                 expect(page.locator('#perchance-install')).to_be_visible()
                 page.locator('#perchance-install-yes').click()
-                page.wait_for_function('() => state?.state === "finished" && !state.busy && state.completed_now===1')
+                page.wait_for_function('() => state?.state === "finished" && !state.busy && state.completed_now===3')
                 install.assert_called_once()
                 assert len(FakeBackend.created) == 1
+                assert len(FakeBackend.created[0].calls) == 3, 'Configured repetitions must run independently'
                 assert app.report['perchance_setup']['status'] == 'installed'
                 page.locator('#run').click()
                 page.wait_for_function('() => state?.state === "finished" && !state.busy && state.completed_now===0')
-                assert len(FakeBackend.created) == 1, 'Resume must preserve the single observation'
+                assert len(FakeBackend.created) == 1, 'Resume must preserve all three independent repetitions'
                 record = app.store.all()[0]; app.delete_result(record['model_id'], record['case_id'])
                 status.update(ready=False, reason='Fixture: broken browser launch.')
                 page.locator('#run').click()

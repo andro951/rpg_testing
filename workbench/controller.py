@@ -289,6 +289,13 @@ class Controller(ModelManager):
                 if selection is not None:validate_selection(selection,self.selection_models(),load_tests(self.root/'test_specs'))
                 if kind=='run':self.requested_run_selection=selection
             else:selection=None
+            if kind=='optimization':
+                from optimization.engine import settings
+                from optimization.storage import Store
+                if not isinstance(payload,dict) or set(payload)-{'mode','session_id','generator_id','origin_model_id','settings'}:raise ValueError('Unknown optimizer option')
+                if payload.get('mode','optimize') not in ('optimize','evaluate_remaining'):raise ValueError('Unknown optimizer mode')
+                if payload.get('session_id'):Store(self.root).load(payload['session_id'])
+                else:settings(payload.get('settings',{}))
             repair_selection=copy.deepcopy((self.report or {}).get('selection')) if kind=='fix' else None
         except Exception:
             self.operation.release();raise
@@ -307,6 +314,9 @@ class Controller(ModelManager):
                 elif kind=='unit_tests':self.selftest()
                 elif kind=='fix':self.fix(payload);self.check(selection=repair_selection,setup=False)
                 elif kind=='run':self.run(selection=selection)
+                elif kind=='optimization':
+                    from optimization.engine import dispatch
+                    dispatch(self,payload)
                 elif kind=='hub_search':self.search_hub(payload)
                 elif kind=='hub_inspect':self.inspect_hub(payload)
                 elif kind=='hub_download':self.download_selected(payload)

@@ -42,3 +42,7 @@ On a Windows host with Edge already installed, set `REPORT_BROWSER_EXECUTABLE` t
 
 
 Timeout is an execution watchdog, excluded from case identity, experiment comparison and matrix row grouping. Its actual value is preserved in raw run metadata. Changing it does not create another row, add references or reopen a completed result, including a timed-out completion. The approved clean reset deleted all saved results and removed the deadline-specific comparison catalog before adopting this policy. Fresh runs populate the ordinary active-suite rows.
+
+### Detailed evaluator feedback
+
+Regenerate the table with `Open_Results_Table.bat`. Cell tooltips include the evaluator verdict and a concise reason; clicking evidence shows individual pass/fail checks, including pointer/format/type defects and expected/actual values. The table retains original saved scores. Disagreements between detailed evaluation and saved scores are called out explicitly. Missing captured contracts show Unavailable; interrupted/infrastructure evidence shows Inconclusive rather than inventing a semantic verdict. These diagnostics do not change manual accepted/needs-review/rejected test judgements, and do not alter raw result files.

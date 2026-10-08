@@ -33,6 +33,7 @@ def main():
         root=Path(tmp);test=fixture();write_json(root/'test_specs/fixture.json',test)
         other=fixture();other['id']='second';other['variants'][0]['steps'][0]['prompt']+=' Different.'
         write_json(root/'test_specs/second.json',other)
+        expected_trials=test['repetitions']+other['repetitions']
         app=Controller(root);app.settings.update(sync_source=False,perchance_only=True)
         server=WorkbenchServer(('127.0.0.1',0),app)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
@@ -87,9 +88,10 @@ def main():
                 expect(page.locator('#state-badge')).to_have_text('FINISHED WITH ERRORS',timeout=15000)
                 finished=page.get_by_role('dialog',name='Run finished with errors',exact=True)
                 expect(finished).to_be_visible()
-                expect(page.locator('#worker-failure-reason')).to_contain_text('2 infrastructure error')
+                expect(page.locator('#worker-failure-reason')).to_contain_text(f'{expected_trials} infrastructure error')
                 expect(page.locator('#worker-failure-host')).not_to_be_visible()
-                assert len(app.store.all())==2
+                assert len(app.store.all())==expected_trials
+                assert len(FakeBackend.created[1].calls)==expected_trials,'Every repetition gets an independent attempt'
                 assert any(record.get('attempts') for record in app.store.all()),'Original failed attempt is retained'
                 FakeBackend.failure=None
                 assert not errors,errors
