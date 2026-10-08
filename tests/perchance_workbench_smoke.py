@@ -35,7 +35,7 @@ def main():
                 page.locator('#preflight').click()
                 page.wait_for_function('() => state?.report?.ready && !state.busy')
                 assert app.report['plan']['groups'][-1]['model_id']==perchance.MODEL_ID
-                assert app.report['plan']['pending']==1
+                assert app.report['plan']['pending']==3
                 page.locator('#run').click()
                 page.wait_for_function('() => state?.state==="finished" && !state.busy')
                 assert len(FakeBackend.created)==1
@@ -45,19 +45,19 @@ def main():
                 page.wait_for_function('() => runOptionsValid && !runOptionsLoading')
                 page.locator('#one-model-model').select_option(perchance.MODEL_ID)
                 page.wait_for_function('() => document.querySelectorAll("#one-model-tests input:checked").length===1')
-                assert 'Unsupported settings/repetitions collapse' in page.locator('#one-model-summary').inner_text()
+                assert 'Repetitions run independently' in page.locator('#one-model-summary').inner_text()
                 page.locator('#one-model-check').click()
                 page.wait_for_function('() => state?.report?.remote_provider && !state.busy')
                 assert '3 requested cases' in page.locator('#plan').inner_text()
-                assert app.report['plan']['independent_observations']==1
+                assert app.report['plan']['independent_observations']==3
                 page.evaluate('() => setPage("one-model")')
                 page.wait_for_function('() => runOptionsValid && !runOptionsLoading')
                 with page.expect_response(lambda response: response.url.endswith('/api/run') and response.request.method=='POST'):
                     page.locator('#one-model-run').click()
                 page.evaluate('async () => render(await api("/api/state"))')
                 page.wait_for_function('() => state?.state==="finished" && !state.busy')
-                assert len(app.store.all())==1
-                assert len(FakeBackend.created[0].calls)==1
+                assert len(app.store.all())==3
+                assert len(FakeBackend.created[0].calls)==3
                 page.evaluate('() => setPage("one-model")')
                 page.wait_for_function('() => runOptionsValid && !runOptionsLoading')
                 with page.expect_response(lambda response: response.url.endswith('/api/run') and response.request.method=='POST'):

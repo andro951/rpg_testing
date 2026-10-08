@@ -73,26 +73,26 @@ class RunAllPerchanceTests(unittest.TestCase):
     def test_eight_gb_run_all_local_first_remote_last_and_resume(self):
         report, plan = self.app.build_preflight()
         self.assertTrue(report['ready'])
-        self.assertEqual(plan['pending'], 4)
+        self.assertEqual(plan['pending'], 6)
         self.assertEqual(report['plan']['groups'][-1]['model_id'], perchance.MODEL_ID)
         self.app.run()
         self.assertEqual(self.events, ['local', 'local', 'local', 'perchance'])
-        self.assertEqual((self.app.run_total, self.app.run_processed, self.app.completed_now), (4, 4, 4))
+        self.assertEqual((self.app.run_total, self.app.run_processed, self.app.completed_now), (6, 6, 6))
         self.assertEqual(self.app.report['plan']['pending'], 0)
         remote = next(r for r in self.app.store.all() if r['model_id'] == perchance.MODEL_ID)
         self.assertEqual(remote['timeout_seconds'], 300)
         self.assertEqual(remote['aliases'][0]['requested_timeout_seconds'], 120)
-        self.assertEqual(len(remote['aliases']), 3)
+        self.assertEqual(len(remote['aliases']), 1)
         self.app.run()
         self.assertEqual(self.app.completed_now, 0)
         self.assertEqual(len(FakeBackend.created), 1)
 
     def test_completed_locals_do_not_prevent_pending_perchance(self):
         self.stop = True; self.app.run()
-        self.assertEqual(self.app.report['plan']['pending'], 1)
+        self.assertEqual(self.app.report['plan']['pending'], 3)
         self.stop = False; self.events.clear(); self.app.run()
         self.assertEqual(self.events, ['perchance'])
-        self.assertEqual(self.app.completed_now, 1)
+        self.assertEqual(self.app.completed_now, 3)
 
     def test_stop_and_cancel_before_remote_do_not_open_browser(self):
         for control in ('stop', 'cancel'):
@@ -241,7 +241,7 @@ class RunAllPerchanceTests(unittest.TestCase):
         FakeBackend.failure=RuntimeError
         self.app.start('run');self.finish()
         self.assertEqual(self.app.state,'finished_with_errors')
-        self.assertIn('1 infrastructure error',self.app.snapshot()['failure']['message'])
+        self.assertIn('3 infrastructure error',self.app.snapshot()['failure']['message'])
         record=next(r for r in self.app.store.all() if r['model_id']==perchance.MODEL_ID)
         self.assertEqual(record['status'],'error')
         self.assertIn('PARTIAL',record['calls'][0]['text'])

@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from workbench.controller import Controller
-from workbench.domain import ResultStore, code_fingerprint, read_json, write_json
+from workbench.domain import ResultStore, code_fingerprint, read_json, write_json, digest
 from workbench import perchance as provider
 
 
@@ -80,17 +80,17 @@ class PerchanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'fixed 8'):
             self.app.assign_model(provider.MODEL_ID, 12)
 
-    def test_collapse_cache_sampling_and_repetitions_and_subset_identity(self):
+    def test_collapse_settings_within_each_independent_repetition_and_subset_identity(self):
         alternate = copy.deepcopy(self.test['variants'][0])
         alternate.update(id='b', cache='off')
         alternate['steps'][0]['sampling'].update(temperature=1, top_p=.5, seed=100)
         self.test['variants'].append(alternate)
         full = self.make_plan()
-        self.assertEqual((full['requested_cases'], full['independent_observations'], full['collapsed_cases']), (6, 1, 5))
+        self.assertEqual((full['requested_cases'], full['independent_observations'], full['collapsed_cases']), (6, 3, 3))
         subset = self.make_plan(selection={**self.selection, 'test_id': self.test['id'], 'variant_id': 'b'})
         self.assertEqual(subset['groups'][0]['case_id'], full['groups'][0]['case_id'])
         self.assertEqual(subset['groups'][0]['variant']['id'], 'a')
-        self.assertEqual(len(full['groups'][0]['aliases']), 6)
+        self.assertEqual(len(full['groups'][0]['aliases']), 2)
 
     def test_distinct_prompts_states_outputs_oracles_and_workflows(self):
         for field in ('prompt', 'state', 'schema', 'oracle', 'workflow', 'representation'):
@@ -102,14 +102,14 @@ class PerchanceTests(unittest.TestCase):
             elif field == 'representation':other['variants'][0]['state_presentation'] = 'raw_json'
             else:
                 other['variants'][0]['steps'].append({'id':'second','type':'generate','prompt':'Another step','output':{'type':'text'},'uses':['answer']})
-            with self.subTest(field=field):self.assertEqual(self.make_plan([self.test, other])['independent_observations'], 2)
+            with self.subTest(field=field):self.assertEqual(self.make_plan([self.test, other])['independent_observations'], 6)
 
     def test_remote_preflight_bypasses_native_and_larger_tiers(self):
         for tier in (8, 11, 12, 16):
             with patch('workbench.inventory.detect_gpus', return_value=[{'name':'GPU','total_gib':tier}]), patch.object(provider.BrowserBackend, 'open') as opened:
                 report, plan = self.app.build_preflight(selection=self.selection)
             self.assertEqual(report['ready'], tier == 8)
-            self.assertEqual(plan['pending'], 1)
+            self.assertEqual(plan['pending'], 3)
             opened.assert_not_called()
             self.assertFalse(any(issue['id'] == 'backend' for issue in report['issues']))
         report, _ = self.app.build_preflight({'gpu_name': 'GPU', 'vram_gb': 8}, self.selection)
@@ -123,15 +123,15 @@ class PerchanceTests(unittest.TestCase):
         path.parent.mkdir(); path.write_text('{}')
         with self.assertRaises(ValueError):self.make_plan()
 
-    def test_run_once_resume_mapping_export_and_no_original_changes(self):
+    def test_run_all_repetitions_resume_mapping_export_and_no_original_changes(self):
         pending = self.make_plan()
         before = (self.root/'test_specs/fixture.json').read_bytes()
         provider.run(self.app, {'gpu':{}}, pending, FakeBackend)
-        self.assertEqual(len(FakeBackend.created[0].calls), 1)
+        self.assertEqual(len(FakeBackend.created[0].calls), 3)
         self.assertTrue(FakeBackend.created[0].closed)
-        self.assertEqual(len(self.app.store.all()), 1)
+        self.assertEqual(len(self.app.store.all()), 3)
         record = self.app.store.all()[0]
-        self.assertEqual(len(record['aliases']), 3)
+        self.assertEqual(len(record['aliases']), 1)
         self.assertIsNone(record['calls'][0]['applied_sampling'])
         self.assertEqual(record['execution_class'], 'remote_service')
         self.assertFalse(record['feature_applicability']['cache_control'])
@@ -141,8 +141,10 @@ class PerchanceTests(unittest.TestCase):
         archive = zipfile.ZipFile(io.BytesIO(self.app.export()))
         self.assertTrue(any(n.startswith('perchance-plans/') for n in archive.namelist()))
         summary = json.loads(archive.read('summary.json'))
-        self.assertEqual(summary['perchance']['independent_observations'], 1)
+        self.assertEqual(summary['perchance']['independent_observations'], 3)
         self.assertEqual(summary['perchance']['mapped_requested_cases'], 3)
+        self.assertEqual({r['repetition'] for r in self.app.store.all()}, {0, 1, 2})
+        self.assertEqual(len({r['calls'][0]['requested_sampling']['seed'] for r in self.app.store.all()}), 3)
 
     def test_timeout_changes_watchdog_only_and_terminals_do_not_rerun(self):
         before = self.make_plan()
@@ -154,7 +156,7 @@ class PerchanceTests(unittest.TestCase):
         self.assertEqual(after['groups'][0]['aliases'][0]['requested_timeout_seconds'],120)
         duplicate = copy.deepcopy(changed); duplicate['id'] = 'other'
         combined = self.make_plan([self.test, duplicate])
-        self.assertEqual(combined['independent_observations'],1)
+        self.assertEqual(combined['independent_observations'],3)
         self.assertEqual(combined['groups'][0]['test']['timeout_seconds'],300)
         self.assertEqual(self.test['timeout_seconds'],10)
         for failure in (None, provider.PerchanceTimeout):
@@ -169,16 +171,17 @@ class PerchanceTests(unittest.TestCase):
                 if failure:self.assertEqual(record['calls'][0]['text'],'PARTIAL')
 
     def test_cancellation_and_infrastructure_attempts(self):
+        cid = self.make_plan()['groups'][0]['case_id']
         FakeBackend.failure = provider.Cancelled
         with self.assertRaises(provider.Cancelled):provider.run(self.app, {}, self.make_plan(), FakeBackend)
         self.assertEqual(self.app.store.all()[0]['status'], 'aborted')
         self.assertTrue(FakeBackend.created[0].closed)
         FakeBackend.failure = RuntimeError
         provider.run(self.app, {}, self.make_plan(), FakeBackend)
-        self.assertEqual(len(self.app.store.all()[0]['attempts']), 1)
+        self.assertEqual(len(self.app.store.read(self.app.store.path(provider.MODEL_ID, cid))['attempts']), 1)
         FakeBackend.failure = None
         provider.run(self.app, {}, self.make_plan(), FakeBackend)
-        self.assertEqual(len(self.app.store.all()[0]['attempts']), 2)
+        self.assertEqual(len(self.app.store.read(self.app.store.path(provider.MODEL_ID, cid))['attempts']), 2)
 
     def test_schema_baseline_validates_locally_and_multistep_is_not_collapsed(self):
         self.test['variants'][0]['steps'][0]['output'] = {'type':'boolean'}
@@ -190,7 +193,7 @@ class PerchanceTests(unittest.TestCase):
         self.assertFalse(record['feature_applicability']['constrained_decoding'])
         self.test['variants'][0]['steps'].append({'id':'followup','type':'generate','prompt':'Followup','uses':['answer'],'output':{'type':'text'}})
         pending=self.make_plan(); provider.run(self.app, {}, pending, FakeBackend)
-        self.assertEqual(len(FakeBackend.created[-1].calls), 2)
+        self.assertEqual(len(FakeBackend.created[-1].calls), 6)
         self.assertIn('Previous output', str(FakeBackend.created[-1].calls[-1]))
 
     def test_settings_are_validated_and_identity_tracks_epoch(self):
@@ -209,7 +212,7 @@ class PerchanceTests(unittest.TestCase):
     def test_default_representation_and_explicit_default_are_equivalent(self):
         other=copy.deepcopy(self.test);other['id']='other'
         other['variants'][0]['state_presentation']='indexed_arrays'
-        self.assertEqual(self.make_plan([self.test,other])['independent_observations'],1)
+        self.assertEqual(self.make_plan([self.test,other])['independent_observations'],3)
 
     def test_browser_transport_preserves_final_text_and_timeout_cancel_partials(self):
         for mode in ('complete','timeout','cancel','error'):
@@ -242,6 +245,116 @@ class PerchanceTests(unittest.TestCase):
     def test_native_identity_fingerprint_after_clean_reset(self):
         self.assertEqual(code_fingerprint(), '56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787')
 
+    def legacy_record(self):
+        policy = copy.deepcopy(provider.identity(self.app.settings))
+        policy.update(policy=provider.LEGACY_POLICY, adapter_hash=provider.LEGACY_ADAPTER_HASH)
+        policy['capabilities']['seed'] = 'unavailable_in_adapter'
+        definition = provider.effective(self.test, self.test['variants'][0])
+        cid = digest({'provider': policy, 'effective': definition})
+        aliases = [{'test_id': self.test['id'], 'variant_id': 'a', 'repetition': rep,
+                    'requested_id': digest({'legacy': cid, 'repetition': rep}),
+                    'requested_definition': {'test': {k: v for k, v in self.test.items() if k not in ('variants', 'repetitions', 'timeout_seconds', 'name')}, 'variant': self.test['variants'][0]}}
+                   for rep in range(3)]
+        return {'status': 'completed', 'model_id': provider.MODEL_ID, 'case_id': cid, 'repetition': 0,
+                'test_id': self.test['id'], 'variant_id': 'a', 'test_definition': self.test,
+                'variant_definition': self.test['variants'][0], 'effective_definition': definition,
+                'capability_policy': policy, 'artifact_identity': policy, 'aliases': aliases,
+                'execution_class': 'remote_service', 'simulated': False,
+                'provenance': {'workflow_code': code_fingerprint()},
+                'outputs': {'answer': 'READY'}, 'score': {'exact_match': True},
+                'calls': [{'step': 'answer', 'text': 'READY', 'finish_reason': 'provider_completed'}]}
+
+    def test_old_baseline_fulfills_only_first_trial_and_preserves_resume_and_matrix(self):
+        from reporting.report import build_report
+        legacy = self.legacy_record()
+        path = self.app.store.save(legacy); raw = path.read_bytes()
+        pending = self.make_plan()
+        self.assertEqual((pending['complete'], pending['pending']), (1, 2))
+        self.assertEqual(pending['groups'][0]['case_id'], legacy['case_id'])
+        self.assertTrue(pending['groups'][0]['legacy_baseline_reused'])
+        self.assertEqual({g['repetition'] for g in pending['groups'] if not g['done']}, {1, 2})
+        provider.run(self.app, {}, pending, FakeBackend)
+        self.assertEqual(len(FakeBackend.created[0].calls), 2)
+        self.assertEqual(path.read_bytes(), raw)
+        records = self.app.store.all()
+        report = build_report(records, [self.test])
+        self.assertEqual(len(report['matrix']['models']), 1)
+        self.assertEqual(report['remote_statistics']['mapped_requested_cases'], 3)
+        self.assertEqual(report['remote_statistics']['independent_observations'], 3)
+        self.assertEqual(report['remote_statistics']['collapsed_cases'], 0)
+        rows = report['matrix']['rows']; self.assertEqual(len(rows), 3)
+        for row in rows:
+            cell = next(iter(row['cells'].values()))
+            self.assertEqual(len(cell['primary_ids']), 1)
+            self.assertFalse(cell['reference_ids'])
+        provider.run(self.app, {}, self.make_plan(), FakeBackend)
+        self.assertEqual(len(FakeBackend.created), 1)
+        self.assertEqual(self.make_plan()['pending'], 0)
+
+    def test_legacy_terminal_failures_and_timeouts_are_not_rerolled(self):
+        for timeout in (False, True):
+            with self.subTest(timeout=timeout), tempfile.TemporaryDirectory() as directory:
+                self.app.store = ResultStore(Path(directory))
+                record = self.legacy_record(); record['score']['exact_match'] = False; record['timed_out'] = timeout
+                path = self.app.store.save(record); raw = path.read_bytes()
+                pending = self.make_plan()
+                self.assertEqual(pending['complete'], 1)
+                provider.run(self.app, {}, pending, FakeBackend)
+                self.assertEqual(len(FakeBackend.created[-1].calls), 2)
+                self.assertEqual(path.read_bytes(), raw)
+
+    def test_migration_rejects_changed_prompt_epoch_url_and_unknown_adapter(self):
+        record = self.legacy_record(); self.app.store.save(record)
+        altered = copy.deepcopy(self.test); altered['variants'][0]['steps'][0]['prompt'] += ' changed'
+        self.assertEqual(self.make_plan([altered])['complete'], 0)
+        for settings in ({'perchance_epoch': '2'}, {'perchance_url': 'https://perchance.org/different'}):
+            self.assertEqual(provider.plan([self.test], settings, self.target, self.app.store, self.selection)['complete'], 0)
+        with tempfile.TemporaryDirectory() as directory:
+            self.app.store = ResultStore(Path(directory))
+            record['capability_policy']['adapter_hash'] = 'unknown'
+            record['case_id'] = digest({'provider': record['capability_policy'], 'effective': record['effective_definition']})
+            self.app.store.save(record)
+            self.assertEqual(self.make_plan()['complete'], 0)
+
+    def test_extra_repetitions_only_add_new_trials(self):
+        provider.run(self.app, {}, self.make_plan(), FakeBackend)
+        self.test['repetitions'] = 4
+        pending = self.make_plan()
+        self.assertEqual((pending['complete'], pending['pending']), (3, 1))
+        provider.run(self.app, {}, pending, FakeBackend)
+        self.assertEqual(len(FakeBackend.created[-1].calls), 1)
+        self.assertEqual({r['repetition'] for r in self.app.store.all()}, {0, 1, 2, 3})
+
+    def test_full_active_suite_keeps_repetitions_but_collapses_unavailable_settings(self):
+        from workbench.judgements import load_tests
+        tests = load_tests(Path(__file__).resolve().parents[1] / 'test_specs')
+        plan = provider.plan(tests, self.app.settings, self.target, self.app.store, self.selection)
+        self.assertEqual((plan['requested_cases'], plan['independent_observations'], plan['collapsed_cases']), (357, 312, 45))
+        self.assertTrue(all({a['repetition'] for a in g['aliases']} == {g['repetition']} for g in plan['groups']))
+
+    def test_full_suite_160_compatible_baselines_leave_152_fresh_trials(self):
+        from workbench.judgements import load_tests
+        tests = load_tests(Path(__file__).resolve().parents[1] / 'test_specs')
+        original = provider.plan(tests, self.app.settings, self.target, self.app.store, self.selection)
+        policy = copy.deepcopy(original['provider'])
+        policy.update(policy=provider.LEGACY_POLICY, adapter_hash=provider.LEGACY_ADAPTER_HASH)
+        preserved = {}
+        for group in original['groups']:
+            if group['repetition'] != 0:
+                continue
+            cid = digest({'provider': policy, 'effective': group['effective']})
+            record = {'status': 'completed', 'model_id': provider.MODEL_ID, 'case_id': cid,
+                      'repetition': 0, 'capability_policy': policy,
+                      'test_definition': group['test'], 'variant_definition': group['variant'],
+                      'effective_definition': group['effective'], 'score': {'exact_match': False}}
+            path = self.app.store.save(record)
+            preserved[path] = path.read_bytes()
+        self.assertEqual(len(preserved), 160)
+        revised = provider.plan(tests, self.app.settings, self.target, self.app.store, self.selection)
+        self.assertEqual((revised['complete'], revised['pending']), (160, 152))
+        self.assertTrue(all(g['repetition'] > 0 for g in revised['groups'] if not g['done']))
+        self.assertTrue(all(path.read_bytes() == raw for path, raw in preserved.items()))
+
     def test_conditions_assignments_and_bounded_loops_keep_required_calls(self):
         variant=self.test['variants'][0]
         variant['steps'][0]['assign']='ready'
@@ -261,9 +374,9 @@ class PerchanceTests(unittest.TestCase):
         other['variants'][0]['steps'][0]['prompt']='A genuinely different prompt'
         self.app.stop_after_model=True
         provider.run(self.app, {}, self.make_plan([self.test,other]), FakeBackend)
-        self.assertEqual(len(self.app.store.all()),2)
+        self.assertEqual(len(self.app.store.all()),6)
         from reporting.report import build_report
         counts=build_report(self.app.store.all(),[self.test,other])['remote_statistics']
-        self.assertEqual(counts['independent_observations'],2)
+        self.assertEqual(counts['independent_observations'],6)
         self.assertEqual(counts['mapped_requested_cases'],6)
-        self.assertEqual(counts['collapsed_cases'],4)
+        self.assertEqual(counts['collapsed_cases'],0)

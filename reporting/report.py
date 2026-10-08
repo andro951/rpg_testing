@@ -13,6 +13,7 @@ from workbench.analysis import summarize
 from workbench.domain import ResultStore, canonical, code_fingerprint, digest, experiment_spec, read_json
 from .matrix import build_matrix
 from workbench.judgements import JudgementStore, annotate
+from workbench.perchance_trials import requested_case_keys
 
 VERSION = 'all-results-report-v2'
 OPERATIONS = ('replace', 'remove', 'add', 'move', 'copy', 'test')
@@ -187,7 +188,7 @@ def build_report(records, specs, fingerprint=None, problems=None):
                                 'ids': [row['id'] for row in rows]})
             cohort['matched'][kind] = matched
     remote = [r for r in seen.values() if r.get('execution_class') == 'remote_service']
-    requested = len({a['requested_id'] for r in remote for a in r.get('aliases', [])})
+    requested = len(requested_case_keys(remote))
     remote_statistics = {'independent_observations': sum(bool(r.get('calls')) for r in remote),
                          'observation_records':len(remote), 'mapped_requested_cases': requested,
                          'collapsed_cases': max(0, requested-len(remote)),

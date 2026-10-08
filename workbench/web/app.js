@@ -245,8 +245,8 @@ function renderRunControls(){
  $('individual-summary').textContent=notice|| (individualReady?individualTotal+' configured case(s) on '+individualTarget+' · '+test.timeout_seconds+' s limit each. Only pending cases will run.':'Choose a model and test to see the scope.');
  const total=selectedTests.reduce((n,t)=>n+t.repetitions*t.variants.length,0);
  $('one-model-summary').textContent=notice|| (modelReady?selectedTests.length+' selected test definition(s), '+total+' configured case(s) on '+oneModel.name+'. Only pending cases will run.':oneModel&&!selectedTests.length?'Select at least one test.':'Choose a model to see the scope.');
- if(individualModel?.id==='perchance-text-generator')$('individual-summary').textContent+=' Remote service · fixed 8 GB worker. Unsupported settings/repetitions collapse; check preflight for independent counts.';
- if(oneModel?.id==='perchance-text-generator')$('one-model-summary').textContent+=' Unsupported settings/repetitions collapse; check preflight for independent counts.';
+ if(individualModel?.id==='perchance-text-generator')$('individual-summary').textContent+=' Remote service · fixed 8 GB worker. Repetitions run independently; unsupported setting variants collapse. Check preflight for counts.';
+ if(oneModel?.id==='perchance-text-generator')$('one-model-summary').textContent+=' Repetitions run independently; unsupported setting variants collapse. Check preflight for counts.';
 }
 async function startTargetedRun(mode,operation){
  const individual=mode==='individual',chosenModel=$(individual?'individual-model':'one-model-model').value;
@@ -370,7 +370,7 @@ const PerchanceSetup = {
   const section=document.createElement('section');
   $('page-setup').append(section);
   const heading=document.createElement('h2');heading.textContent='Perchance Text Generator';section.append(heading);
-  const note=document.createElement('p');note.textContent='Select Perchance in Individual test or One model. It uses a remote service and is fixed to an 8 GB worker. Run all includes Perchance last on 8 GB workers. Larger workers and targeted All models runs remain local-only. Local tests use 120 seconds; Perchance uses 300 seconds. Unsupported controls and repetitions collapse to one observation.';section.append(note);
+  const note=document.createElement('p');note.textContent='Select Perchance in Individual test or One model. It uses a remote service and is fixed to an 8 GB worker. Run all includes Perchance last on 8 GB workers. Larger workers and targeted All models runs remain local-only. Local tests use 120 seconds; Perchance uses 300 seconds. Repetitions run independently. Unsupported setting variants collapse within each repetition; seed effect and reproducibility are unverified.';section.append(note);
   const fields=[['perchance_url','Worker URL','url'],['perchance_browser','Browser executable (blank discovers Edge/Chrome)','text'],['perchance_cdp_port','Local browser connection port','number'],['perchance_epoch','Study epoch (change explicitly for a new provider study)','text'],['perchance_only','Skip local model-folder onboarding','checkbox']];
   PerchanceSetup.Inputs={};
   for(const [setting,text,type] of fields){

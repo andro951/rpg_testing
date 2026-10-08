@@ -57,6 +57,7 @@ class GitTests(unittest.TestCase):
         path=self.root/'results/model-a/case.json';path.parent.mkdir(parents=True);path.write_text('{"status":"completed"}')
         self.assertIn('results/model-a/case.json',git(self.root,'ls-files','--others','--exclude-standard'))
     def test_dirty_nonconflicting_pull_preserves_local_edit(self):
+        git(self.root,'config','pull.rebase','true')
         tracked=self.root/'tracked.txt';tracked.write_text('base')
         git(self.root,'add','tracked.txt');git(self.root,'commit','-m','add tracked');git(self.root,'push')
         peer=self.root.parent/'peer';git(self.root.parent,'clone',str(self.remote),str(peer))
@@ -70,6 +71,7 @@ class GitTests(unittest.TestCase):
         self.assertIn('tracked.txt',git(self.root,'status','--porcelain'))
 
     def test_dirty_conflicting_pull_aborts_and_preserves_local_edit(self):
+        git(self.root,'config','pull.rebase','true')
         tracked=self.root/'conflict.txt';tracked.write_text('base')
         git(self.root,'add','conflict.txt');git(self.root,'commit','-m','add conflict');git(self.root,'push')
         peer=self.root.parent/'peer-conflict';git(self.root.parent,'clone',str(self.remote),str(peer))

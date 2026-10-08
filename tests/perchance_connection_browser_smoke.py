@@ -19,6 +19,7 @@ class Handler(BaseHTTPRequestHandler):
             globalThis.calls=0;
             globalThis.aiTextPlugin=async options=>{
               globalThis.calls++;
+              globalThis.lastSeed=options.seed;
               options.onChunk({textChunk:" RAW\\n",isFromStartWith:false});
               return {generatedText:" RAW\\n",stopReason:"natural"};
             };
@@ -53,17 +54,22 @@ def main():
             try:
                 backend.open(); page_url = backend.page.url
                 backend.deadline = time.monotonic() + 300
-                first = backend.generate([{'role': 'user', 'content': 'First fixture prompt'}], {}, None, threading.Event())
+                first = backend.generate([{'role': 'user', 'content': 'First fixture prompt'}], {'seed': 42}, None, threading.Event())
                 assert first['text'] == ' RAW\n' and first['raw_chunks'][0]['text'] == ' RAW\n'
                 assert first['effective_instruction'] == 'USER:\nFirst fixture prompt'
                 assert backend.frame.evaluate('() => calls') == 1
+                assert backend.frame.evaluate('() => lastSeed') == 42
+                assert first['forwarded_sampling'] == {'seed': 42}
+                assert first['applied_sampling'] is None and first['seed_reproducibility'] == 'unverified'
                 backend.close()
                 assert connection.listening(port), 'Disconnect must leave the normal browser running'
                 backend = connection.ControlledBrowserBackend(settings); backend.open()
                 assert backend.page.url == page_url
                 assert backend.frame.evaluate('() => calls') == 1, 'Hosted page must survive reconnect'
-                second = backend.generate([{'role': 'user', 'content': 'Second fixture prompt'}], {}, None, threading.Event())
+                second = backend.generate([{'role': 'user', 'content': 'Second fixture prompt'}], {'seed': 104771}, None, threading.Event())
                 assert second['text'] == ' RAW\n' and backend.frame.evaluate('() => calls') == 2
+                assert backend.frame.evaluate('() => lastSeed') == 104771
+                assert second['forwarded_sampling'] == {'seed': 104771}
                 launch.assert_called_once()
                 assert backend.environment['browser_connection'] == 'normal-browser-cdp-v1'
             finally:

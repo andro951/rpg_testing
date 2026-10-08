@@ -2,7 +2,7 @@
 
 //#region Owned text worker
 globalThis.RpgPerchanceText = {
-    Version: "rpg-perchance-worker-v1",
+    Version: "rpg-perchance-worker-v2",
     Active: null,
     Plugin: () => {
         const root = globalThis.root;
@@ -15,6 +15,7 @@ globalThis.RpgPerchanceText = {
         userAgent: navigator.userAgent,
         remoteModel: null,
         appliedSampling: null,
+        seedReproducibility: "unverified",
         cacheControl: null
     }),
     Snapshot: id => {
@@ -24,6 +25,7 @@ globalThis.RpgPerchanceText = {
 
         return { id, state: active.state, text: active.text, chunks: active.chunks,
             rawResult: active.rawResult, stopReason: active.stopReason, error: active.error,
+            forwardedSampling: active.forwardedSampling,
             elapsedMs: performance.now() - active.started, firstVisibleMs: active.firstVisibleMs };
     },
     Start: job => {
@@ -34,14 +36,18 @@ globalThis.RpgPerchanceText = {
         if (typeof job.id !== "string" || typeof job.instruction !== "string" || !job.instruction.trim())
             throw new Error("A job ID and instruction are required");
 
+        if (job.seed !== undefined && (!Number.isInteger(job.seed) || job.seed < 0 || job.seed > 0xFFFFFFFF))
+            throw new Error("Seed must be an unsigned 32-bit integer");
+
         const plugin = worker.Plugin();
         if (typeof plugin !== "function")
             throw new Error("Perchance text plugin is unavailable");
 
         const active = { id: job.id, state: "running", text: "", chunks: [], rawResult: null,
-            stopReason: null, error: null, started: performance.now(), firstVisibleMs: null, request: null };
+            stopReason: null, error: null, started: performance.now(), firstVisibleMs: null, request: null,
+            forwardedSampling: job.seed === undefined ? null : { seed: job.seed } };
         worker.Active = active;
-        const request = plugin({ instruction: job.instruction, startWith: "", hideStartWith: true,
+        const options = { instruction: job.instruction, startWith: "", hideStartWith: true,
             stopSequences: [], onChunk: data => {
                 if (worker.Active !== active || active.state !== "running")
                     return;
@@ -54,7 +60,11 @@ globalThis.RpgPerchanceText = {
                     if (chunk && active.firstVisibleMs === null)
                         active.firstVisibleMs = performance.now() - active.started;
                 }
-            } });
+            } };
+        if (job.seed !== undefined)
+            options.seed = job.seed;
+
+        const request = plugin(options);
         active.request = request;
         Promise.resolve(request).then(data => {
             if (worker.Active !== active || active.state !== "running")

@@ -12,6 +12,7 @@ def main():
         errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
         page.set_content('<!doctype html><title>Text worker test</title>')
         page.evaluate('''() => { globalThis.root={aiTextPlugin:options=>{
+            globalThis.lastOptions=options;
             const pending=new Promise(resolve=>{globalThis.resolveJob=resolve;});
             pending.stop=()=>{globalThis.stopped=true;};
             options.onChunk({textChunk:"  RAW\\n"});
@@ -19,7 +20,11 @@ def main():
         }};}''')
         page.evaluate(WORKER.read_text(encoding='utf-8'))
         assert page.evaluate('() => RpgPerchanceText.Environment().ready')
-        page.evaluate('() => RpgPerchanceText.Start({id:"a",instruction:"Prompt"})')
+        page.evaluate('() => RpgPerchanceText.Start({id:"a",instruction:"Prompt",seed:42})')
+        assert page.evaluate('() => lastOptions.seed')==42
+        assert page.evaluate('() => RpgPerchanceText.Snapshot("a").forwardedSampling.seed')==42
+        assert page.evaluate('() => RpgPerchanceText.Environment().appliedSampling') is None
+        assert page.evaluate('() => RpgPerchanceText.Environment().seedReproducibility')=='unverified'
         assert page.evaluate('() => RpgPerchanceText.Snapshot("a").text')=='  RAW\n'
         page.evaluate('() => resolveJob({generatedText:"  RAW\\n",stopReason:"end"})')
         page.wait_for_function('RpgPerchanceText.Snapshot("a").state==="completed"')

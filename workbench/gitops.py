@@ -28,7 +28,7 @@ def pull(root):
     # fast-forward), git pull --ff-only aborts before discarding local work and
     # git() surfaces that error to the Workbench.
     before=git(root,'rev-parse','HEAD')
-    git(root,'pull','--ff-only')
+    git(root,'pull','--ff-only','--no-rebase')
     return git(root,'rev-parse','HEAD')!=before
 
 

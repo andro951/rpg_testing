@@ -18,10 +18,11 @@ from .domain import canonical, digest, code_fingerprint, experiment_spec, device
 from .planning import validate_selection
 from .workflows import messages, condition, output_schema, evaluate, Cancelled, repetition_seed
 from .scoring import parse
+from .perchance_trials import LEGACY_POLICY, LEGACY_ADAPTER_HASH
 
 MODEL_ID = 'perchance-text-generator'
 TIMEOUT_SECONDS = 300
-VERSION = 'perchance-capability-baseline-v1'
+VERSION = 'perchance-independent-repetitions-v2'
 DEFAULT_URL = 'https://perchance.org/056uh2nc6k'
 WORKER = Path(__file__).resolve().parents[1] / 'tools/perchance-text/worker.js'
 UNAVAILABLE = ('temperature', 'top_p', 'top_k', 'min_p', 'seed', 'repeat_penalty',
@@ -52,9 +53,9 @@ def identity(settings):
             'epoch': settings.get('perchance_epoch', '1'),
             'adapter_hash': digest({p.name: hashlib.sha256(p.read_bytes().replace(b'\r\n', b'\n')).hexdigest() for p in files}),
             'workflow_code': code_fingerprint(), 'remote_model': None,
-            'capability_evidence': {'reviewed': '2026-10-01', 'source': 'tools/perchance-text/worker.js',
-                                    'reason': 'Worker forwards instruction/startWith/hideStartWith/stopSequences/onChunk only; no verified experimental controls'},
-            'capabilities': {key: 'unavailable_in_adapter' for key in UNAVAILABLE}}
+            'capability_evidence': {'reviewed': '2026-10-08', 'source': 'tools/perchance-text/worker.js',
+                                    'reason': 'Seed is forwarded experimentally; its effect and reproducibility are unverified. Other experimental controls remain unavailable.'},
+            'capabilities': {key: 'forwarded_unverified' if key == 'seed' else 'unavailable_in_adapter' for key in UNAVAILABLE}}
 
 
 def effective(test, variant):
@@ -76,9 +77,34 @@ def effective(test, variant):
     return {'test': t, 'variant': v}
 
 
+def legacy_baselines(store, provider):
+    """Reuse only the known prior baseline as trial zero; never clone its response."""
+    compatible = {}
+    for path in sorted((store.root / MODEL_ID).glob('*.json')):
+        record = store.read(path)
+        old = record.get('capability_policy', {})
+        if (record.get('status') != 'completed' or record.get('repetition', 0) != 0
+                or old.get('policy') != LEGACY_POLICY or old.get('adapter_hash') != LEGACY_ADAPTER_HASH
+                or any(old.get(k) != provider.get(k) for k in ('provider', 'worker_url', 'epoch', 'workflow_code', 'remote_model'))):
+            continue
+        definition = record.get('effective_definition')
+        if not isinstance(definition, dict) or record['case_id'] != digest({'provider': old, 'effective': definition}):
+            continue
+        captured_test = record.get('test_definition')
+        captured_variant = record.get('variant_definition')
+        if (not isinstance(captured_test, dict) or not isinstance(captured_variant, dict)
+                or not isinstance(captured_variant.get('steps'), list)):
+            continue
+        if definition != effective(captured_test, captured_variant):
+            continue
+        compatible.setdefault(digest(definition), record['case_id'])
+    return compatible
+
+
 def plan(tests, settings, target, store, selection):
     validate_selection(selection, [model()], tests)
     provider = identity(settings)
+    baselines = legacy_baselines(store, provider)
     groups = {}
     for test in sorted(tests, key=lambda item: item['id']):
         if not test.get('enabled', True):
@@ -88,11 +114,15 @@ def plan(tests, settings, target, store, selection):
                 continue
             definition = effective(test, variant)
             #Client GPU/OS are provenance, not applied remote model conditions.
-            cid = digest({'provider': provider, 'effective': definition})
-            group = groups.setdefault(cid, {'case_id': cid, 'test': copy.deepcopy(test), 'variant': variant,
-                                           'effective': definition, 'aliases': []})
-            group['test']['timeout_seconds'] = TIMEOUT_SECONDS
             for rep in range(test.get('repetitions', 1)):
+                cid = digest({'provider': provider, 'effective': definition, 'repetition': rep})
+                reused = baselines.get(digest(definition)) if rep == 0 else None
+                if reused:
+                    cid = reused
+                group = groups.setdefault(cid, {'case_id': cid, 'test': copy.deepcopy(test), 'variant': variant,
+                                               'effective': definition, 'repetition': rep, 'aliases': [],
+                                               'legacy_baseline_reused': bool(reused)})
+                group['test']['timeout_seconds'] = TIMEOUT_SECONDS
                 group['aliases'].append({'test_id': test['id'], 'variant_id': variant['id'], 'repetition': rep,
                     'requested_id': digest({'provider': provider, 'definition': experiment_spec(test, variant), 'repetition': rep}),
                     'requested_definition': experiment_spec(test, variant),
@@ -255,10 +285,14 @@ class BrowserBackend:
                     'raw_chunks': snapshot.get('chunks', []), 'provider_result': snapshot,
                     'effective_instruction': instruction, 'serializer_version': 'role-labels-v1',
                     'requested_sampling': requested, 'sampling': None, 'applied_sampling': None,
+                    'forwarded_sampling': snapshot.get('forwardedSampling'), 'seed_reproducibility': 'unverified',
                     'schema_requested': schema, 'constrained_decoding': False,
                     'environment': copy.deepcopy(self.environment)}
         try:
-            self.frame.evaluate('(job) => RpgPerchanceText.Start(job)', {'id': jid, 'instruction': instruction})
+            job = {'id': jid, 'instruction': instruction}
+            if 'seed' in requested:
+                job['seed'] = requested['seed']
+            snapshot = self.frame.evaluate('(job) => RpgPerchanceText.Start(job)', job)
             while True:
                 snapshot = self.frame.evaluate('(id) => RpgPerchanceText.Snapshot(id)', jid)
                 stopped = self.cancel_requested or bool(cancel and cancel.is_set())
@@ -311,13 +345,15 @@ def execute_job(job, backend, cancel, progress=None):
             prompt = messages(test, step, values, variant)
             schema = output_schema(step.get('output', {'type': 'text'}))
             requested = {'temperature': 0, 'top_p': 1, 'top_k': 0, 'min_p': 0, 'seed': 42, **step.get('sampling', {})}
+            base_seed = requested['seed']
+            requested['seed'] = repetition_seed(base_seed, job.get('repetition', 0))
             try:
                 response = backend.generate(prompt, requested, schema, cancel)
             except Exception as exc:
                 if hasattr(exc, 'partial_response'):
-                    calls.append({'step': step['id'], 'iteration': iteration, 'messages': prompt, **exc.partial_response})
+                    calls.append({'step': step['id'], 'iteration': iteration, 'messages': prompt, 'base_seed': base_seed, **exc.partial_response})
                 raise
-            calls.append({'step': step['id'], 'iteration': iteration, 'messages': prompt, **response})
+            calls.append({'step': step['id'], 'iteration': iteration, 'messages': prompt, 'base_seed': base_seed, **response})
             if response.get('finish_reason') != 'provider_completed':
                 raise ValueError('Provider did not complete the text request')
             value = response['text'] if schema is None else parse(response['text'])
@@ -339,7 +375,8 @@ def execute_job(job, backend, cancel, progress=None):
     scoring = time.perf_counter()
     result['score'] = {'valid': False, 'exact_match': False, 'error': error} if error else evaluate(test, variant, values)
     result.update(scoring_seconds=time.perf_counter() - scoring, cache_mode='provider_default_unknown',
-                  cache_verified=None, measurement_valid=True, sampling_seed_policy='unavailable; repetitions collapsed',
+                  cache_verified=None, measurement_valid=True,
+                  sampling_seed_policy='base_seed_plus_repetition_stride; forwarded without verified effect or reproducibility',
                   feature_applicability={'cache_control': False, 'seed_control': False, 'constrained_decoding': False},
                   gpu_memory=None)
     return result
@@ -373,7 +410,7 @@ def run(app, report, pending, backend_factory=BrowserBackend, append=False):
                 backend.reset()
             backend.deadline = time.monotonic() + job['test']['timeout_seconds']
             record = {'case_id': job['case_id'], 'model_id': MODEL_ID, 'model_name': 'Perchance Text Generator',
-                      'test_id': job['test']['id'], 'variant_id': job['variant']['id'], 'repetition': 0,
+                      'test_id': job['test']['id'], 'variant_id': job['variant']['id'], 'repetition': job['repetition'],
                       'target': pending['target'], 'test_definition': job['test'], 'variant_definition': job['variant'],
                       'effective_definition': job['effective'], 'aliases': job['aliases'],
                       'selected_aliases': job['selected_aliases'], 'capability_policy': pending['provider'],

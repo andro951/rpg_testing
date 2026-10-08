@@ -5,6 +5,7 @@ import re
 from reporting.grouping import row_grouping
 from reporting.timing import annotate as annotate_timing
 from workbench.domain import digest, experiment_spec
+from workbench.perchance_trials import observation_aliases, model_conditions
 
 
 def outcome(record):
@@ -101,6 +102,8 @@ def build_matrix(records, specs, fingerprint):
         artifact = record.get('artifact_identity') or record.get('artifact_hashes', {})
         execution = record.get('execution_class', 'legacy_unverified')
         simulated = bool(record.get('simulated'))
+        if record.get('model_id') == 'perchance-text-generator' and execution == 'remote_service':
+            artifact = model_conditions(record)
         model = record['model_id'] + ':' + digest([artifact, execution, simulated])[:12]
         files = artifact.get('files', []) if isinstance(artifact, dict) else []
         label = ', '.join(f['name'] for f in files if 'name' in f) or record.get('model_name') or record['model_id']
@@ -131,7 +134,7 @@ def build_matrix(records, specs, fingerprint):
                 cell['reference_ids'].remove(cid)
 
         add_cell(row, False)
-        for alias in record.get('aliases', []):
+        for alias in observation_aliases(record):
             requested = alias.get('requested_definition')
             if not isinstance(requested, dict) or not has_objective_oracle(requested.get('test', {}), requested.get('variant', {})):
                 continue

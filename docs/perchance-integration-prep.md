@@ -1,3 +1,5 @@
+> October 8 update: ordinary repetitions now run independently; seed forwarding remains unverified. The original preparation below predates this change. Current requirements: [capability policy](perchance-capability-policy.md).
+
 # Perchance integration preparation and acceptance review
 
 ## October 8, 2026: browser setup consent before preflight

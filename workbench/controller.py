@@ -254,7 +254,7 @@ class Controller(ModelManager):
             report['issues']+=remote_report['issues']
             report['ready']=report['ready'] and remote_report['ready']
             report['prepared']=report['prepared'] and remote_report['prepared']
-            report['note']+=' Perchance runs last with a 300-second limit; its counts are independent observations after unsupported controls/repetitions collapse.'
+            report['note']+=' Perchance runs last with a 300-second limit; repetitions run independently, while unsupported setting variants collapse.'
         if omit_perchance:report['note']+=' Perchance was skipped for this run; its unfinished observations remain pending.'
         return report,plan
     def check(self,preparation=None,selection=None,setup=True):
@@ -554,10 +554,11 @@ class Controller(ModelManager):
             summary['worker_status']={'state':self.state,'message':self.message,
                                       'failure':copy.deepcopy(self.failure),'progress':copy.deepcopy(self.progress)}
             remote=[r for r in valid if r.get('execution_class')=='remote_service']
-            requested_remote=len({a['requested_id'] for r in remote for a in r.get('aliases',[])})
+            from .perchance_trials import requested_case_keys
+            requested_remote=len(requested_case_keys(remote))
             executed_remote=sum(bool(r.get('calls')) for r in remote)
             summary['perchance']={'independent_observations':executed_remote,'observation_records':len(remote),
-                'mapped_requested_cases':len({a['requested_id'] for r in remote for a in r.get('aliases',[])}),
+                'mapped_requested_cases':requested_remote,
                 'collapsed_cases':max(0,requested_remote-len(remote)),
                 'statuses':{s:sum(r.get('status')==s for r in remote) for s in ('completed','error','aborted')},
                 'timeouts':sum(bool(r.get('timed_out')) for r in remote),
