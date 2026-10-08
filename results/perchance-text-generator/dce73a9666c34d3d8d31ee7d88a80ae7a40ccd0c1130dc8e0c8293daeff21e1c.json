@@ -1,0 +1,1536 @@
+{
+  "status": "completed",
+  "case_id": "dce73a9666c34d3d8d31ee7d88a80ae7a40ccd0c1130dc8e0c8293daeff21e1c",
+  "model_id": "perchance-text-generator",
+  "model_name": "Perchance Text Generator",
+  "test_id": "prompt_calibration_001_time",
+  "variant_id": "v6_one_example",
+  "repetition": 0,
+  "target": {
+    "backend": "perchance",
+    "vram_gb": 8,
+    "gpu_name": "NVIDIA GeForce GTX 1080",
+    "os": "Windows-10-10.0.19045-SP0",
+    "execution_class": "remote_service",
+    "execution_policy": "perchance-capability-baseline-v1"
+  },
+  "test_definition": {
+    "schema_version": 2,
+    "id": "prompt_calibration_001_time",
+    "name": "Prompt calibration 1/4 — time change",
+    "description": "Compare prompt wording while applying one scalar time change.",
+    "workflow": "steps",
+    "repetitions": 3,
+    "timeout_seconds": 300,
+    "source": {
+      "initial_state": {
+        "time": "14:15",
+        "location": "Kitchen",
+        "characters": {
+          "Tom": {
+            "location": "Kitchen",
+            "clothing": [
+              "blue shirt",
+              "jeans"
+            ],
+            "mood": "annoyed"
+          },
+          "Susie": {
+            "location": "Bedroom",
+            "clothing": [
+              "red dress"
+            ],
+            "mood": "happy"
+          }
+        },
+        "doorLocked": true,
+        "playerHasKey": false
+      },
+      "new_information": "Exactly five minutes pass."
+    },
+    "expected_state": {
+      "time": "14:20",
+      "location": "Kitchen",
+      "characters": {
+        "Tom": {
+          "location": "Kitchen",
+          "clothing": [
+            "blue shirt",
+            "jeans"
+          ],
+          "mood": "annoyed"
+        },
+        "Susie": {
+          "location": "Bedroom",
+          "clothing": [
+            "red dress"
+          ],
+          "mood": "happy"
+        }
+      },
+      "doorLocked": true,
+      "playerHasKey": false
+    },
+    "variants": [
+      {
+        "id": "v1_original_clinical",
+        "name": "V1 Original — clinical + indexed arrays",
+        "prompt_style": "legacy_v1",
+        "state_presentation": "indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        },
+        "new_information_override": "Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes."
+      },
+      {
+        "id": "v1_raw_json_control",
+        "name": "V1 Control — clinical + raw JSON",
+        "prompt_style": "legacy_v1",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v2_conversational",
+        "name": "V2 — conversational baseline",
+        "prompt_style": "conversational_v2",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v3_only_changed",
+        "name": "V3 — conversational + only changed fields",
+        "prompt_style": "only_changed_v3",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v4_smallest_patch",
+        "name": "V4 — conversational + smallest patch",
+        "prompt_style": "smallest_patch_v4",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v5_change_rule",
+        "name": "V5 — conversational + value-difference rule",
+        "prompt_style": "change_rule_v5",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v6_one_example",
+        "name": "V6 — conversational + one example",
+        "prompt_style": "one_example_v6",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v1_original_clinical__raw_json",
+        "name": "V1 Original — clinical + indexed arrays — Raw JSON",
+        "prompt_style": "legacy_v1",
+        "state_presentation": "raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        },
+        "new_information_override": "Exactly five minutes pass. Nobody moves or changes clothing. Nothing else in the tracked state changes."
+      },
+      {
+        "id": "v1_raw_json_control__indexed_arrays",
+        "name": "V1 Control — clinical + raw JSON — Indexed-array JSON",
+        "prompt_style": "legacy_v1",
+        "state_presentation": "indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v2_conversational__indexed_arrays",
+        "name": "V2 — conversational baseline — Indexed-array JSON",
+        "prompt_style": "conversational_v2",
+        "state_presentation": "indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v3_only_changed__indexed_arrays",
+        "name": "V3 — conversational + only changed fields — Indexed-array JSON",
+        "prompt_style": "only_changed_v3",
+        "state_presentation": "indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v4_smallest_patch__indexed_arrays",
+        "name": "V4 — conversational + smallest patch — Indexed-array JSON",
+        "prompt_style": "smallest_patch_v4",
+        "state_presentation": "indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v5_change_rule__indexed_arrays",
+        "name": "V5 — conversational + value-difference rule — Indexed-array JSON",
+        "prompt_style": "change_rule_v5",
+        "state_presentation": "indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      },
+      {
+        "id": "v6_one_example__indexed_arrays",
+        "name": "V6 — conversational + one example — Indexed-array JSON",
+        "prompt_style": "one_example_v6",
+        "state_presentation": "indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "replace"
+          ]
+        }
+      }
+    ]
+  },
+  "variant_definition": {
+    "id": "v6_one_example",
+    "name": "V6 — conversational + one example",
+    "prompt_style": "one_example_v6",
+    "state_presentation": "raw_json",
+    "cache": "default",
+    "steps": [
+      {
+        "id": "patch",
+        "type": "generate",
+        "prompt": "Please return only the JSON Patch array.",
+        "output": {
+          "type": "text"
+        },
+        "sampling": {
+          "temperature": 0,
+          "top_p": 1,
+          "seed": 42
+        }
+      }
+    ],
+    "result": {
+      "step": "patch",
+      "representation": "json_patch",
+      "required_ops": [
+        "replace"
+      ]
+    }
+  },
+  "effective_definition": {
+    "test": {
+      "schema_version": 2,
+      "workflow": "steps",
+      "source": {
+        "initial_state": {
+          "time": "14:15",
+          "location": "Kitchen",
+          "characters": {
+            "Tom": {
+              "location": "Kitchen",
+              "clothing": [
+                "blue shirt",
+                "jeans"
+              ],
+              "mood": "annoyed"
+            },
+            "Susie": {
+              "location": "Bedroom",
+              "clothing": [
+                "red dress"
+              ],
+              "mood": "happy"
+            }
+          },
+          "doorLocked": true,
+          "playerHasKey": false
+        },
+        "new_information": "Exactly five minutes pass."
+      },
+      "expected_state": {
+        "time": "14:20",
+        "location": "Kitchen",
+        "characters": {
+          "Tom": {
+            "location": "Kitchen",
+            "clothing": [
+              "blue shirt",
+              "jeans"
+            ],
+            "mood": "annoyed"
+          },
+          "Susie": {
+            "location": "Bedroom",
+            "clothing": [
+              "red dress"
+            ],
+            "mood": "happy"
+          }
+        },
+        "doorLocked": true,
+        "playerHasKey": false
+      }
+    },
+    "variant": {
+      "prompt_style": "one_example_v6",
+      "state_presentation": "raw_json",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Please return only the JSON Patch array.",
+          "output": {
+            "type": "text"
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "replace"
+        ]
+      }
+    }
+  },
+  "aliases": [
+    {
+      "test_id": "prompt_calibration_001_time",
+      "variant_id": "v6_one_example",
+      "repetition": 0,
+      "requested_id": "f8a021d9b1e7096cf9de9b53b0548a0c186ae7643d2518977fd1664d3ae9fadf",
+      "requested_definition": {
+        "test": {
+          "schema_version": 2,
+          "id": "prompt_calibration_001_time",
+          "workflow": "steps",
+          "source": {
+            "initial_state": {
+              "time": "14:15",
+              "location": "Kitchen",
+              "characters": {
+                "Tom": {
+                  "location": "Kitchen",
+                  "clothing": [
+                    "blue shirt",
+                    "jeans"
+                  ],
+                  "mood": "annoyed"
+                },
+                "Susie": {
+                  "location": "Bedroom",
+                  "clothing": [
+                    "red dress"
+                  ],
+                  "mood": "happy"
+                }
+              },
+              "doorLocked": true,
+              "playerHasKey": false
+            },
+            "new_information": "Exactly five minutes pass."
+          },
+          "expected_state": {
+            "time": "14:20",
+            "location": "Kitchen",
+            "characters": {
+              "Tom": {
+                "location": "Kitchen",
+                "clothing": [
+                  "blue shirt",
+                  "jeans"
+                ],
+                "mood": "annoyed"
+              },
+              "Susie": {
+                "location": "Bedroom",
+                "clothing": [
+                  "red dress"
+                ],
+                "mood": "happy"
+              }
+            },
+            "doorLocked": true,
+            "playerHasKey": false
+          }
+        },
+        "variant": {
+          "id": "v6_one_example",
+          "prompt_style": "one_example_v6",
+          "state_presentation": "raw_json",
+          "cache": "default",
+          "steps": [
+            {
+              "id": "patch",
+              "type": "generate",
+              "prompt": "Please return only the JSON Patch array.",
+              "output": {
+                "type": "text"
+              },
+              "sampling": {
+                "temperature": 0,
+                "top_p": 1,
+                "seed": 42
+              }
+            }
+          ],
+          "result": {
+            "step": "patch",
+            "representation": "json_patch",
+            "required_ops": [
+              "replace"
+            ]
+          }
+        }
+      },
+      "requested_timeout_seconds": 120,
+      "observation_id": "dce73a9666c34d3d8d31ee7d88a80ae7a40ccd0c1130dc8e0c8293daeff21e1c",
+      "collapsed_dimensions": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "seed",
+        "repeat_penalty",
+        "cache",
+        "cache_verification",
+        "constrained_decoding",
+        "context_allocation",
+        "gpu_placement",
+        "remote_model_identity",
+        "token_timings"
+      ]
+    },
+    {
+      "test_id": "prompt_calibration_001_time",
+      "variant_id": "v6_one_example",
+      "repetition": 1,
+      "requested_id": "711f831ab3af295e331f2797464d2d0eecfc5f0c2d3fc48eb8a5ec0f7f4f666f",
+      "requested_definition": {
+        "test": {
+          "schema_version": 2,
+          "id": "prompt_calibration_001_time",
+          "workflow": "steps",
+          "source": {
+            "initial_state": {
+              "time": "14:15",
+              "location": "Kitchen",
+              "characters": {
+                "Tom": {
+                  "location": "Kitchen",
+                  "clothing": [
+                    "blue shirt",
+                    "jeans"
+                  ],
+                  "mood": "annoyed"
+                },
+                "Susie": {
+                  "location": "Bedroom",
+                  "clothing": [
+                    "red dress"
+                  ],
+                  "mood": "happy"
+                }
+              },
+              "doorLocked": true,
+              "playerHasKey": false
+            },
+            "new_information": "Exactly five minutes pass."
+          },
+          "expected_state": {
+            "time": "14:20",
+            "location": "Kitchen",
+            "characters": {
+              "Tom": {
+                "location": "Kitchen",
+                "clothing": [
+                  "blue shirt",
+                  "jeans"
+                ],
+                "mood": "annoyed"
+              },
+              "Susie": {
+                "location": "Bedroom",
+                "clothing": [
+                  "red dress"
+                ],
+                "mood": "happy"
+              }
+            },
+            "doorLocked": true,
+            "playerHasKey": false
+          }
+        },
+        "variant": {
+          "id": "v6_one_example",
+          "prompt_style": "one_example_v6",
+          "state_presentation": "raw_json",
+          "cache": "default",
+          "steps": [
+            {
+              "id": "patch",
+              "type": "generate",
+              "prompt": "Please return only the JSON Patch array.",
+              "output": {
+                "type": "text"
+              },
+              "sampling": {
+                "temperature": 0,
+                "top_p": 1,
+                "seed": 42
+              }
+            }
+          ],
+          "result": {
+            "step": "patch",
+            "representation": "json_patch",
+            "required_ops": [
+              "replace"
+            ]
+          }
+        }
+      },
+      "requested_timeout_seconds": 120,
+      "observation_id": "dce73a9666c34d3d8d31ee7d88a80ae7a40ccd0c1130dc8e0c8293daeff21e1c",
+      "collapsed_dimensions": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "seed",
+        "repeat_penalty",
+        "cache",
+        "cache_verification",
+        "constrained_decoding",
+        "context_allocation",
+        "gpu_placement",
+        "remote_model_identity",
+        "token_timings"
+      ]
+    },
+    {
+      "test_id": "prompt_calibration_001_time",
+      "variant_id": "v6_one_example",
+      "repetition": 2,
+      "requested_id": "5c1fc4fa6cd29eeb936fd8d474a7e82c15df9d3029e7ca9c6b331278defa16c4",
+      "requested_definition": {
+        "test": {
+          "schema_version": 2,
+          "id": "prompt_calibration_001_time",
+          "workflow": "steps",
+          "source": {
+            "initial_state": {
+              "time": "14:15",
+              "location": "Kitchen",
+              "characters": {
+                "Tom": {
+                  "location": "Kitchen",
+                  "clothing": [
+                    "blue shirt",
+                    "jeans"
+                  ],
+                  "mood": "annoyed"
+                },
+                "Susie": {
+                  "location": "Bedroom",
+                  "clothing": [
+                    "red dress"
+                  ],
+                  "mood": "happy"
+                }
+              },
+              "doorLocked": true,
+              "playerHasKey": false
+            },
+            "new_information": "Exactly five minutes pass."
+          },
+          "expected_state": {
+            "time": "14:20",
+            "location": "Kitchen",
+            "characters": {
+              "Tom": {
+                "location": "Kitchen",
+                "clothing": [
+                  "blue shirt",
+                  "jeans"
+                ],
+                "mood": "annoyed"
+              },
+              "Susie": {
+                "location": "Bedroom",
+                "clothing": [
+                  "red dress"
+                ],
+                "mood": "happy"
+              }
+            },
+            "doorLocked": true,
+            "playerHasKey": false
+          }
+        },
+        "variant": {
+          "id": "v6_one_example",
+          "prompt_style": "one_example_v6",
+          "state_presentation": "raw_json",
+          "cache": "default",
+          "steps": [
+            {
+              "id": "patch",
+              "type": "generate",
+              "prompt": "Please return only the JSON Patch array.",
+              "output": {
+                "type": "text"
+              },
+              "sampling": {
+                "temperature": 0,
+                "top_p": 1,
+                "seed": 42
+              }
+            }
+          ],
+          "result": {
+            "step": "patch",
+            "representation": "json_patch",
+            "required_ops": [
+              "replace"
+            ]
+          }
+        }
+      },
+      "requested_timeout_seconds": 120,
+      "observation_id": "dce73a9666c34d3d8d31ee7d88a80ae7a40ccd0c1130dc8e0c8293daeff21e1c",
+      "collapsed_dimensions": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "seed",
+        "repeat_penalty",
+        "cache",
+        "cache_verification",
+        "constrained_decoding",
+        "context_allocation",
+        "gpu_placement",
+        "remote_model_identity",
+        "token_timings"
+      ]
+    }
+  ],
+  "selected_aliases": [
+    "f8a021d9b1e7096cf9de9b53b0548a0c186ae7643d2518977fd1664d3ae9fadf",
+    "711f831ab3af295e331f2797464d2d0eecfc5f0c2d3fc48eb8a5ec0f7f4f666f",
+    "5c1fc4fa6cd29eeb936fd8d474a7e82c15df9d3029e7ca9c6b331278defa16c4"
+  ],
+  "capability_policy": {
+    "provider": "Perchance Text Generator",
+    "policy": "perchance-capability-baseline-v1",
+    "worker_url": "https://perchance.org/056uh2nc6k",
+    "epoch": "1",
+    "adapter_hash": "5d9c66643a60542ac665cd45a6dc216d1517cc23c21a2edba78a7c69b03a3730",
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "remote_model": null,
+    "capability_evidence": {
+      "reviewed": "2026-10-01",
+      "source": "tools/perchance-text/worker.js",
+      "reason": "Worker forwards instruction/startWith/hideStartWith/stopSequences/onChunk only; no verified experimental controls"
+    },
+    "capabilities": {
+      "temperature": "unavailable_in_adapter",
+      "top_p": "unavailable_in_adapter",
+      "top_k": "unavailable_in_adapter",
+      "min_p": "unavailable_in_adapter",
+      "seed": "unavailable_in_adapter",
+      "repeat_penalty": "unavailable_in_adapter",
+      "cache": "unavailable_in_adapter",
+      "cache_verification": "unavailable_in_adapter",
+      "constrained_decoding": "unavailable_in_adapter",
+      "context_allocation": "unavailable_in_adapter",
+      "gpu_placement": "unavailable_in_adapter",
+      "remote_model_identity": "unavailable_in_adapter",
+      "token_timings": "unavailable_in_adapter"
+    }
+  },
+  "artifact_identity": {
+    "provider": "Perchance Text Generator",
+    "policy": "perchance-capability-baseline-v1",
+    "worker_url": "https://perchance.org/056uh2nc6k",
+    "epoch": "1",
+    "adapter_hash": "5d9c66643a60542ac665cd45a6dc216d1517cc23c21a2edba78a7c69b03a3730",
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "remote_model": null,
+    "capability_evidence": {
+      "reviewed": "2026-10-01",
+      "source": "tools/perchance-text/worker.js",
+      "reason": "Worker forwards instruction/startWith/hideStartWith/stopSequences/onChunk only; no verified experimental controls"
+    },
+    "capabilities": {
+      "temperature": "unavailable_in_adapter",
+      "top_p": "unavailable_in_adapter",
+      "top_k": "unavailable_in_adapter",
+      "min_p": "unavailable_in_adapter",
+      "seed": "unavailable_in_adapter",
+      "repeat_penalty": "unavailable_in_adapter",
+      "cache": "unavailable_in_adapter",
+      "cache_verification": "unavailable_in_adapter",
+      "constrained_decoding": "unavailable_in_adapter",
+      "context_allocation": "unavailable_in_adapter",
+      "gpu_placement": "unavailable_in_adapter",
+      "remote_model_identity": "unavailable_in_adapter",
+      "token_timings": "unavailable_in_adapter"
+    }
+  },
+  "execution_class": "remote_service",
+  "simulated": false,
+  "valid_for_full_gpu_comparison": false,
+  "policy": "perchance-capability-baseline-v1",
+  "load": {
+    "environment": {
+      "version": "rpg-perchance-worker-v1",
+      "ready": true,
+      "frameUrl": "https://ced2311a27f6c6944ef5e0ac74e1176e.perchance.org/056uh2nc6k",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+      "remoteModel": null,
+      "appliedSampling": null,
+      "cacheControl": null,
+      "browser_connection": "normal-browser-cdp-v1",
+      "browser_visible": true,
+      "readiness_scope": "plugin_availability_only",
+      "connection_code_hash": "9c1227199413ef87dea16c819832165f0fc7595d2869a2e374c866ef8c414b84"
+    },
+    "context": {},
+    "placement": {}
+  },
+  "timeout_seconds": 300,
+  "started_at": "2026-10-08T17:00:05.629487+00:00",
+  "provenance": {
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "provider": "perchance",
+    "remote_model": null
+  },
+  "calls": [
+    {
+      "step": "patch",
+      "iteration": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You help update an existing JSON state when new information is provided."
+        },
+        {
+          "role": "user",
+          "content": "I need you to write a JSON Patch to update the existing state with the new information.\n\nExample:\nCurrent State:\n{\n  \"score\": 10,\n  \"name\": \"Sam\"\n}\n\nNew Information:\nThe score is now 11.\n\nJSON Patch:\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/score\",\n    \"value\": 11\n  }\n]\n\nCurrent State:\n{\n  \"time\": \"14:15\",\n  \"location\": \"Kitchen\",\n  \"characters\": {\n    \"Tom\": {\n      \"location\": \"Kitchen\",\n      \"clothing\": [\n        \"blue shirt\",\n        \"jeans\"\n      ],\n      \"mood\": \"annoyed\"\n    },\n    \"Susie\": {\n      \"location\": \"Bedroom\",\n      \"clothing\": [\n        \"red dress\"\n      ],\n      \"mood\": \"happy\"\n    }\n  },\n  \"doorLocked\": true,\n  \"playerHasKey\": false\n}\n\nNew Information:\nExactly five minutes pass.\n\nPlease return only the JSON Patch array."
+        }
+      ],
+      "text": "```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+      "finish_reason": "provider_completed",
+      "request_seconds": 2.46295169997029,
+      "first_visible_text_seconds": 1.7068950000405312,
+      "first_token_seconds": null,
+      "usage": {},
+      "timings": {},
+      "cached_tokens": null,
+      "raw_chunks": [
+        {
+          "text": "```",
+          "isFromStartWith": false,
+          "elapsedMs": 1706.8950000405312
+        },
+        {
+          "text": "json",
+          "isFromStartWith": false,
+          "elapsedMs": 1706.960000038147
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1707.0049999952316
+        },
+        {
+          "text": "[",
+          "isFromStartWith": false,
+          "elapsedMs": 1707.0600000023842
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1707.1100000143051
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 1707.1450000405312
+        },
+        {
+          "text": "{",
+          "isFromStartWith": false,
+          "elapsedMs": 1707.1899999976158
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1707.2250000238419
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 1707.2750000357628
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.270000040531
+        },
+        {
+          "text": "op",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.3199999928474
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.360000014305
+        },
+        {
+          "text": " \"",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.395000040531
+        },
+        {
+          "text": "replace",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.435000002384
+        },
+        {
+          "text": "\",",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.475000023842
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.5049999952316
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.5300000309944
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.5550000071526
+        },
+        {
+          "text": "path",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.5799999833107
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.600000023842
+        },
+        {
+          "text": " \"/",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.6200000047684
+        },
+        {
+          "text": "time",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.650000035763
+        },
+        {
+          "text": "\",",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.6700000166893
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.6949999928474
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.7200000286102
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.7450000047684
+        },
+        {
+          "text": "value",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.764999985695
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.785000026226
+        },
+        {
+          "text": " \"",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.810000002384
+        },
+        {
+          "text": "1",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.8299999833107
+        },
+        {
+          "text": "4",
+          "isFromStartWith": false,
+          "elapsedMs": 2221.8650000095367
+        },
+        {
+          "text": ":",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.25
+        },
+        {
+          "text": "2",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.3199999928474
+        },
+        {
+          "text": "0",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.3700000047684
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.4150000214577
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.4549999833107
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.4950000047684
+        },
+        {
+          "text": "}",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.5300000309944
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.574999988079
+        },
+        {
+          "text": "]",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.6150000095367
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.650000035763
+        },
+        {
+          "text": "```",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.6949999928474
+        },
+        {
+          "text": "",
+          "isFromStartWith": false,
+          "elapsedMs": 2413.7400000095367
+        }
+      ],
+      "provider_result": {
+        "id": "fa274a54b1004acc9f944c2ae8375d2c",
+        "state": "completed",
+        "text": "```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+        "chunks": [
+          {
+            "text": "```",
+            "isFromStartWith": false,
+            "elapsedMs": 1706.8950000405312
+          },
+          {
+            "text": "json",
+            "isFromStartWith": false,
+            "elapsedMs": 1706.960000038147
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1707.0049999952316
+          },
+          {
+            "text": "[",
+            "isFromStartWith": false,
+            "elapsedMs": 1707.0600000023842
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1707.1100000143051
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 1707.1450000405312
+          },
+          {
+            "text": "{",
+            "isFromStartWith": false,
+            "elapsedMs": 1707.1899999976158
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1707.2250000238419
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 1707.2750000357628
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.270000040531
+          },
+          {
+            "text": "op",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.3199999928474
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.360000014305
+          },
+          {
+            "text": " \"",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.395000040531
+          },
+          {
+            "text": "replace",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.435000002384
+          },
+          {
+            "text": "\",",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.475000023842
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.5049999952316
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.5300000309944
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.5550000071526
+          },
+          {
+            "text": "path",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.5799999833107
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.600000023842
+          },
+          {
+            "text": " \"/",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.6200000047684
+          },
+          {
+            "text": "time",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.650000035763
+          },
+          {
+            "text": "\",",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.6700000166893
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.6949999928474
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.7200000286102
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.7450000047684
+          },
+          {
+            "text": "value",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.764999985695
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.785000026226
+          },
+          {
+            "text": " \"",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.810000002384
+          },
+          {
+            "text": "1",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.8299999833107
+          },
+          {
+            "text": "4",
+            "isFromStartWith": false,
+            "elapsedMs": 2221.8650000095367
+          },
+          {
+            "text": ":",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.25
+          },
+          {
+            "text": "2",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.3199999928474
+          },
+          {
+            "text": "0",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.3700000047684
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.4150000214577
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.4549999833107
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.4950000047684
+          },
+          {
+            "text": "}",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.5300000309944
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.574999988079
+          },
+          {
+            "text": "]",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.6150000095367
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.650000035763
+          },
+          {
+            "text": "```",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.6949999928474
+          },
+          {
+            "text": "",
+            "isFromStartWith": false,
+            "elapsedMs": 2413.7400000095367
+          }
+        ],
+        "rawResult": "```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+        "stopReason": "natural",
+        "error": null,
+        "elapsedMs": 2458.7300000190735,
+        "firstVisibleMs": 1706.8950000405312
+      },
+      "effective_instruction": "SYSTEM:\nYou help update an existing JSON state when new information is provided.\n\nUSER:\nI need you to write a JSON Patch to update the existing state with the new information.\n\nExample:\nCurrent State:\n{\n  \"score\": 10,\n  \"name\": \"Sam\"\n}\n\nNew Information:\nThe score is now 11.\n\nJSON Patch:\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/score\",\n    \"value\": 11\n  }\n]\n\nCurrent State:\n{\n  \"time\": \"14:15\",\n  \"location\": \"Kitchen\",\n  \"characters\": {\n    \"Tom\": {\n      \"location\": \"Kitchen\",\n      \"clothing\": [\n        \"blue shirt\",\n        \"jeans\"\n      ],\n      \"mood\": \"annoyed\"\n    },\n    \"Susie\": {\n      \"location\": \"Bedroom\",\n      \"clothing\": [\n        \"red dress\"\n      ],\n      \"mood\": \"happy\"\n    }\n  },\n  \"doorLocked\": true,\n  \"playerHasKey\": false\n}\n\nNew Information:\nExactly five minutes pass.\n\nPlease return only the JSON Patch array.",
+      "serializer_version": "role-labels-v1",
+      "requested_sampling": {
+        "temperature": 0,
+        "top_p": 1,
+        "top_k": 0,
+        "min_p": 0,
+        "seed": 42
+      },
+      "sampling": null,
+      "applied_sampling": null,
+      "schema_requested": null,
+      "constrained_decoding": false,
+      "environment": {
+        "version": "rpg-perchance-worker-v1",
+        "ready": true,
+        "frameUrl": "https://ced2311a27f6c6944ef5e0ac74e1176e.perchance.org/056uh2nc6k",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+        "remoteModel": null,
+        "appliedSampling": null,
+        "cacheControl": null,
+        "browser_connection": "normal-browser-cdp-v1",
+        "browser_visible": true,
+        "readiness_scope": "plugin_availability_only",
+        "connection_code_hash": "9c1227199413ef87dea16c819832165f0fc7595d2869a2e374c866ef8c414b84"
+      }
+    }
+  ],
+  "outputs": {
+    "patch": "```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```"
+  },
+  "step_events": [
+    {
+      "step": "patch",
+      "status": "completed",
+      "iteration": 0
+    }
+  ],
+  "pipeline_seconds": 2.4630844000494108,
+  "score": {
+    "valid": false,
+    "exact_match": false,
+    "error": "Expecting value: line 1 column 1 (char 0)",
+    "required_changes": 1,
+    "state_exact_match": false,
+    "required_patch_ops": [
+      "replace"
+    ],
+    "actual_patch_ops": [],
+    "patch_ops_match": false,
+    "objective_checks": []
+  },
+  "scoring_seconds": 0.00010030006524175406,
+  "cache_mode": "provider_default_unknown",
+  "cache_verified": null,
+  "measurement_valid": true,
+  "sampling_seed_policy": "unavailable; repetitions collapsed",
+  "feature_applicability": {
+    "cache_control": false,
+    "seed_control": false,
+    "constrained_decoding": false
+  },
+  "gpu_memory": null,
+  "finished_at": "2026-10-08T17:00:08.094784+00:00",
+  "sha256": "27aaf99961c608d4fb0a785dca14ecf7e9f5195f18c6a69a85ac556b1e5491d0"
+}

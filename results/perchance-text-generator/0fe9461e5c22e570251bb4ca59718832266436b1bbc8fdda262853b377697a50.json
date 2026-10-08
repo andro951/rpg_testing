@@ -1,0 +1,1822 @@
+{
+  "status": "completed",
+  "case_id": "0fe9461e5c22e570251bb4ca59718832266436b1bbc8fdda262853b377697a50",
+  "model_id": "perchance-text-generator",
+  "model_name": "Perchance Text Generator",
+  "test_id": "time_only",
+  "variant_id": "analyze_json_patch__indexed_arrays",
+  "repetition": 0,
+  "target": {
+    "backend": "perchance",
+    "vram_gb": 8,
+    "gpu_name": "NVIDIA GeForce GTX 1080",
+    "os": "Windows-10-10.0.19045-SP0",
+    "execution_class": "remote_service",
+    "execution_policy": "perchance-capability-baseline-v1"
+  },
+  "test_definition": {
+    "schema_version": 2,
+    "id": "time_only",
+    "name": "Only the time changes",
+    "workflow": "steps",
+    "repetitions": 1,
+    "timeout_seconds": 300,
+    "state_presentation": "raw_json",
+    "source": {
+      "initial_state": {
+        "time": "14:15",
+        "location": "Kitchen",
+        "characters": {
+          "Tom": {
+            "location": "Kitchen",
+            "clothing": [
+              "blue shirt",
+              "jeans"
+            ],
+            "mood": "annoyed"
+          },
+          "Susie": {
+            "location": "Bedroom",
+            "clothing": [
+              "red dress"
+            ],
+            "mood": "happy"
+          }
+        },
+        "doorLocked": true,
+        "playerHasKey": false
+      },
+      "new_information": "Exactly five minutes pass."
+    },
+    "expected_state": {
+      "time": "14:20",
+      "location": "Kitchen",
+      "characters": {
+        "Tom": {
+          "location": "Kitchen",
+          "clothing": [
+            "blue shirt",
+            "jeans"
+          ],
+          "mood": "annoyed"
+        },
+        "Susie": {
+          "location": "Bedroom",
+          "clothing": [
+            "red dress"
+          ],
+          "mood": "happy"
+        }
+      },
+      "doorLocked": true,
+      "playerHasKey": false
+    },
+    "variants": [
+      {
+        "id": "direct_json_patch",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch"
+        },
+        "prompt_style": "conversational_v2"
+      },
+      {
+        "id": "analyze_json_patch",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Before writing the patch, briefly tell me what needs to change.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Now please return only the JSON Patch array.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch"
+        },
+        "prompt_style": "conversational_v2"
+      },
+      {
+        "id": "direct_semantic",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "semantic"
+        },
+        "prompt_style": "conversational_v2"
+      },
+      {
+        "id": "analyze_semantic",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Describe the established state changes concisely. Do not generate JSON yet.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown. Check the earlier analysis against the original evidence.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "semantic"
+        },
+        "prompt_style": "conversational_v2"
+      },
+      {
+        "id": "direct_json_patch__indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch"
+        },
+        "prompt_style": "conversational_v2",
+        "name": "direct_json_patch — Indexed-array JSON",
+        "state_presentation": "indexed_arrays"
+      },
+      {
+        "id": "analyze_json_patch__indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Before writing the patch, briefly tell me what needs to change.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Now please return only the JSON Patch array.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch"
+        },
+        "prompt_style": "conversational_v2",
+        "name": "analyze_json_patch — Indexed-array JSON",
+        "state_presentation": "indexed_arrays"
+      },
+      {
+        "id": "direct_semantic__indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "semantic"
+        },
+        "prompt_style": "conversational_v2",
+        "name": "direct_semantic — Indexed-array JSON",
+        "state_presentation": "indexed_arrays"
+      },
+      {
+        "id": "analyze_semantic__indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Describe the established state changes concisely. Do not generate JSON yet.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown. Check the earlier analysis against the original evidence.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "semantic"
+        },
+        "prompt_style": "conversational_v2",
+        "name": "analyze_semantic — Indexed-array JSON",
+        "state_presentation": "indexed_arrays"
+      }
+    ]
+  },
+  "variant_definition": {
+    "id": "analyze_json_patch__indexed_arrays",
+    "cache": "default",
+    "steps": [
+      {
+        "id": "analysis",
+        "type": "generate",
+        "prompt": "Before writing the patch, briefly tell me what needs to change.",
+        "output": {
+          "type": "text"
+        },
+        "sampling": {
+          "temperature": 0,
+          "top_p": 1,
+          "seed": 42
+        }
+      },
+      {
+        "id": "patch",
+        "type": "generate",
+        "prompt": "Now please return only the JSON Patch array.",
+        "uses": [
+          "analysis"
+        ],
+        "output": {
+          "type": "text"
+        },
+        "sampling": {
+          "temperature": 0,
+          "top_p": 1,
+          "seed": 42
+        }
+      }
+    ],
+    "result": {
+      "step": "patch",
+      "representation": "json_patch"
+    },
+    "prompt_style": "conversational_v2",
+    "name": "analyze_json_patch — Indexed-array JSON",
+    "state_presentation": "indexed_arrays"
+  },
+  "effective_definition": {
+    "test": {
+      "schema_version": 2,
+      "workflow": "steps",
+      "state_presentation": "raw_json",
+      "source": {
+        "initial_state": {
+          "time": "14:15",
+          "location": "Kitchen",
+          "characters": {
+            "Tom": {
+              "location": "Kitchen",
+              "clothing": [
+                "blue shirt",
+                "jeans"
+              ],
+              "mood": "annoyed"
+            },
+            "Susie": {
+              "location": "Bedroom",
+              "clothing": [
+                "red dress"
+              ],
+              "mood": "happy"
+            }
+          },
+          "doorLocked": true,
+          "playerHasKey": false
+        },
+        "new_information": "Exactly five minutes pass."
+      },
+      "expected_state": {
+        "time": "14:20",
+        "location": "Kitchen",
+        "characters": {
+          "Tom": {
+            "location": "Kitchen",
+            "clothing": [
+              "blue shirt",
+              "jeans"
+            ],
+            "mood": "annoyed"
+          },
+          "Susie": {
+            "location": "Bedroom",
+            "clothing": [
+              "red dress"
+            ],
+            "mood": "happy"
+          }
+        },
+        "doorLocked": true,
+        "playerHasKey": false
+      }
+    },
+    "variant": {
+      "cache": "default",
+      "steps": [
+        {
+          "id": "analysis",
+          "type": "generate",
+          "prompt": "Before writing the patch, briefly tell me what needs to change.",
+          "output": {
+            "type": "text"
+          }
+        },
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Now please return only the JSON Patch array.",
+          "uses": [
+            "analysis"
+          ],
+          "output": {
+            "type": "text"
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch"
+      },
+      "prompt_style": "conversational_v2",
+      "state_presentation": "indexed_arrays"
+    }
+  },
+  "aliases": [
+    {
+      "test_id": "time_only",
+      "variant_id": "analyze_json_patch__indexed_arrays",
+      "repetition": 0,
+      "requested_id": "002b574eaf1f3d15dd71233c43c4b0312732fa6f45af241f544d330c3240bef6",
+      "requested_definition": {
+        "test": {
+          "schema_version": 2,
+          "id": "time_only",
+          "workflow": "steps",
+          "state_presentation": "raw_json",
+          "source": {
+            "initial_state": {
+              "time": "14:15",
+              "location": "Kitchen",
+              "characters": {
+                "Tom": {
+                  "location": "Kitchen",
+                  "clothing": [
+                    "blue shirt",
+                    "jeans"
+                  ],
+                  "mood": "annoyed"
+                },
+                "Susie": {
+                  "location": "Bedroom",
+                  "clothing": [
+                    "red dress"
+                  ],
+                  "mood": "happy"
+                }
+              },
+              "doorLocked": true,
+              "playerHasKey": false
+            },
+            "new_information": "Exactly five minutes pass."
+          },
+          "expected_state": {
+            "time": "14:20",
+            "location": "Kitchen",
+            "characters": {
+              "Tom": {
+                "location": "Kitchen",
+                "clothing": [
+                  "blue shirt",
+                  "jeans"
+                ],
+                "mood": "annoyed"
+              },
+              "Susie": {
+                "location": "Bedroom",
+                "clothing": [
+                  "red dress"
+                ],
+                "mood": "happy"
+              }
+            },
+            "doorLocked": true,
+            "playerHasKey": false
+          }
+        },
+        "variant": {
+          "id": "analyze_json_patch__indexed_arrays",
+          "cache": "default",
+          "steps": [
+            {
+              "id": "analysis",
+              "type": "generate",
+              "prompt": "Before writing the patch, briefly tell me what needs to change.",
+              "output": {
+                "type": "text"
+              },
+              "sampling": {
+                "temperature": 0,
+                "top_p": 1,
+                "seed": 42
+              }
+            },
+            {
+              "id": "patch",
+              "type": "generate",
+              "prompt": "Now please return only the JSON Patch array.",
+              "uses": [
+                "analysis"
+              ],
+              "output": {
+                "type": "text"
+              },
+              "sampling": {
+                "temperature": 0,
+                "top_p": 1,
+                "seed": 42
+              }
+            }
+          ],
+          "result": {
+            "step": "patch",
+            "representation": "json_patch"
+          },
+          "prompt_style": "conversational_v2",
+          "state_presentation": "indexed_arrays"
+        }
+      },
+      "requested_timeout_seconds": 120,
+      "observation_id": "0fe9461e5c22e570251bb4ca59718832266436b1bbc8fdda262853b377697a50",
+      "collapsed_dimensions": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "seed",
+        "repeat_penalty",
+        "cache",
+        "cache_verification",
+        "constrained_decoding",
+        "context_allocation",
+        "gpu_placement",
+        "remote_model_identity",
+        "token_timings"
+      ]
+    }
+  ],
+  "selected_aliases": [
+    "002b574eaf1f3d15dd71233c43c4b0312732fa6f45af241f544d330c3240bef6"
+  ],
+  "capability_policy": {
+    "provider": "Perchance Text Generator",
+    "policy": "perchance-capability-baseline-v1",
+    "worker_url": "https://perchance.org/056uh2nc6k",
+    "epoch": "1",
+    "adapter_hash": "5d9c66643a60542ac665cd45a6dc216d1517cc23c21a2edba78a7c69b03a3730",
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "remote_model": null,
+    "capability_evidence": {
+      "reviewed": "2026-10-01",
+      "source": "tools/perchance-text/worker.js",
+      "reason": "Worker forwards instruction/startWith/hideStartWith/stopSequences/onChunk only; no verified experimental controls"
+    },
+    "capabilities": {
+      "temperature": "unavailable_in_adapter",
+      "top_p": "unavailable_in_adapter",
+      "top_k": "unavailable_in_adapter",
+      "min_p": "unavailable_in_adapter",
+      "seed": "unavailable_in_adapter",
+      "repeat_penalty": "unavailable_in_adapter",
+      "cache": "unavailable_in_adapter",
+      "cache_verification": "unavailable_in_adapter",
+      "constrained_decoding": "unavailable_in_adapter",
+      "context_allocation": "unavailable_in_adapter",
+      "gpu_placement": "unavailable_in_adapter",
+      "remote_model_identity": "unavailable_in_adapter",
+      "token_timings": "unavailable_in_adapter"
+    }
+  },
+  "artifact_identity": {
+    "provider": "Perchance Text Generator",
+    "policy": "perchance-capability-baseline-v1",
+    "worker_url": "https://perchance.org/056uh2nc6k",
+    "epoch": "1",
+    "adapter_hash": "5d9c66643a60542ac665cd45a6dc216d1517cc23c21a2edba78a7c69b03a3730",
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "remote_model": null,
+    "capability_evidence": {
+      "reviewed": "2026-10-01",
+      "source": "tools/perchance-text/worker.js",
+      "reason": "Worker forwards instruction/startWith/hideStartWith/stopSequences/onChunk only; no verified experimental controls"
+    },
+    "capabilities": {
+      "temperature": "unavailable_in_adapter",
+      "top_p": "unavailable_in_adapter",
+      "top_k": "unavailable_in_adapter",
+      "min_p": "unavailable_in_adapter",
+      "seed": "unavailable_in_adapter",
+      "repeat_penalty": "unavailable_in_adapter",
+      "cache": "unavailable_in_adapter",
+      "cache_verification": "unavailable_in_adapter",
+      "constrained_decoding": "unavailable_in_adapter",
+      "context_allocation": "unavailable_in_adapter",
+      "gpu_placement": "unavailable_in_adapter",
+      "remote_model_identity": "unavailable_in_adapter",
+      "token_timings": "unavailable_in_adapter"
+    }
+  },
+  "execution_class": "remote_service",
+  "simulated": false,
+  "valid_for_full_gpu_comparison": false,
+  "policy": "perchance-capability-baseline-v1",
+  "load": {
+    "environment": {
+      "version": "rpg-perchance-worker-v1",
+      "ready": true,
+      "frameUrl": "https://ced2311a27f6c6944ef5e0ac74e1176e.perchance.org/056uh2nc6k",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+      "remoteModel": null,
+      "appliedSampling": null,
+      "cacheControl": null,
+      "browser_connection": "normal-browser-cdp-v1",
+      "browser_visible": true,
+      "readiness_scope": "plugin_availability_only",
+      "connection_code_hash": "9c1227199413ef87dea16c819832165f0fc7595d2869a2e374c866ef8c414b84"
+    },
+    "context": {},
+    "placement": {}
+  },
+  "timeout_seconds": 300,
+  "started_at": "2026-10-08T17:06:38.506342+00:00",
+  "provenance": {
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "provider": "perchance",
+    "remote_model": null
+  },
+  "calls": [
+    {
+      "step": "analysis",
+      "iteration": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You help update an existing JSON state when new information is provided."
+        },
+        {
+          "role": "user",
+          "content": "I need you to figure out how the existing state should change based on the new information.\n\nCurrent State:\n{\n  \"time\": \"14:15\",\n  \"location\": \"Kitchen\",\n  \"characters\": {\n    \"Tom\": {\n      \"location\": \"Kitchen\",\n      \"clothing\": {\n        \"0\": \"blue shirt\",\n        \"1\": \"jeans\"\n      },\n      \"mood\": \"annoyed\"\n    },\n    \"Susie\": {\n      \"location\": \"Bedroom\",\n      \"clothing\": {\n        \"0\": \"red dress\"\n      },\n      \"mood\": \"happy\"\n    }\n  },\n  \"doorLocked\": true,\n  \"playerHasKey\": false\n}\n\nNew Information:\nExactly five minutes pass.\n\nFor this version, arrays in Current State are shown as objects with their zero-based indexes as keys. They're still arrays in the actual state, so use those numbers as array indexes in JSON Patch paths.\n\nBefore writing the patch, briefly tell me what needs to change."
+        }
+      ],
+      "text": "The time needs to be advanced by five minutes.\n\n```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+      "finish_reason": "provider_completed",
+      "request_seconds": 4.647293499903753,
+      "first_visible_text_seconds": 1.0594750000238418,
+      "first_token_seconds": null,
+      "usage": {},
+      "timings": {},
+      "cached_tokens": null,
+      "raw_chunks": [
+        {
+          "text": "The",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.4750000238419
+        },
+        {
+          "text": " time",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.5200000405312
+        },
+        {
+          "text": " needs",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.5450000166893
+        },
+        {
+          "text": " to",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.5650000572205
+        },
+        {
+          "text": " be",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.5950000286102
+        },
+        {
+          "text": " advanced",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.6150000095367
+        },
+        {
+          "text": " by",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.635000050068
+        },
+        {
+          "text": " five",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.6550000309944
+        },
+        {
+          "text": " minutes",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.675000011921
+        },
+        {
+          "text": ".",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.7000000476837
+        },
+        {
+          "text": "\n\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.7200000286102
+        },
+        {
+          "text": "```",
+          "isFromStartWith": false,
+          "elapsedMs": 1059.7450000047684
+        },
+        {
+          "text": "json",
+          "isFromStartWith": false,
+          "elapsedMs": 1577.8800000548363
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1577.9300000071526
+        },
+        {
+          "text": "[",
+          "isFromStartWith": false,
+          "elapsedMs": 1577.9650000333786
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1578
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 1578.050000011921
+        },
+        {
+          "text": "{",
+          "isFromStartWith": false,
+          "elapsedMs": 1578.0800000429153
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1578.1150000095367
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 2048.3300000429153
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 2048.3900000452995
+        },
+        {
+          "text": "op",
+          "isFromStartWith": false,
+          "elapsedMs": 2048.425000011921
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 2048.4500000476837
+        },
+        {
+          "text": " \"",
+          "isFromStartWith": false,
+          "elapsedMs": 2048.4950000047684
+        },
+        {
+          "text": "replace",
+          "isFromStartWith": false,
+          "elapsedMs": 2048.5300000309944
+        },
+        {
+          "text": "\",",
+          "isFromStartWith": false,
+          "elapsedMs": 2048.570000052452
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2567.1300000548363
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 2567.185000002384
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 2567.225000023842
+        },
+        {
+          "text": "path",
+          "isFromStartWith": false,
+          "elapsedMs": 2567.260000050068
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 2567.2950000166893
+        },
+        {
+          "text": " \"/",
+          "isFromStartWith": false,
+          "elapsedMs": 3025.0750000476837
+        },
+        {
+          "text": "time",
+          "isFromStartWith": false,
+          "elapsedMs": 3025.1150000095367
+        },
+        {
+          "text": "\",",
+          "isFromStartWith": false,
+          "elapsedMs": 3025.150000035763
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 3025.1900000572205
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 3025.235000014305
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 3025.2800000309944
+        },
+        {
+          "text": "value",
+          "isFromStartWith": false,
+          "elapsedMs": 3525.7950000166893
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 3525.850000023842
+        },
+        {
+          "text": " \"",
+          "isFromStartWith": false,
+          "elapsedMs": 3525.900000035763
+        },
+        {
+          "text": "1",
+          "isFromStartWith": false,
+          "elapsedMs": 3525.975000023842
+        },
+        {
+          "text": "4",
+          "isFromStartWith": false,
+          "elapsedMs": 3526.010000050068
+        },
+        {
+          "text": ":",
+          "isFromStartWith": false,
+          "elapsedMs": 3526.0400000214577
+        },
+        {
+          "text": "2",
+          "isFromStartWith": false,
+          "elapsedMs": 3966.9400000572205
+        },
+        {
+          "text": "0",
+          "isFromStartWith": false,
+          "elapsedMs": 3966.9800000190735
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 3967.010000050068
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 3967.0550000071526
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 3967.0750000476837
+        },
+        {
+          "text": "}",
+          "isFromStartWith": false,
+          "elapsedMs": 4516.020000040531
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 4516.070000052452
+        },
+        {
+          "text": "]",
+          "isFromStartWith": false,
+          "elapsedMs": 4516.1050000190735
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 4516.150000035763
+        },
+        {
+          "text": "```",
+          "isFromStartWith": false,
+          "elapsedMs": 4516.185000002384
+        },
+        {
+          "text": "",
+          "isFromStartWith": false,
+          "elapsedMs": 4612.22000002861
+        }
+      ],
+      "provider_result": {
+        "id": "22dc857f8bae435ba3bda89a78dbfc15",
+        "state": "completed",
+        "text": "The time needs to be advanced by five minutes.\n\n```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+        "chunks": [
+          {
+            "text": "The",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.4750000238419
+          },
+          {
+            "text": " time",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.5200000405312
+          },
+          {
+            "text": " needs",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.5450000166893
+          },
+          {
+            "text": " to",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.5650000572205
+          },
+          {
+            "text": " be",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.5950000286102
+          },
+          {
+            "text": " advanced",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.6150000095367
+          },
+          {
+            "text": " by",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.635000050068
+          },
+          {
+            "text": " five",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.6550000309944
+          },
+          {
+            "text": " minutes",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.675000011921
+          },
+          {
+            "text": ".",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.7000000476837
+          },
+          {
+            "text": "\n\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.7200000286102
+          },
+          {
+            "text": "```",
+            "isFromStartWith": false,
+            "elapsedMs": 1059.7450000047684
+          },
+          {
+            "text": "json",
+            "isFromStartWith": false,
+            "elapsedMs": 1577.8800000548363
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1577.9300000071526
+          },
+          {
+            "text": "[",
+            "isFromStartWith": false,
+            "elapsedMs": 1577.9650000333786
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1578
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 1578.050000011921
+          },
+          {
+            "text": "{",
+            "isFromStartWith": false,
+            "elapsedMs": 1578.0800000429153
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1578.1150000095367
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 2048.3300000429153
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 2048.3900000452995
+          },
+          {
+            "text": "op",
+            "isFromStartWith": false,
+            "elapsedMs": 2048.425000011921
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 2048.4500000476837
+          },
+          {
+            "text": " \"",
+            "isFromStartWith": false,
+            "elapsedMs": 2048.4950000047684
+          },
+          {
+            "text": "replace",
+            "isFromStartWith": false,
+            "elapsedMs": 2048.5300000309944
+          },
+          {
+            "text": "\",",
+            "isFromStartWith": false,
+            "elapsedMs": 2048.570000052452
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2567.1300000548363
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 2567.185000002384
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 2567.225000023842
+          },
+          {
+            "text": "path",
+            "isFromStartWith": false,
+            "elapsedMs": 2567.260000050068
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 2567.2950000166893
+          },
+          {
+            "text": " \"/",
+            "isFromStartWith": false,
+            "elapsedMs": 3025.0750000476837
+          },
+          {
+            "text": "time",
+            "isFromStartWith": false,
+            "elapsedMs": 3025.1150000095367
+          },
+          {
+            "text": "\",",
+            "isFromStartWith": false,
+            "elapsedMs": 3025.150000035763
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 3025.1900000572205
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 3025.235000014305
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 3025.2800000309944
+          },
+          {
+            "text": "value",
+            "isFromStartWith": false,
+            "elapsedMs": 3525.7950000166893
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 3525.850000023842
+          },
+          {
+            "text": " \"",
+            "isFromStartWith": false,
+            "elapsedMs": 3525.900000035763
+          },
+          {
+            "text": "1",
+            "isFromStartWith": false,
+            "elapsedMs": 3525.975000023842
+          },
+          {
+            "text": "4",
+            "isFromStartWith": false,
+            "elapsedMs": 3526.010000050068
+          },
+          {
+            "text": ":",
+            "isFromStartWith": false,
+            "elapsedMs": 3526.0400000214577
+          },
+          {
+            "text": "2",
+            "isFromStartWith": false,
+            "elapsedMs": 3966.9400000572205
+          },
+          {
+            "text": "0",
+            "isFromStartWith": false,
+            "elapsedMs": 3966.9800000190735
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 3967.010000050068
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 3967.0550000071526
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 3967.0750000476837
+          },
+          {
+            "text": "}",
+            "isFromStartWith": false,
+            "elapsedMs": 4516.020000040531
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 4516.070000052452
+          },
+          {
+            "text": "]",
+            "isFromStartWith": false,
+            "elapsedMs": 4516.1050000190735
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 4516.150000035763
+          },
+          {
+            "text": "```",
+            "isFromStartWith": false,
+            "elapsedMs": 4516.185000002384
+          },
+          {
+            "text": "",
+            "isFromStartWith": false,
+            "elapsedMs": 4612.22000002861
+          }
+        ],
+        "rawResult": "The time needs to be advanced by five minutes.\n\n```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+        "stopReason": "natural",
+        "error": null,
+        "elapsedMs": 4642.080000042915,
+        "firstVisibleMs": 1059.4750000238419
+      },
+      "effective_instruction": "SYSTEM:\nYou help update an existing JSON state when new information is provided.\n\nUSER:\nI need you to figure out how the existing state should change based on the new information.\n\nCurrent State:\n{\n  \"time\": \"14:15\",\n  \"location\": \"Kitchen\",\n  \"characters\": {\n    \"Tom\": {\n      \"location\": \"Kitchen\",\n      \"clothing\": {\n        \"0\": \"blue shirt\",\n        \"1\": \"jeans\"\n      },\n      \"mood\": \"annoyed\"\n    },\n    \"Susie\": {\n      \"location\": \"Bedroom\",\n      \"clothing\": {\n        \"0\": \"red dress\"\n      },\n      \"mood\": \"happy\"\n    }\n  },\n  \"doorLocked\": true,\n  \"playerHasKey\": false\n}\n\nNew Information:\nExactly five minutes pass.\n\nFor this version, arrays in Current State are shown as objects with their zero-based indexes as keys. They're still arrays in the actual state, so use those numbers as array indexes in JSON Patch paths.\n\nBefore writing the patch, briefly tell me what needs to change.",
+      "serializer_version": "role-labels-v1",
+      "requested_sampling": {
+        "temperature": 0,
+        "top_p": 1,
+        "top_k": 0,
+        "min_p": 0,
+        "seed": 42
+      },
+      "sampling": null,
+      "applied_sampling": null,
+      "schema_requested": null,
+      "constrained_decoding": false,
+      "environment": {
+        "version": "rpg-perchance-worker-v1",
+        "ready": true,
+        "frameUrl": "https://ced2311a27f6c6944ef5e0ac74e1176e.perchance.org/056uh2nc6k",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+        "remoteModel": null,
+        "appliedSampling": null,
+        "cacheControl": null,
+        "browser_connection": "normal-browser-cdp-v1",
+        "browser_visible": true,
+        "readiness_scope": "plugin_availability_only",
+        "connection_code_hash": "9c1227199413ef87dea16c819832165f0fc7595d2869a2e374c866ef8c414b84"
+      }
+    },
+    {
+      "step": "patch",
+      "iteration": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You help update an existing JSON state when new information is provided."
+        },
+        {
+          "role": "user",
+          "content": "I need you to write a JSON Patch to update the existing state with the new information.\n\nCurrent State:\n{\n  \"time\": \"14:15\",\n  \"location\": \"Kitchen\",\n  \"characters\": {\n    \"Tom\": {\n      \"location\": \"Kitchen\",\n      \"clothing\": {\n        \"0\": \"blue shirt\",\n        \"1\": \"jeans\"\n      },\n      \"mood\": \"annoyed\"\n    },\n    \"Susie\": {\n      \"location\": \"Bedroom\",\n      \"clothing\": {\n        \"0\": \"red dress\"\n      },\n      \"mood\": \"happy\"\n    }\n  },\n  \"doorLocked\": true,\n  \"playerHasKey\": false\n}\n\nNew Information:\nExactly five minutes pass.\n\nFor this version, arrays in Current State are shown as objects with their zero-based indexes as keys. They're still arrays in the actual state, so use those numbers as array indexes in JSON Patch paths."
+        },
+        {
+          "role": "assistant",
+          "content": "Previous output [analysis]:\n\"The time needs to be advanced by five minutes.\\n\\n```json\\n[\\n  {\\n    \\\"op\\\": \\\"replace\\\",\\n    \\\"path\\\": \\\"/time\\\",\\n    \\\"value\\\": \\\"14:20\\\"\\n  }\\n]\\n```\""
+        },
+        {
+          "role": "user",
+          "content": "Now please return only the JSON Patch array."
+        }
+      ],
+      "text": "```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+      "finish_reason": "provider_completed",
+      "request_seconds": 5.623284199973568,
+      "first_visible_text_seconds": 2.619210000038147,
+      "first_token_seconds": null,
+      "usage": {},
+      "timings": {},
+      "cached_tokens": null,
+      "raw_chunks": [
+        {
+          "text": "```",
+          "isFromStartWith": false,
+          "elapsedMs": 2619.2050000429153
+        },
+        {
+          "text": "json",
+          "isFromStartWith": false,
+          "elapsedMs": 2619.2650000452995
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2619.3050000071526
+        },
+        {
+          "text": "[",
+          "isFromStartWith": false,
+          "elapsedMs": 2619.3400000333786
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2619.3849999904633
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 2619.4150000214577
+        },
+        {
+          "text": "{",
+          "isFromStartWith": false,
+          "elapsedMs": 2619.4500000476837
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 3149.25
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 3149.314999997616
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 3149.350000023842
+        },
+        {
+          "text": "op",
+          "isFromStartWith": false,
+          "elapsedMs": 3149.3799999952316
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 3149.410000026226
+        },
+        {
+          "text": " \"",
+          "isFromStartWith": false,
+          "elapsedMs": 3617.175000011921
+        },
+        {
+          "text": "replace",
+          "isFromStartWith": false,
+          "elapsedMs": 3617.235000014305
+        },
+        {
+          "text": "\",",
+          "isFromStartWith": false,
+          "elapsedMs": 3617.275000035763
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 3617.314999997616
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 4114.725000023842
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 4114.790000021458
+        },
+        {
+          "text": "path",
+          "isFromStartWith": false,
+          "elapsedMs": 4114.835000038147
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 4114.8900000452995
+        },
+        {
+          "text": " \"/",
+          "isFromStartWith": false,
+          "elapsedMs": 4114.944999992847
+        },
+        {
+          "text": "time",
+          "isFromStartWith": false,
+          "elapsedMs": 4114.990000009537
+        },
+        {
+          "text": "\",",
+          "isFromStartWith": false,
+          "elapsedMs": 4115.040000021458
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 4555.439999997616
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 4555.495000004768
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 4555.535000026226
+        },
+        {
+          "text": "value",
+          "isFromStartWith": false,
+          "elapsedMs": 4555.569999992847
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 4555.620000004768
+        },
+        {
+          "text": " \"",
+          "isFromStartWith": false,
+          "elapsedMs": 4555.655000030994
+        },
+        {
+          "text": "1",
+          "isFromStartWith": false,
+          "elapsedMs": 4555.689999997616
+        },
+        {
+          "text": "4",
+          "isFromStartWith": false,
+          "elapsedMs": 4555.725000023842
+        },
+        {
+          "text": ":",
+          "isFromStartWith": false,
+          "elapsedMs": 4555.759999990463
+        },
+        {
+          "text": "2",
+          "isFromStartWith": false,
+          "elapsedMs": 5036.530000030994
+        },
+        {
+          "text": "0",
+          "isFromStartWith": false,
+          "elapsedMs": 5036.59500002861
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 5036.6400000452995
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 5036.680000007153
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 5036.72000002861
+        },
+        {
+          "text": "}",
+          "isFromStartWith": false,
+          "elapsedMs": 5595.960000038147
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 5596.050000011921
+        },
+        {
+          "text": "]",
+          "isFromStartWith": false,
+          "elapsedMs": 5596.115000009537
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 5596.165000021458
+        },
+        {
+          "text": "```",
+          "isFromStartWith": false,
+          "elapsedMs": 5596.22000002861
+        },
+        {
+          "text": "",
+          "isFromStartWith": false,
+          "elapsedMs": 5596.259999990463
+        }
+      ],
+      "provider_result": {
+        "id": "cc170b376f024aac9c0c441ebc1919c8",
+        "state": "completed",
+        "text": "```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+        "chunks": [
+          {
+            "text": "```",
+            "isFromStartWith": false,
+            "elapsedMs": 2619.2050000429153
+          },
+          {
+            "text": "json",
+            "isFromStartWith": false,
+            "elapsedMs": 2619.2650000452995
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2619.3050000071526
+          },
+          {
+            "text": "[",
+            "isFromStartWith": false,
+            "elapsedMs": 2619.3400000333786
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2619.3849999904633
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 2619.4150000214577
+          },
+          {
+            "text": "{",
+            "isFromStartWith": false,
+            "elapsedMs": 2619.4500000476837
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 3149.25
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 3149.314999997616
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 3149.350000023842
+          },
+          {
+            "text": "op",
+            "isFromStartWith": false,
+            "elapsedMs": 3149.3799999952316
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 3149.410000026226
+          },
+          {
+            "text": " \"",
+            "isFromStartWith": false,
+            "elapsedMs": 3617.175000011921
+          },
+          {
+            "text": "replace",
+            "isFromStartWith": false,
+            "elapsedMs": 3617.235000014305
+          },
+          {
+            "text": "\",",
+            "isFromStartWith": false,
+            "elapsedMs": 3617.275000035763
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 3617.314999997616
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 4114.725000023842
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 4114.790000021458
+          },
+          {
+            "text": "path",
+            "isFromStartWith": false,
+            "elapsedMs": 4114.835000038147
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 4114.8900000452995
+          },
+          {
+            "text": " \"/",
+            "isFromStartWith": false,
+            "elapsedMs": 4114.944999992847
+          },
+          {
+            "text": "time",
+            "isFromStartWith": false,
+            "elapsedMs": 4114.990000009537
+          },
+          {
+            "text": "\",",
+            "isFromStartWith": false,
+            "elapsedMs": 4115.040000021458
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 4555.439999997616
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 4555.495000004768
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 4555.535000026226
+          },
+          {
+            "text": "value",
+            "isFromStartWith": false,
+            "elapsedMs": 4555.569999992847
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 4555.620000004768
+          },
+          {
+            "text": " \"",
+            "isFromStartWith": false,
+            "elapsedMs": 4555.655000030994
+          },
+          {
+            "text": "1",
+            "isFromStartWith": false,
+            "elapsedMs": 4555.689999997616
+          },
+          {
+            "text": "4",
+            "isFromStartWith": false,
+            "elapsedMs": 4555.725000023842
+          },
+          {
+            "text": ":",
+            "isFromStartWith": false,
+            "elapsedMs": 4555.759999990463
+          },
+          {
+            "text": "2",
+            "isFromStartWith": false,
+            "elapsedMs": 5036.530000030994
+          },
+          {
+            "text": "0",
+            "isFromStartWith": false,
+            "elapsedMs": 5036.59500002861
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 5036.6400000452995
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 5036.680000007153
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 5036.72000002861
+          },
+          {
+            "text": "}",
+            "isFromStartWith": false,
+            "elapsedMs": 5595.960000038147
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 5596.050000011921
+          },
+          {
+            "text": "]",
+            "isFromStartWith": false,
+            "elapsedMs": 5596.115000009537
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 5596.165000021458
+          },
+          {
+            "text": "```",
+            "isFromStartWith": false,
+            "elapsedMs": 5596.22000002861
+          },
+          {
+            "text": "",
+            "isFromStartWith": false,
+            "elapsedMs": 5596.259999990463
+          }
+        ],
+        "rawResult": "```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+        "stopReason": "natural",
+        "error": null,
+        "elapsedMs": 5616.925000011921,
+        "firstVisibleMs": 2619.210000038147
+      },
+      "effective_instruction": "SYSTEM:\nYou help update an existing JSON state when new information is provided.\n\nUSER:\nI need you to write a JSON Patch to update the existing state with the new information.\n\nCurrent State:\n{\n  \"time\": \"14:15\",\n  \"location\": \"Kitchen\",\n  \"characters\": {\n    \"Tom\": {\n      \"location\": \"Kitchen\",\n      \"clothing\": {\n        \"0\": \"blue shirt\",\n        \"1\": \"jeans\"\n      },\n      \"mood\": \"annoyed\"\n    },\n    \"Susie\": {\n      \"location\": \"Bedroom\",\n      \"clothing\": {\n        \"0\": \"red dress\"\n      },\n      \"mood\": \"happy\"\n    }\n  },\n  \"doorLocked\": true,\n  \"playerHasKey\": false\n}\n\nNew Information:\nExactly five minutes pass.\n\nFor this version, arrays in Current State are shown as objects with their zero-based indexes as keys. They're still arrays in the actual state, so use those numbers as array indexes in JSON Patch paths.\n\nASSISTANT:\nPrevious output [analysis]:\n\"The time needs to be advanced by five minutes.\\n\\n```json\\n[\\n  {\\n    \\\"op\\\": \\\"replace\\\",\\n    \\\"path\\\": \\\"/time\\\",\\n    \\\"value\\\": \\\"14:20\\\"\\n  }\\n]\\n```\"\n\nUSER:\nNow please return only the JSON Patch array.",
+      "serializer_version": "role-labels-v1",
+      "requested_sampling": {
+        "temperature": 0,
+        "top_p": 1,
+        "top_k": 0,
+        "min_p": 0,
+        "seed": 42
+      },
+      "sampling": null,
+      "applied_sampling": null,
+      "schema_requested": null,
+      "constrained_decoding": false,
+      "environment": {
+        "version": "rpg-perchance-worker-v1",
+        "ready": true,
+        "frameUrl": "https://ced2311a27f6c6944ef5e0ac74e1176e.perchance.org/056uh2nc6k",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+        "remoteModel": null,
+        "appliedSampling": null,
+        "cacheControl": null,
+        "browser_connection": "normal-browser-cdp-v1",
+        "browser_visible": true,
+        "readiness_scope": "plugin_availability_only",
+        "connection_code_hash": "9c1227199413ef87dea16c819832165f0fc7595d2869a2e374c866ef8c414b84"
+      }
+    }
+  ],
+  "outputs": {
+    "analysis": "The time needs to be advanced by five minutes.\n\n```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```",
+    "patch": "```json\n[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]\n```"
+  },
+  "step_events": [
+    {
+      "step": "analysis",
+      "status": "completed",
+      "iteration": 0
+    },
+    {
+      "step": "patch",
+      "status": "completed",
+      "iteration": 0
+    }
+  ],
+  "pipeline_seconds": 10.270907399943098,
+  "score": {
+    "valid": false,
+    "exact_match": false,
+    "error": "Expecting value: line 1 column 1 (char 0)",
+    "required_changes": 1,
+    "objective_checks": []
+  },
+  "scoring_seconds": 0.00010000006295740604,
+  "cache_mode": "provider_default_unknown",
+  "cache_verified": null,
+  "measurement_valid": true,
+  "sampling_seed_policy": "unavailable; repetitions collapsed",
+  "feature_applicability": {
+    "cache_control": false,
+    "seed_control": false,
+    "constrained_decoding": false
+  },
+  "gpu_memory": null,
+  "finished_at": "2026-10-08T17:06:48.779705+00:00",
+  "sha256": "84a8d7e2fd00f4c9ff3790b4a8e25a75ecb7d7d5b5895b9b48c5daa68259b002"
+}

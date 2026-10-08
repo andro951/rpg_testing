@@ -1,0 +1,1323 @@
+{
+  "status": "completed",
+  "case_id": "4dfd616f3225b6c06ecb119318d7a26f5294cb85a055da00537abb1807356002",
+  "model_id": "perchance-text-generator",
+  "model_name": "Perchance Text Generator",
+  "test_id": "household_coat_remove_002",
+  "variant_id": "direct_json_patch__raw_json",
+  "repetition": 0,
+  "target": {
+    "backend": "perchance",
+    "vram_gb": 8,
+    "gpu_name": "NVIDIA GeForce GTX 1080",
+    "os": "Windows-10-10.0.19045-SP0",
+    "execution_class": "remote_service",
+    "execution_policy": "perchance-capability-baseline-v1"
+  },
+  "test_definition": {
+    "schema_version": 2,
+    "id": "household_coat_remove_002",
+    "name": "Household clothing: remove worn coat",
+    "description": "Second real general state-update benchmark. A natural household conversation refers only to 'his coat'; the model must resolve that reference to the one coat in Evan's tracked clothing list and remove it without changing unrelated state.",
+    "provenance": {
+      "scenario": "Synthetic household state and conversation",
+      "note": "All people, employers, household details, and events are fictional benchmark data."
+    },
+    "workflow": "steps",
+    "repetitions": 1,
+    "timeout_seconds": 300,
+    "source": {
+      "initial_state": {
+        "household": {
+          "household_id": "HARPER-001",
+          "home_profile": {
+            "city": "Hartford",
+            "state": "Connecticut",
+            "residence_type": "single-family home",
+            "pets": [
+              "Milo the cat"
+            ],
+            "primary_vehicle": "2019 Subaru Outback",
+            "usual_weekday_dinner_time": "18:30"
+          },
+          "members": {
+            "evan_harper": {
+              "full_name": "Evan Harper",
+              "age": 36,
+              "household_role": "husband",
+              "occupation": "civil engineer",
+              "employer": "North River Engineering",
+              "work_days": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday"
+              ],
+              "phone_model": "Google Pixel 9",
+              "clothing": [
+                "white oxford shirt",
+                "charcoal wool trousers",
+                "brown leather belt",
+                "dark brown dress shoes",
+                "brown leather coat"
+              ],
+              "carried_items": [
+                "wallet",
+                "house keys",
+                "phone"
+              ]
+            },
+            "laura_harper": {
+              "full_name": "Laura Harper",
+              "age": 35,
+              "household_role": "wife",
+              "occupation": "middle school science teacher",
+              "employer": "Riverview Middle School",
+              "phone_model": "iPhone 16",
+              "clothing": [
+                "green cardigan",
+                "black blouse",
+                "dark jeans",
+                "white sneakers"
+              ],
+              "carried_items": [
+                "phone"
+              ]
+            }
+          },
+          "relationship": {
+            "marital_status": "married",
+            "anniversary_month": "June"
+          }
+        }
+      },
+      "new_information": "Evan Harper gets home from work and unlocks the front door with his house key. As he steps inside he calls, \"Hey, Laura, I'm home. How was your day?\" Laura answers from the kitchen that the science lab went well, although one student knocked over a tray. Evan laughs and says traffic was worse than usual. While they keep talking, he takes off his coat and hangs it on the hook beside the entryway. He then walks into the kitchen, still carrying his wallet, house keys, and phone, and asks Laura what she wants to do for dinner."
+    },
+    "expected_state": {
+      "household": {
+        "household_id": "HARPER-001",
+        "home_profile": {
+          "city": "Hartford",
+          "state": "Connecticut",
+          "residence_type": "single-family home",
+          "pets": [
+            "Milo the cat"
+          ],
+          "primary_vehicle": "2019 Subaru Outback",
+          "usual_weekday_dinner_time": "18:30"
+        },
+        "members": {
+          "evan_harper": {
+            "full_name": "Evan Harper",
+            "age": 36,
+            "household_role": "husband",
+            "occupation": "civil engineer",
+            "employer": "North River Engineering",
+            "work_days": [
+              "Monday",
+              "Tuesday",
+              "Wednesday",
+              "Thursday",
+              "Friday"
+            ],
+            "phone_model": "Google Pixel 9",
+            "clothing": [
+              "white oxford shirt",
+              "charcoal wool trousers",
+              "brown leather belt",
+              "dark brown dress shoes"
+            ],
+            "carried_items": [
+              "wallet",
+              "house keys",
+              "phone"
+            ]
+          },
+          "laura_harper": {
+            "full_name": "Laura Harper",
+            "age": 35,
+            "household_role": "wife",
+            "occupation": "middle school science teacher",
+            "employer": "Riverview Middle School",
+            "phone_model": "iPhone 16",
+            "clothing": [
+              "green cardigan",
+              "black blouse",
+              "dark jeans",
+              "white sneakers"
+            ],
+            "carried_items": [
+              "phone"
+            ]
+          }
+        },
+        "relationship": {
+          "marital_status": "married",
+          "anniversary_month": "June"
+        }
+      }
+    },
+    "variants": [
+      {
+        "id": "direct_json_patch",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "remove"
+          ]
+        },
+        "state_presentation": "indexed_arrays"
+      },
+      {
+        "id": "analyze_json_patch",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Identify only state fields that are established to have changed. Distinguish completed actions from dialogue, discussion, plans, implications, movement that is not represented in the tracked state, and unchanged facts. Do not generate JSON yet.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the established state changes. Preserve all unchanged fields. Check the earlier analysis against the original evidence. To append an array item use add and /- at the end of the path. No markdown.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "remove"
+          ]
+        },
+        "state_presentation": "indexed_arrays"
+      },
+      {
+        "id": "direct_json_patch__raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "remove"
+          ]
+        },
+        "state_presentation": "raw_json",
+        "name": "direct_json_patch — Raw JSON"
+      },
+      {
+        "id": "analyze_json_patch__raw_json",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Identify only state fields that are established to have changed. Distinguish completed actions from dialogue, discussion, plans, implications, movement that is not represented in the tracked state, and unchanged facts. Do not generate JSON yet.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the established state changes. Preserve all unchanged fields. Check the earlier analysis against the original evidence. To append an array item use add and /- at the end of the path. No markdown.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch",
+          "required_ops": [
+            "remove"
+          ]
+        },
+        "state_presentation": "raw_json",
+        "name": "analyze_json_patch — Raw JSON"
+      }
+    ],
+    "state_presentation": "indexed_arrays"
+  },
+  "variant_definition": {
+    "id": "direct_json_patch__raw_json",
+    "cache": "default",
+    "steps": [
+      {
+        "id": "patch",
+        "type": "generate",
+        "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+        "output": {
+          "type": "text"
+        },
+        "sampling": {
+          "temperature": 0,
+          "top_p": 1,
+          "seed": 42
+        }
+      }
+    ],
+    "result": {
+      "step": "patch",
+      "representation": "json_patch",
+      "required_ops": [
+        "remove"
+      ]
+    },
+    "state_presentation": "raw_json",
+    "name": "direct_json_patch — Raw JSON"
+  },
+  "effective_definition": {
+    "test": {
+      "schema_version": 2,
+      "workflow": "steps",
+      "source": {
+        "initial_state": {
+          "household": {
+            "household_id": "HARPER-001",
+            "home_profile": {
+              "city": "Hartford",
+              "state": "Connecticut",
+              "residence_type": "single-family home",
+              "pets": [
+                "Milo the cat"
+              ],
+              "primary_vehicle": "2019 Subaru Outback",
+              "usual_weekday_dinner_time": "18:30"
+            },
+            "members": {
+              "evan_harper": {
+                "full_name": "Evan Harper",
+                "age": 36,
+                "household_role": "husband",
+                "occupation": "civil engineer",
+                "employer": "North River Engineering",
+                "work_days": [
+                  "Monday",
+                  "Tuesday",
+                  "Wednesday",
+                  "Thursday",
+                  "Friday"
+                ],
+                "phone_model": "Google Pixel 9",
+                "clothing": [
+                  "white oxford shirt",
+                  "charcoal wool trousers",
+                  "brown leather belt",
+                  "dark brown dress shoes",
+                  "brown leather coat"
+                ],
+                "carried_items": [
+                  "wallet",
+                  "house keys",
+                  "phone"
+                ]
+              },
+              "laura_harper": {
+                "full_name": "Laura Harper",
+                "age": 35,
+                "household_role": "wife",
+                "occupation": "middle school science teacher",
+                "employer": "Riverview Middle School",
+                "phone_model": "iPhone 16",
+                "clothing": [
+                  "green cardigan",
+                  "black blouse",
+                  "dark jeans",
+                  "white sneakers"
+                ],
+                "carried_items": [
+                  "phone"
+                ]
+              }
+            },
+            "relationship": {
+              "marital_status": "married",
+              "anniversary_month": "June"
+            }
+          }
+        },
+        "new_information": "Evan Harper gets home from work and unlocks the front door with his house key. As he steps inside he calls, \"Hey, Laura, I'm home. How was your day?\" Laura answers from the kitchen that the science lab went well, although one student knocked over a tray. Evan laughs and says traffic was worse than usual. While they keep talking, he takes off his coat and hangs it on the hook beside the entryway. He then walks into the kitchen, still carrying his wallet, house keys, and phone, and asks Laura what she wants to do for dinner."
+      },
+      "expected_state": {
+        "household": {
+          "household_id": "HARPER-001",
+          "home_profile": {
+            "city": "Hartford",
+            "state": "Connecticut",
+            "residence_type": "single-family home",
+            "pets": [
+              "Milo the cat"
+            ],
+            "primary_vehicle": "2019 Subaru Outback",
+            "usual_weekday_dinner_time": "18:30"
+          },
+          "members": {
+            "evan_harper": {
+              "full_name": "Evan Harper",
+              "age": 36,
+              "household_role": "husband",
+              "occupation": "civil engineer",
+              "employer": "North River Engineering",
+              "work_days": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday"
+              ],
+              "phone_model": "Google Pixel 9",
+              "clothing": [
+                "white oxford shirt",
+                "charcoal wool trousers",
+                "brown leather belt",
+                "dark brown dress shoes"
+              ],
+              "carried_items": [
+                "wallet",
+                "house keys",
+                "phone"
+              ]
+            },
+            "laura_harper": {
+              "full_name": "Laura Harper",
+              "age": 35,
+              "household_role": "wife",
+              "occupation": "middle school science teacher",
+              "employer": "Riverview Middle School",
+              "phone_model": "iPhone 16",
+              "clothing": [
+                "green cardigan",
+                "black blouse",
+                "dark jeans",
+                "white sneakers"
+              ],
+              "carried_items": [
+                "phone"
+              ]
+            }
+          },
+          "relationship": {
+            "marital_status": "married",
+            "anniversary_month": "June"
+          }
+        }
+      },
+      "state_presentation": "indexed_arrays"
+    },
+    "variant": {
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+          "output": {
+            "type": "text"
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "json_patch",
+        "required_ops": [
+          "remove"
+        ]
+      },
+      "state_presentation": "raw_json",
+      "prompt_style": "conversational_v2"
+    }
+  },
+  "aliases": [
+    {
+      "test_id": "household_coat_remove_002",
+      "variant_id": "direct_json_patch__raw_json",
+      "repetition": 0,
+      "requested_id": "5bead59be958888ddd81e8a425a120b73c59f9f286b14ea35e35ed6b124aa13a",
+      "requested_definition": {
+        "test": {
+          "schema_version": 2,
+          "id": "household_coat_remove_002",
+          "provenance": {
+            "scenario": "Synthetic household state and conversation",
+            "note": "All people, employers, household details, and events are fictional benchmark data."
+          },
+          "workflow": "steps",
+          "source": {
+            "initial_state": {
+              "household": {
+                "household_id": "HARPER-001",
+                "home_profile": {
+                  "city": "Hartford",
+                  "state": "Connecticut",
+                  "residence_type": "single-family home",
+                  "pets": [
+                    "Milo the cat"
+                  ],
+                  "primary_vehicle": "2019 Subaru Outback",
+                  "usual_weekday_dinner_time": "18:30"
+                },
+                "members": {
+                  "evan_harper": {
+                    "full_name": "Evan Harper",
+                    "age": 36,
+                    "household_role": "husband",
+                    "occupation": "civil engineer",
+                    "employer": "North River Engineering",
+                    "work_days": [
+                      "Monday",
+                      "Tuesday",
+                      "Wednesday",
+                      "Thursday",
+                      "Friday"
+                    ],
+                    "phone_model": "Google Pixel 9",
+                    "clothing": [
+                      "white oxford shirt",
+                      "charcoal wool trousers",
+                      "brown leather belt",
+                      "dark brown dress shoes",
+                      "brown leather coat"
+                    ],
+                    "carried_items": [
+                      "wallet",
+                      "house keys",
+                      "phone"
+                    ]
+                  },
+                  "laura_harper": {
+                    "full_name": "Laura Harper",
+                    "age": 35,
+                    "household_role": "wife",
+                    "occupation": "middle school science teacher",
+                    "employer": "Riverview Middle School",
+                    "phone_model": "iPhone 16",
+                    "clothing": [
+                      "green cardigan",
+                      "black blouse",
+                      "dark jeans",
+                      "white sneakers"
+                    ],
+                    "carried_items": [
+                      "phone"
+                    ]
+                  }
+                },
+                "relationship": {
+                  "marital_status": "married",
+                  "anniversary_month": "June"
+                }
+              }
+            },
+            "new_information": "Evan Harper gets home from work and unlocks the front door with his house key. As he steps inside he calls, \"Hey, Laura, I'm home. How was your day?\" Laura answers from the kitchen that the science lab went well, although one student knocked over a tray. Evan laughs and says traffic was worse than usual. While they keep talking, he takes off his coat and hangs it on the hook beside the entryway. He then walks into the kitchen, still carrying his wallet, house keys, and phone, and asks Laura what she wants to do for dinner."
+          },
+          "expected_state": {
+            "household": {
+              "household_id": "HARPER-001",
+              "home_profile": {
+                "city": "Hartford",
+                "state": "Connecticut",
+                "residence_type": "single-family home",
+                "pets": [
+                  "Milo the cat"
+                ],
+                "primary_vehicle": "2019 Subaru Outback",
+                "usual_weekday_dinner_time": "18:30"
+              },
+              "members": {
+                "evan_harper": {
+                  "full_name": "Evan Harper",
+                  "age": 36,
+                  "household_role": "husband",
+                  "occupation": "civil engineer",
+                  "employer": "North River Engineering",
+                  "work_days": [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday"
+                  ],
+                  "phone_model": "Google Pixel 9",
+                  "clothing": [
+                    "white oxford shirt",
+                    "charcoal wool trousers",
+                    "brown leather belt",
+                    "dark brown dress shoes"
+                  ],
+                  "carried_items": [
+                    "wallet",
+                    "house keys",
+                    "phone"
+                  ]
+                },
+                "laura_harper": {
+                  "full_name": "Laura Harper",
+                  "age": 35,
+                  "household_role": "wife",
+                  "occupation": "middle school science teacher",
+                  "employer": "Riverview Middle School",
+                  "phone_model": "iPhone 16",
+                  "clothing": [
+                    "green cardigan",
+                    "black blouse",
+                    "dark jeans",
+                    "white sneakers"
+                  ],
+                  "carried_items": [
+                    "phone"
+                  ]
+                }
+              },
+              "relationship": {
+                "marital_status": "married",
+                "anniversary_month": "June"
+              }
+            }
+          },
+          "state_presentation": "indexed_arrays"
+        },
+        "variant": {
+          "id": "direct_json_patch__raw_json",
+          "cache": "default",
+          "steps": [
+            {
+              "id": "patch",
+              "type": "generate",
+              "prompt": "Return only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+              "output": {
+                "type": "text"
+              },
+              "sampling": {
+                "temperature": 0,
+                "top_p": 1,
+                "seed": 42
+              }
+            }
+          ],
+          "result": {
+            "step": "patch",
+            "representation": "json_patch",
+            "required_ops": [
+              "remove"
+            ]
+          },
+          "state_presentation": "raw_json"
+        }
+      },
+      "requested_timeout_seconds": 120,
+      "observation_id": "4dfd616f3225b6c06ecb119318d7a26f5294cb85a055da00537abb1807356002",
+      "collapsed_dimensions": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "seed",
+        "repeat_penalty",
+        "cache",
+        "cache_verification",
+        "constrained_decoding",
+        "context_allocation",
+        "gpu_placement",
+        "remote_model_identity",
+        "token_timings"
+      ]
+    }
+  ],
+  "selected_aliases": [
+    "5bead59be958888ddd81e8a425a120b73c59f9f286b14ea35e35ed6b124aa13a"
+  ],
+  "capability_policy": {
+    "provider": "Perchance Text Generator",
+    "policy": "perchance-capability-baseline-v1",
+    "worker_url": "https://perchance.org/056uh2nc6k",
+    "epoch": "1",
+    "adapter_hash": "5d9c66643a60542ac665cd45a6dc216d1517cc23c21a2edba78a7c69b03a3730",
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "remote_model": null,
+    "capability_evidence": {
+      "reviewed": "2026-10-01",
+      "source": "tools/perchance-text/worker.js",
+      "reason": "Worker forwards instruction/startWith/hideStartWith/stopSequences/onChunk only; no verified experimental controls"
+    },
+    "capabilities": {
+      "temperature": "unavailable_in_adapter",
+      "top_p": "unavailable_in_adapter",
+      "top_k": "unavailable_in_adapter",
+      "min_p": "unavailable_in_adapter",
+      "seed": "unavailable_in_adapter",
+      "repeat_penalty": "unavailable_in_adapter",
+      "cache": "unavailable_in_adapter",
+      "cache_verification": "unavailable_in_adapter",
+      "constrained_decoding": "unavailable_in_adapter",
+      "context_allocation": "unavailable_in_adapter",
+      "gpu_placement": "unavailable_in_adapter",
+      "remote_model_identity": "unavailable_in_adapter",
+      "token_timings": "unavailable_in_adapter"
+    }
+  },
+  "artifact_identity": {
+    "provider": "Perchance Text Generator",
+    "policy": "perchance-capability-baseline-v1",
+    "worker_url": "https://perchance.org/056uh2nc6k",
+    "epoch": "1",
+    "adapter_hash": "5d9c66643a60542ac665cd45a6dc216d1517cc23c21a2edba78a7c69b03a3730",
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "remote_model": null,
+    "capability_evidence": {
+      "reviewed": "2026-10-01",
+      "source": "tools/perchance-text/worker.js",
+      "reason": "Worker forwards instruction/startWith/hideStartWith/stopSequences/onChunk only; no verified experimental controls"
+    },
+    "capabilities": {
+      "temperature": "unavailable_in_adapter",
+      "top_p": "unavailable_in_adapter",
+      "top_k": "unavailable_in_adapter",
+      "min_p": "unavailable_in_adapter",
+      "seed": "unavailable_in_adapter",
+      "repeat_penalty": "unavailable_in_adapter",
+      "cache": "unavailable_in_adapter",
+      "cache_verification": "unavailable_in_adapter",
+      "constrained_decoding": "unavailable_in_adapter",
+      "context_allocation": "unavailable_in_adapter",
+      "gpu_placement": "unavailable_in_adapter",
+      "remote_model_identity": "unavailable_in_adapter",
+      "token_timings": "unavailable_in_adapter"
+    }
+  },
+  "execution_class": "remote_service",
+  "simulated": false,
+  "valid_for_full_gpu_comparison": false,
+  "policy": "perchance-capability-baseline-v1",
+  "load": {
+    "environment": {
+      "version": "rpg-perchance-worker-v1",
+      "ready": true,
+      "frameUrl": "https://ced2311a27f6c6944ef5e0ac74e1176e.perchance.org/056uh2nc6k",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+      "remoteModel": null,
+      "appliedSampling": null,
+      "cacheControl": null,
+      "browser_connection": "normal-browser-cdp-v1",
+      "browser_visible": true,
+      "readiness_scope": "plugin_availability_only",
+      "connection_code_hash": "9c1227199413ef87dea16c819832165f0fc7595d2869a2e374c866ef8c414b84"
+    },
+    "context": {},
+    "placement": {}
+  },
+  "timeout_seconds": 300,
+  "started_at": "2026-10-08T16:57:41.218280+00:00",
+  "provenance": {
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "provider": "perchance",
+    "remote_model": null
+  },
+  "calls": [
+    {
+      "step": "patch",
+      "iteration": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You help update an existing JSON state when new information is provided."
+        },
+        {
+          "role": "user",
+          "content": "I need you to write a JSON Patch to update the existing state with the new information.\n\nCurrent State:\n{\n  \"household\": {\n    \"household_id\": \"HARPER-001\",\n    \"home_profile\": {\n      \"city\": \"Hartford\",\n      \"state\": \"Connecticut\",\n      \"residence_type\": \"single-family home\",\n      \"pets\": [\n        \"Milo the cat\"\n      ],\n      \"primary_vehicle\": \"2019 Subaru Outback\",\n      \"usual_weekday_dinner_time\": \"18:30\"\n    },\n    \"members\": {\n      \"evan_harper\": {\n        \"full_name\": \"Evan Harper\",\n        \"age\": 36,\n        \"household_role\": \"husband\",\n        \"occupation\": \"civil engineer\",\n        \"employer\": \"North River Engineering\",\n        \"work_days\": [\n          \"Monday\",\n          \"Tuesday\",\n          \"Wednesday\",\n          \"Thursday\",\n          \"Friday\"\n        ],\n        \"phone_model\": \"Google Pixel 9\",\n        \"clothing\": [\n          \"white oxford shirt\",\n          \"charcoal wool trousers\",\n          \"brown leather belt\",\n          \"dark brown dress shoes\",\n          \"brown leather coat\"\n        ],\n        \"carried_items\": [\n          \"wallet\",\n          \"house keys\",\n          \"phone\"\n        ]\n      },\n      \"laura_harper\": {\n        \"full_name\": \"Laura Harper\",\n        \"age\": 35,\n        \"household_role\": \"wife\",\n        \"occupation\": \"middle school science teacher\",\n        \"employer\": \"Riverview Middle School\",\n        \"phone_model\": \"iPhone 16\",\n        \"clothing\": [\n          \"green cardigan\",\n          \"black blouse\",\n          \"dark jeans\",\n          \"white sneakers\"\n        ],\n        \"carried_items\": [\n          \"phone\"\n        ]\n      }\n    },\n    \"relationship\": {\n      \"marital_status\": \"married\",\n      \"anniversary_month\": \"June\"\n    }\n  }\n}\n\nNew Information:\nEvan Harper gets home from work and unlocks the front door with his house key. As he steps inside he calls, \"Hey, Laura, I'm home. How was your day?\" Laura answers from the kitchen that the science lab went well, although one student knocked over a tray. Evan laughs and says traffic was worse than usual. While they keep talking, he takes off his coat and hangs it on the hook beside the entryway. He then walks into the kitchen, still carrying his wallet, house keys, and phone, and asks Laura what she wants to do for dinner.\n\nReturn only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown."
+        }
+      ],
+      "text": "[\n  {\n    \"op\": \"remove\",\n    \"path\": \"/household/members/evan_harper/clothing/4\"\n  }\n]",
+      "finish_reason": "provider_completed",
+      "request_seconds": 3.6003386999946088,
+      "first_visible_text_seconds": 1.2033650000095368,
+      "first_token_seconds": null,
+      "usage": {},
+      "timings": {},
+      "cached_tokens": null,
+      "raw_chunks": [
+        {
+          "text": "[",
+          "isFromStartWith": false,
+          "elapsedMs": 1203.3650000095367
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1203.425000011921
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 1203.4599999785423
+        },
+        {
+          "text": "{",
+          "isFromStartWith": false,
+          "elapsedMs": 1203.4850000143051
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1203.5049999952316
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 1203.5300000309944
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 1203.5649999976158
+        },
+        {
+          "text": "op",
+          "isFromStartWith": false,
+          "elapsedMs": 1203.5849999785423
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 1473.2350000143051
+        },
+        {
+          "text": " \"",
+          "isFromStartWith": false,
+          "elapsedMs": 1473.2900000214577
+        },
+        {
+          "text": "remove",
+          "isFromStartWith": false,
+          "elapsedMs": 1473.3349999785423
+        },
+        {
+          "text": "\",",
+          "isFromStartWith": false,
+          "elapsedMs": 1473.3799999952316
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2025.675000011921
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 2025.7200000286102
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 2025.7450000047684
+        },
+        {
+          "text": "path",
+          "isFromStartWith": false,
+          "elapsedMs": 2025.7649999856949
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 2025.785000026226
+        },
+        {
+          "text": " \"/",
+          "isFromStartWith": false,
+          "elapsedMs": 2025.8050000071526
+        },
+        {
+          "text": "household",
+          "isFromStartWith": false,
+          "elapsedMs": 2025.8299999833107
+        },
+        {
+          "text": "/",
+          "isFromStartWith": false,
+          "elapsedMs": 2025.8500000238419
+        },
+        {
+          "text": "members",
+          "isFromStartWith": false,
+          "elapsedMs": 2606.175000011921
+        },
+        {
+          "text": "/",
+          "isFromStartWith": false,
+          "elapsedMs": 2606.214999973774
+        },
+        {
+          "text": "evan",
+          "isFromStartWith": false,
+          "elapsedMs": 2606.2400000095367
+        },
+        {
+          "text": "_",
+          "isFromStartWith": false,
+          "elapsedMs": 2606.274999976158
+        },
+        {
+          "text": "har",
+          "isFromStartWith": false,
+          "elapsedMs": 2606.314999997616
+        },
+        {
+          "text": "per",
+          "isFromStartWith": false,
+          "elapsedMs": 2606.3450000286102
+        },
+        {
+          "text": "/",
+          "isFromStartWith": false,
+          "elapsedMs": 3123.2099999785423
+        },
+        {
+          "text": "clothing",
+          "isFromStartWith": false,
+          "elapsedMs": 3123.2599999904633
+        },
+        {
+          "text": "/",
+          "isFromStartWith": false,
+          "elapsedMs": 3123.314999997616
+        },
+        {
+          "text": "4",
+          "isFromStartWith": false,
+          "elapsedMs": 3123.3550000190735
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 3123.3949999809265
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 3539.110000014305
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 3539.1800000071526
+        },
+        {
+          "text": "}",
+          "isFromStartWith": false,
+          "elapsedMs": 3539.235000014305
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 3539.274999976158
+        },
+        {
+          "text": "]",
+          "isFromStartWith": false,
+          "elapsedMs": 3539.314999997616
+        },
+        {
+          "text": "",
+          "isFromStartWith": false,
+          "elapsedMs": 3539.3550000190735
+        }
+      ],
+      "provider_result": {
+        "id": "af7063368ed44ec398c3f8346dfc5e5b",
+        "state": "completed",
+        "text": "[\n  {\n    \"op\": \"remove\",\n    \"path\": \"/household/members/evan_harper/clothing/4\"\n  }\n]",
+        "chunks": [
+          {
+            "text": "[",
+            "isFromStartWith": false,
+            "elapsedMs": 1203.3650000095367
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1203.425000011921
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 1203.4599999785423
+          },
+          {
+            "text": "{",
+            "isFromStartWith": false,
+            "elapsedMs": 1203.4850000143051
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1203.5049999952316
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 1203.5300000309944
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 1203.5649999976158
+          },
+          {
+            "text": "op",
+            "isFromStartWith": false,
+            "elapsedMs": 1203.5849999785423
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 1473.2350000143051
+          },
+          {
+            "text": " \"",
+            "isFromStartWith": false,
+            "elapsedMs": 1473.2900000214577
+          },
+          {
+            "text": "remove",
+            "isFromStartWith": false,
+            "elapsedMs": 1473.3349999785423
+          },
+          {
+            "text": "\",",
+            "isFromStartWith": false,
+            "elapsedMs": 1473.3799999952316
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2025.675000011921
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 2025.7200000286102
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 2025.7450000047684
+          },
+          {
+            "text": "path",
+            "isFromStartWith": false,
+            "elapsedMs": 2025.7649999856949
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 2025.785000026226
+          },
+          {
+            "text": " \"/",
+            "isFromStartWith": false,
+            "elapsedMs": 2025.8050000071526
+          },
+          {
+            "text": "household",
+            "isFromStartWith": false,
+            "elapsedMs": 2025.8299999833107
+          },
+          {
+            "text": "/",
+            "isFromStartWith": false,
+            "elapsedMs": 2025.8500000238419
+          },
+          {
+            "text": "members",
+            "isFromStartWith": false,
+            "elapsedMs": 2606.175000011921
+          },
+          {
+            "text": "/",
+            "isFromStartWith": false,
+            "elapsedMs": 2606.214999973774
+          },
+          {
+            "text": "evan",
+            "isFromStartWith": false,
+            "elapsedMs": 2606.2400000095367
+          },
+          {
+            "text": "_",
+            "isFromStartWith": false,
+            "elapsedMs": 2606.274999976158
+          },
+          {
+            "text": "har",
+            "isFromStartWith": false,
+            "elapsedMs": 2606.314999997616
+          },
+          {
+            "text": "per",
+            "isFromStartWith": false,
+            "elapsedMs": 2606.3450000286102
+          },
+          {
+            "text": "/",
+            "isFromStartWith": false,
+            "elapsedMs": 3123.2099999785423
+          },
+          {
+            "text": "clothing",
+            "isFromStartWith": false,
+            "elapsedMs": 3123.2599999904633
+          },
+          {
+            "text": "/",
+            "isFromStartWith": false,
+            "elapsedMs": 3123.314999997616
+          },
+          {
+            "text": "4",
+            "isFromStartWith": false,
+            "elapsedMs": 3123.3550000190735
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 3123.3949999809265
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 3539.110000014305
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 3539.1800000071526
+          },
+          {
+            "text": "}",
+            "isFromStartWith": false,
+            "elapsedMs": 3539.235000014305
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 3539.274999976158
+          },
+          {
+            "text": "]",
+            "isFromStartWith": false,
+            "elapsedMs": 3539.314999997616
+          },
+          {
+            "text": "",
+            "isFromStartWith": false,
+            "elapsedMs": 3539.3550000190735
+          }
+        ],
+        "rawResult": "[\n  {\n    \"op\": \"remove\",\n    \"path\": \"/household/members/evan_harper/clothing/4\"\n  }\n]",
+        "stopReason": "natural",
+        "error": null,
+        "elapsedMs": 3595.9599999785423,
+        "firstVisibleMs": 1203.3650000095367
+      },
+      "effective_instruction": "SYSTEM:\nYou help update an existing JSON state when new information is provided.\n\nUSER:\nI need you to write a JSON Patch to update the existing state with the new information.\n\nCurrent State:\n{\n  \"household\": {\n    \"household_id\": \"HARPER-001\",\n    \"home_profile\": {\n      \"city\": \"Hartford\",\n      \"state\": \"Connecticut\",\n      \"residence_type\": \"single-family home\",\n      \"pets\": [\n        \"Milo the cat\"\n      ],\n      \"primary_vehicle\": \"2019 Subaru Outback\",\n      \"usual_weekday_dinner_time\": \"18:30\"\n    },\n    \"members\": {\n      \"evan_harper\": {\n        \"full_name\": \"Evan Harper\",\n        \"age\": 36,\n        \"household_role\": \"husband\",\n        \"occupation\": \"civil engineer\",\n        \"employer\": \"North River Engineering\",\n        \"work_days\": [\n          \"Monday\",\n          \"Tuesday\",\n          \"Wednesday\",\n          \"Thursday\",\n          \"Friday\"\n        ],\n        \"phone_model\": \"Google Pixel 9\",\n        \"clothing\": [\n          \"white oxford shirt\",\n          \"charcoal wool trousers\",\n          \"brown leather belt\",\n          \"dark brown dress shoes\",\n          \"brown leather coat\"\n        ],\n        \"carried_items\": [\n          \"wallet\",\n          \"house keys\",\n          \"phone\"\n        ]\n      },\n      \"laura_harper\": {\n        \"full_name\": \"Laura Harper\",\n        \"age\": 35,\n        \"household_role\": \"wife\",\n        \"occupation\": \"middle school science teacher\",\n        \"employer\": \"Riverview Middle School\",\n        \"phone_model\": \"iPhone 16\",\n        \"clothing\": [\n          \"green cardigan\",\n          \"black blouse\",\n          \"dark jeans\",\n          \"white sneakers\"\n        ],\n        \"carried_items\": [\n          \"phone\"\n        ]\n      }\n    },\n    \"relationship\": {\n      \"marital_status\": \"married\",\n      \"anniversary_month\": \"June\"\n    }\n  }\n}\n\nNew Information:\nEvan Harper gets home from work and unlocks the front door with his house key. As he steps inside he calls, \"Hey, Laura, I'm home. How was your day?\" Laura answers from the kitchen that the science lab went well, although one student knocked over a tray. Evan laughs and says traffic was worse than usual. While they keep talking, he takes off his coat and hangs it on the hook beside the entryway. He then walks into the kitchen, still carrying his wallet, house keys, and phone, and asks Laura what she wants to do for dinner.\n\nReturn only an RFC 6902 JSON Patch array containing exactly the changes established by the new information. Preserve every field that was not changed. Use JSON Pointer paths. To append an array item use add and /- at the end of the path. No markdown.",
+      "serializer_version": "role-labels-v1",
+      "requested_sampling": {
+        "temperature": 0,
+        "top_p": 1,
+        "top_k": 0,
+        "min_p": 0,
+        "seed": 42
+      },
+      "sampling": null,
+      "applied_sampling": null,
+      "schema_requested": null,
+      "constrained_decoding": false,
+      "environment": {
+        "version": "rpg-perchance-worker-v1",
+        "ready": true,
+        "frameUrl": "https://ced2311a27f6c6944ef5e0ac74e1176e.perchance.org/056uh2nc6k",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+        "remoteModel": null,
+        "appliedSampling": null,
+        "cacheControl": null,
+        "browser_connection": "normal-browser-cdp-v1",
+        "browser_visible": true,
+        "readiness_scope": "plugin_availability_only",
+        "connection_code_hash": "9c1227199413ef87dea16c819832165f0fc7595d2869a2e374c866ef8c414b84"
+      }
+    }
+  ],
+  "outputs": {
+    "patch": "[\n  {\n    \"op\": \"remove\",\n    \"path\": \"/household/members/evan_harper/clothing/4\"\n  }\n]"
+  },
+  "step_events": [
+    {
+      "step": "patch",
+      "status": "completed",
+      "iteration": 0
+    }
+  ],
+  "pipeline_seconds": 3.600605999934487,
+  "score": {
+    "valid": true,
+    "exact_match": true,
+    "actual_state": {
+      "household": {
+        "household_id": "HARPER-001",
+        "home_profile": {
+          "city": "Hartford",
+          "state": "Connecticut",
+          "residence_type": "single-family home",
+          "pets": [
+            "Milo the cat"
+          ],
+          "primary_vehicle": "2019 Subaru Outback",
+          "usual_weekday_dinner_time": "18:30"
+        },
+        "members": {
+          "evan_harper": {
+            "full_name": "Evan Harper",
+            "age": 36,
+            "household_role": "husband",
+            "occupation": "civil engineer",
+            "employer": "North River Engineering",
+            "work_days": [
+              "Monday",
+              "Tuesday",
+              "Wednesday",
+              "Thursday",
+              "Friday"
+            ],
+            "phone_model": "Google Pixel 9",
+            "clothing": [
+              "white oxford shirt",
+              "charcoal wool trousers",
+              "brown leather belt",
+              "dark brown dress shoes"
+            ],
+            "carried_items": [
+              "wallet",
+              "house keys",
+              "phone"
+            ]
+          },
+          "laura_harper": {
+            "full_name": "Laura Harper",
+            "age": 35,
+            "household_role": "wife",
+            "occupation": "middle school science teacher",
+            "employer": "Riverview Middle School",
+            "phone_model": "iPhone 16",
+            "clothing": [
+              "green cardigan",
+              "black blouse",
+              "dark jeans",
+              "white sneakers"
+            ],
+            "carried_items": [
+              "phone"
+            ]
+          }
+        },
+        "relationship": {
+          "marital_status": "married",
+          "anniversary_month": "June"
+        }
+      }
+    },
+    "required_changes": 1,
+    "correct_changes": 1,
+    "missed_changes": 0,
+    "wrong_values": 0,
+    "unsupported_changes": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "state_exact_match": true,
+    "required_patch_ops": [
+      "remove"
+    ],
+    "actual_patch_ops": [
+      "remove"
+    ],
+    "patch_ops_match": true,
+    "objective_checks": []
+  },
+  "scoring_seconds": 0.0003649999853223562,
+  "cache_mode": "provider_default_unknown",
+  "cache_verified": null,
+  "measurement_valid": true,
+  "sampling_seed_policy": "unavailable; repetitions collapsed",
+  "feature_applicability": {
+    "cache_control": false,
+    "seed_control": false,
+    "constrained_decoding": false
+  },
+  "gpu_memory": null,
+  "finished_at": "2026-10-08T16:57:44.821676+00:00",
+  "sha256": "c0e047b7fce5d24008ee2771fa943124c4505fe9f1bb1053e7482d5c01f807d6"
+}

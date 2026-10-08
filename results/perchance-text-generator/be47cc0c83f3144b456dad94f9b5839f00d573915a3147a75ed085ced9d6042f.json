@@ -1,0 +1,1138 @@
+{
+  "status": "completed",
+  "case_id": "be47cc0c83f3144b456dad94f9b5839f00d573915a3147a75ed085ced9d6042f",
+  "model_id": "perchance-text-generator",
+  "model_name": "Perchance Text Generator",
+  "test_id": "time_only",
+  "variant_id": "direct_semantic",
+  "repetition": 0,
+  "target": {
+    "backend": "perchance",
+    "vram_gb": 8,
+    "gpu_name": "NVIDIA GeForce GTX 1080",
+    "os": "Windows-10-10.0.19045-SP0",
+    "execution_class": "remote_service",
+    "execution_policy": "perchance-capability-baseline-v1"
+  },
+  "test_definition": {
+    "schema_version": 2,
+    "id": "time_only",
+    "name": "Only the time changes",
+    "workflow": "steps",
+    "repetitions": 1,
+    "timeout_seconds": 300,
+    "state_presentation": "raw_json",
+    "source": {
+      "initial_state": {
+        "time": "14:15",
+        "location": "Kitchen",
+        "characters": {
+          "Tom": {
+            "location": "Kitchen",
+            "clothing": [
+              "blue shirt",
+              "jeans"
+            ],
+            "mood": "annoyed"
+          },
+          "Susie": {
+            "location": "Bedroom",
+            "clothing": [
+              "red dress"
+            ],
+            "mood": "happy"
+          }
+        },
+        "doorLocked": true,
+        "playerHasKey": false
+      },
+      "new_information": "Exactly five minutes pass."
+    },
+    "expected_state": {
+      "time": "14:20",
+      "location": "Kitchen",
+      "characters": {
+        "Tom": {
+          "location": "Kitchen",
+          "clothing": [
+            "blue shirt",
+            "jeans"
+          ],
+          "mood": "annoyed"
+        },
+        "Susie": {
+          "location": "Bedroom",
+          "clothing": [
+            "red dress"
+          ],
+          "mood": "happy"
+        }
+      },
+      "doorLocked": true,
+      "playerHasKey": false
+    },
+    "variants": [
+      {
+        "id": "direct_json_patch",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch"
+        },
+        "prompt_style": "conversational_v2"
+      },
+      {
+        "id": "analyze_json_patch",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Before writing the patch, briefly tell me what needs to change.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Now please return only the JSON Patch array.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch"
+        },
+        "prompt_style": "conversational_v2"
+      },
+      {
+        "id": "direct_semantic",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "semantic"
+        },
+        "prompt_style": "conversational_v2"
+      },
+      {
+        "id": "analyze_semantic",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Describe the established state changes concisely. Do not generate JSON yet.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown. Check the earlier analysis against the original evidence.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "semantic"
+        },
+        "prompt_style": "conversational_v2"
+      },
+      {
+        "id": "direct_json_patch__indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Please return only the JSON Patch array.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch"
+        },
+        "prompt_style": "conversational_v2",
+        "name": "direct_json_patch — Indexed-array JSON",
+        "state_presentation": "indexed_arrays"
+      },
+      {
+        "id": "analyze_json_patch__indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Before writing the patch, briefly tell me what needs to change.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Now please return only the JSON Patch array.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "json_patch"
+        },
+        "prompt_style": "conversational_v2",
+        "name": "analyze_json_patch — Indexed-array JSON",
+        "state_presentation": "indexed_arrays"
+      },
+      {
+        "id": "direct_semantic__indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "semantic"
+        },
+        "prompt_style": "conversational_v2",
+        "name": "direct_semantic — Indexed-array JSON",
+        "state_presentation": "indexed_arrays"
+      },
+      {
+        "id": "analyze_semantic__indexed_arrays",
+        "cache": "default",
+        "steps": [
+          {
+            "id": "analysis",
+            "type": "generate",
+            "prompt": "Describe the established state changes concisely. Do not generate JSON yet.",
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          },
+          {
+            "id": "patch",
+            "type": "generate",
+            "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown. Check the earlier analysis against the original evidence.",
+            "uses": [
+              "analysis"
+            ],
+            "output": {
+              "type": "text"
+            },
+            "sampling": {
+              "temperature": 0,
+              "top_p": 1,
+              "seed": 42
+            }
+          }
+        ],
+        "result": {
+          "step": "patch",
+          "representation": "semantic"
+        },
+        "prompt_style": "conversational_v2",
+        "name": "analyze_semantic — Indexed-array JSON",
+        "state_presentation": "indexed_arrays"
+      }
+    ]
+  },
+  "variant_definition": {
+    "id": "direct_semantic",
+    "cache": "default",
+    "steps": [
+      {
+        "id": "patch",
+        "type": "generate",
+        "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown.",
+        "output": {
+          "type": "text"
+        },
+        "sampling": {
+          "temperature": 0,
+          "top_p": 1,
+          "seed": 42
+        }
+      }
+    ],
+    "result": {
+      "step": "patch",
+      "representation": "semantic"
+    },
+    "prompt_style": "conversational_v2"
+  },
+  "effective_definition": {
+    "test": {
+      "schema_version": 2,
+      "workflow": "steps",
+      "state_presentation": "raw_json",
+      "source": {
+        "initial_state": {
+          "time": "14:15",
+          "location": "Kitchen",
+          "characters": {
+            "Tom": {
+              "location": "Kitchen",
+              "clothing": [
+                "blue shirt",
+                "jeans"
+              ],
+              "mood": "annoyed"
+            },
+            "Susie": {
+              "location": "Bedroom",
+              "clothing": [
+                "red dress"
+              ],
+              "mood": "happy"
+            }
+          },
+          "doorLocked": true,
+          "playerHasKey": false
+        },
+        "new_information": "Exactly five minutes pass."
+      },
+      "expected_state": {
+        "time": "14:20",
+        "location": "Kitchen",
+        "characters": {
+          "Tom": {
+            "location": "Kitchen",
+            "clothing": [
+              "blue shirt",
+              "jeans"
+            ],
+            "mood": "annoyed"
+          },
+          "Susie": {
+            "location": "Bedroom",
+            "clothing": [
+              "red dress"
+            ],
+            "mood": "happy"
+          }
+        },
+        "doorLocked": true,
+        "playerHasKey": false
+      }
+    },
+    "variant": {
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown.",
+          "output": {
+            "type": "text"
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "semantic"
+      },
+      "prompt_style": "conversational_v2",
+      "state_presentation": "raw_json"
+    }
+  },
+  "aliases": [
+    {
+      "test_id": "time_only",
+      "variant_id": "direct_semantic",
+      "repetition": 0,
+      "requested_id": "1854539a5049ecd2323a63af627c42cd094016cf9d06915a02e157e2657f28bc",
+      "requested_definition": {
+        "test": {
+          "schema_version": 2,
+          "id": "time_only",
+          "workflow": "steps",
+          "state_presentation": "raw_json",
+          "source": {
+            "initial_state": {
+              "time": "14:15",
+              "location": "Kitchen",
+              "characters": {
+                "Tom": {
+                  "location": "Kitchen",
+                  "clothing": [
+                    "blue shirt",
+                    "jeans"
+                  ],
+                  "mood": "annoyed"
+                },
+                "Susie": {
+                  "location": "Bedroom",
+                  "clothing": [
+                    "red dress"
+                  ],
+                  "mood": "happy"
+                }
+              },
+              "doorLocked": true,
+              "playerHasKey": false
+            },
+            "new_information": "Exactly five minutes pass."
+          },
+          "expected_state": {
+            "time": "14:20",
+            "location": "Kitchen",
+            "characters": {
+              "Tom": {
+                "location": "Kitchen",
+                "clothing": [
+                  "blue shirt",
+                  "jeans"
+                ],
+                "mood": "annoyed"
+              },
+              "Susie": {
+                "location": "Bedroom",
+                "clothing": [
+                  "red dress"
+                ],
+                "mood": "happy"
+              }
+            },
+            "doorLocked": true,
+            "playerHasKey": false
+          }
+        },
+        "variant": {
+          "id": "direct_semantic",
+          "cache": "default",
+          "steps": [
+            {
+              "id": "patch",
+              "type": "generate",
+              "prompt": "Return only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown.",
+              "output": {
+                "type": "text"
+              },
+              "sampling": {
+                "temperature": 0,
+                "top_p": 1,
+                "seed": 42
+              }
+            }
+          ],
+          "result": {
+            "step": "patch",
+            "representation": "semantic"
+          },
+          "prompt_style": "conversational_v2"
+        }
+      },
+      "requested_timeout_seconds": 120,
+      "observation_id": "be47cc0c83f3144b456dad94f9b5839f00d573915a3147a75ed085ced9d6042f",
+      "collapsed_dimensions": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "seed",
+        "repeat_penalty",
+        "cache",
+        "cache_verification",
+        "constrained_decoding",
+        "context_allocation",
+        "gpu_placement",
+        "remote_model_identity",
+        "token_timings"
+      ]
+    }
+  ],
+  "selected_aliases": [
+    "1854539a5049ecd2323a63af627c42cd094016cf9d06915a02e157e2657f28bc"
+  ],
+  "capability_policy": {
+    "provider": "Perchance Text Generator",
+    "policy": "perchance-capability-baseline-v1",
+    "worker_url": "https://perchance.org/056uh2nc6k",
+    "epoch": "1",
+    "adapter_hash": "5d9c66643a60542ac665cd45a6dc216d1517cc23c21a2edba78a7c69b03a3730",
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "remote_model": null,
+    "capability_evidence": {
+      "reviewed": "2026-10-01",
+      "source": "tools/perchance-text/worker.js",
+      "reason": "Worker forwards instruction/startWith/hideStartWith/stopSequences/onChunk only; no verified experimental controls"
+    },
+    "capabilities": {
+      "temperature": "unavailable_in_adapter",
+      "top_p": "unavailable_in_adapter",
+      "top_k": "unavailable_in_adapter",
+      "min_p": "unavailable_in_adapter",
+      "seed": "unavailable_in_adapter",
+      "repeat_penalty": "unavailable_in_adapter",
+      "cache": "unavailable_in_adapter",
+      "cache_verification": "unavailable_in_adapter",
+      "constrained_decoding": "unavailable_in_adapter",
+      "context_allocation": "unavailable_in_adapter",
+      "gpu_placement": "unavailable_in_adapter",
+      "remote_model_identity": "unavailable_in_adapter",
+      "token_timings": "unavailable_in_adapter"
+    }
+  },
+  "artifact_identity": {
+    "provider": "Perchance Text Generator",
+    "policy": "perchance-capability-baseline-v1",
+    "worker_url": "https://perchance.org/056uh2nc6k",
+    "epoch": "1",
+    "adapter_hash": "5d9c66643a60542ac665cd45a6dc216d1517cc23c21a2edba78a7c69b03a3730",
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "remote_model": null,
+    "capability_evidence": {
+      "reviewed": "2026-10-01",
+      "source": "tools/perchance-text/worker.js",
+      "reason": "Worker forwards instruction/startWith/hideStartWith/stopSequences/onChunk only; no verified experimental controls"
+    },
+    "capabilities": {
+      "temperature": "unavailable_in_adapter",
+      "top_p": "unavailable_in_adapter",
+      "top_k": "unavailable_in_adapter",
+      "min_p": "unavailable_in_adapter",
+      "seed": "unavailable_in_adapter",
+      "repeat_penalty": "unavailable_in_adapter",
+      "cache": "unavailable_in_adapter",
+      "cache_verification": "unavailable_in_adapter",
+      "constrained_decoding": "unavailable_in_adapter",
+      "context_allocation": "unavailable_in_adapter",
+      "gpu_placement": "unavailable_in_adapter",
+      "remote_model_identity": "unavailable_in_adapter",
+      "token_timings": "unavailable_in_adapter"
+    }
+  },
+  "execution_class": "remote_service",
+  "simulated": false,
+  "valid_for_full_gpu_comparison": false,
+  "policy": "perchance-capability-baseline-v1",
+  "load": {
+    "environment": {
+      "version": "rpg-perchance-worker-v1",
+      "ready": true,
+      "frameUrl": "https://ced2311a27f6c6944ef5e0ac74e1176e.perchance.org/056uh2nc6k",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+      "remoteModel": null,
+      "appliedSampling": null,
+      "cacheControl": null,
+      "browser_connection": "normal-browser-cdp-v1",
+      "browser_visible": true,
+      "readiness_scope": "plugin_availability_only",
+      "connection_code_hash": "9c1227199413ef87dea16c819832165f0fc7595d2869a2e374c866ef8c414b84"
+    },
+    "context": {},
+    "placement": {}
+  },
+  "timeout_seconds": 300,
+  "started_at": "2026-10-08T17:07:20.650469+00:00",
+  "provenance": {
+    "workflow_code": "56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787",
+    "provider": "perchance",
+    "remote_model": null
+  },
+  "calls": [
+    {
+      "step": "patch",
+      "iteration": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You help update an existing JSON state when new information is provided."
+        },
+        {
+          "role": "user",
+          "content": "I need you to write a small list of operations to update the existing state with the new information.\n\nCurrent State:\n{\n  \"time\": \"14:15\",\n  \"location\": \"Kitchen\",\n  \"characters\": {\n    \"Tom\": {\n      \"location\": \"Kitchen\",\n      \"clothing\": [\n        \"blue shirt\",\n        \"jeans\"\n      ],\n      \"mood\": \"annoyed\"\n    },\n    \"Susie\": {\n      \"location\": \"Bedroom\",\n      \"clothing\": [\n        \"red dress\"\n      ],\n      \"mood\": \"happy\"\n    }\n  },\n  \"doorLocked\": true,\n  \"playerHasKey\": false\n}\n\nNew Information:\nExactly five minutes pass.\n\nReturn only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown."
+        }
+      ],
+      "text": "[\n  {\n    \"op\": \"set\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]",
+      "finish_reason": "provider_completed",
+      "request_seconds": 3.362775400048122,
+      "first_visible_text_seconds": 1.6381699999570847,
+      "first_token_seconds": null,
+      "usage": {},
+      "timings": {},
+      "cached_tokens": null,
+      "raw_chunks": [
+        {
+          "text": "[",
+          "isFromStartWith": false,
+          "elapsedMs": 1638.1699999570847
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1638.2199999690056
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 1638.2549999952316
+        },
+        {
+          "text": "{",
+          "isFromStartWith": false,
+          "elapsedMs": 1638.2799999713898
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 1638.3050000071526
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 2152.7999999523163
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 2152.8599999547005
+        },
+        {
+          "text": "op",
+          "isFromStartWith": false,
+          "elapsedMs": 2152.9049999713898
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 2152.949999988079
+        },
+        {
+          "text": " \"",
+          "isFromStartWith": false,
+          "elapsedMs": 2152.989999949932
+        },
+        {
+          "text": "set",
+          "isFromStartWith": false,
+          "elapsedMs": 2685.5299999713898
+        },
+        {
+          "text": "\",",
+          "isFromStartWith": false,
+          "elapsedMs": 2685.5849999785423
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 2685.6200000047684
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 2685.664999961853
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 2685.699999988079
+        },
+        {
+          "text": "path",
+          "isFromStartWith": false,
+          "elapsedMs": 2685.7349999547005
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 2685.7699999809265
+        },
+        {
+          "text": " \"/",
+          "isFromStartWith": false,
+          "elapsedMs": 2685.8050000071526
+        },
+        {
+          "text": "time",
+          "isFromStartWith": false,
+          "elapsedMs": 3217.9099999666214
+        },
+        {
+          "text": "\",",
+          "isFromStartWith": false,
+          "elapsedMs": 3217.9699999690056
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 3218
+        },
+        {
+          "text": "    ",
+          "isFromStartWith": false,
+          "elapsedMs": 3218.0349999666214
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 3218.060000002384
+        },
+        {
+          "text": "value",
+          "isFromStartWith": false,
+          "elapsedMs": 3218.0799999833107
+        },
+        {
+          "text": "\":",
+          "isFromStartWith": false,
+          "elapsedMs": 3218.1099999547005
+        },
+        {
+          "text": " \"",
+          "isFromStartWith": false,
+          "elapsedMs": 3218.1299999952316
+        },
+        {
+          "text": "1",
+          "isFromStartWith": false,
+          "elapsedMs": 3218.149999976158
+        },
+        {
+          "text": "4",
+          "isFromStartWith": false,
+          "elapsedMs": 3218.1699999570847
+        },
+        {
+          "text": ":",
+          "isFromStartWith": false,
+          "elapsedMs": 3218.189999997616
+        },
+        {
+          "text": "2",
+          "isFromStartWith": false,
+          "elapsedMs": 3348.764999985695
+        },
+        {
+          "text": "0",
+          "isFromStartWith": false,
+          "elapsedMs": 3348.8299999833107
+        },
+        {
+          "text": "\"",
+          "isFromStartWith": false,
+          "elapsedMs": 3348.875
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 3348.914999961853
+        },
+        {
+          "text": "  ",
+          "isFromStartWith": false,
+          "elapsedMs": 3348.9549999833107
+        },
+        {
+          "text": "}",
+          "isFromStartWith": false,
+          "elapsedMs": 3348.9950000047684
+        },
+        {
+          "text": "\n",
+          "isFromStartWith": false,
+          "elapsedMs": 3349.039999961853
+        },
+        {
+          "text": "]",
+          "isFromStartWith": false,
+          "elapsedMs": 3349.074999988079
+        },
+        {
+          "text": "",
+          "isFromStartWith": false,
+          "elapsedMs": 3349.1099999547005
+        }
+      ],
+      "provider_result": {
+        "id": "a03b5c7c68e043afa1475e3973746220",
+        "state": "completed",
+        "text": "[\n  {\n    \"op\": \"set\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]",
+        "chunks": [
+          {
+            "text": "[",
+            "isFromStartWith": false,
+            "elapsedMs": 1638.1699999570847
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1638.2199999690056
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 1638.2549999952316
+          },
+          {
+            "text": "{",
+            "isFromStartWith": false,
+            "elapsedMs": 1638.2799999713898
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 1638.3050000071526
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 2152.7999999523163
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 2152.8599999547005
+          },
+          {
+            "text": "op",
+            "isFromStartWith": false,
+            "elapsedMs": 2152.9049999713898
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 2152.949999988079
+          },
+          {
+            "text": " \"",
+            "isFromStartWith": false,
+            "elapsedMs": 2152.989999949932
+          },
+          {
+            "text": "set",
+            "isFromStartWith": false,
+            "elapsedMs": 2685.5299999713898
+          },
+          {
+            "text": "\",",
+            "isFromStartWith": false,
+            "elapsedMs": 2685.5849999785423
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 2685.6200000047684
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 2685.664999961853
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 2685.699999988079
+          },
+          {
+            "text": "path",
+            "isFromStartWith": false,
+            "elapsedMs": 2685.7349999547005
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 2685.7699999809265
+          },
+          {
+            "text": " \"/",
+            "isFromStartWith": false,
+            "elapsedMs": 2685.8050000071526
+          },
+          {
+            "text": "time",
+            "isFromStartWith": false,
+            "elapsedMs": 3217.9099999666214
+          },
+          {
+            "text": "\",",
+            "isFromStartWith": false,
+            "elapsedMs": 3217.9699999690056
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 3218
+          },
+          {
+            "text": "    ",
+            "isFromStartWith": false,
+            "elapsedMs": 3218.0349999666214
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 3218.060000002384
+          },
+          {
+            "text": "value",
+            "isFromStartWith": false,
+            "elapsedMs": 3218.0799999833107
+          },
+          {
+            "text": "\":",
+            "isFromStartWith": false,
+            "elapsedMs": 3218.1099999547005
+          },
+          {
+            "text": " \"",
+            "isFromStartWith": false,
+            "elapsedMs": 3218.1299999952316
+          },
+          {
+            "text": "1",
+            "isFromStartWith": false,
+            "elapsedMs": 3218.149999976158
+          },
+          {
+            "text": "4",
+            "isFromStartWith": false,
+            "elapsedMs": 3218.1699999570847
+          },
+          {
+            "text": ":",
+            "isFromStartWith": false,
+            "elapsedMs": 3218.189999997616
+          },
+          {
+            "text": "2",
+            "isFromStartWith": false,
+            "elapsedMs": 3348.764999985695
+          },
+          {
+            "text": "0",
+            "isFromStartWith": false,
+            "elapsedMs": 3348.8299999833107
+          },
+          {
+            "text": "\"",
+            "isFromStartWith": false,
+            "elapsedMs": 3348.875
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 3348.914999961853
+          },
+          {
+            "text": "  ",
+            "isFromStartWith": false,
+            "elapsedMs": 3348.9549999833107
+          },
+          {
+            "text": "}",
+            "isFromStartWith": false,
+            "elapsedMs": 3348.9950000047684
+          },
+          {
+            "text": "\n",
+            "isFromStartWith": false,
+            "elapsedMs": 3349.039999961853
+          },
+          {
+            "text": "]",
+            "isFromStartWith": false,
+            "elapsedMs": 3349.074999988079
+          },
+          {
+            "text": "",
+            "isFromStartWith": false,
+            "elapsedMs": 3349.1099999547005
+          }
+        ],
+        "rawResult": "[\n  {\n    \"op\": \"set\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]",
+        "stopReason": "natural",
+        "error": null,
+        "elapsedMs": 3358.699999988079,
+        "firstVisibleMs": 1638.1699999570847
+      },
+      "effective_instruction": "SYSTEM:\nYou help update an existing JSON state when new information is provided.\n\nUSER:\nI need you to write a small list of operations to update the existing state with the new information.\n\nCurrent State:\n{\n  \"time\": \"14:15\",\n  \"location\": \"Kitchen\",\n  \"characters\": {\n    \"Tom\": {\n      \"location\": \"Kitchen\",\n      \"clothing\": [\n        \"blue shirt\",\n        \"jeans\"\n      ],\n      \"mood\": \"annoyed\"\n    },\n    \"Susie\": {\n      \"location\": \"Bedroom\",\n      \"clothing\": [\n        \"red dress\"\n      ],\n      \"mood\": \"happy\"\n    }\n  },\n  \"doorLocked\": true,\n  \"playerHasKey\": false\n}\n\nNew Information:\nExactly five minutes pass.\n\nReturn only a JSON array of semantic operations. Each operation has op, path, value. Use JSON Pointer paths. set replaces an existing value; list_add appends one value; list_remove removes one uniquely matching value. No markdown.",
+      "serializer_version": "role-labels-v1",
+      "requested_sampling": {
+        "temperature": 0,
+        "top_p": 1,
+        "top_k": 0,
+        "min_p": 0,
+        "seed": 42
+      },
+      "sampling": null,
+      "applied_sampling": null,
+      "schema_requested": null,
+      "constrained_decoding": false,
+      "environment": {
+        "version": "rpg-perchance-worker-v1",
+        "ready": true,
+        "frameUrl": "https://ced2311a27f6c6944ef5e0ac74e1176e.perchance.org/056uh2nc6k",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+        "remoteModel": null,
+        "appliedSampling": null,
+        "cacheControl": null,
+        "browser_connection": "normal-browser-cdp-v1",
+        "browser_visible": true,
+        "readiness_scope": "plugin_availability_only",
+        "connection_code_hash": "9c1227199413ef87dea16c819832165f0fc7595d2869a2e374c866ef8c414b84"
+      }
+    }
+  ],
+  "outputs": {
+    "patch": "[\n  {\n    \"op\": \"set\",\n    \"path\": \"/time\",\n    \"value\": \"14:20\"\n  }\n]"
+  },
+  "step_events": [
+    {
+      "step": "patch",
+      "status": "completed",
+      "iteration": 0
+    }
+  ],
+  "pipeline_seconds": 3.362922400003299,
+  "score": {
+    "valid": true,
+    "exact_match": true,
+    "actual_state": {
+      "time": "14:20",
+      "location": "Kitchen",
+      "characters": {
+        "Tom": {
+          "location": "Kitchen",
+          "clothing": [
+            "blue shirt",
+            "jeans"
+          ],
+          "mood": "annoyed"
+        },
+        "Susie": {
+          "location": "Bedroom",
+          "clothing": [
+            "red dress"
+          ],
+          "mood": "happy"
+        }
+      },
+      "doorLocked": true,
+      "playerHasKey": false
+    },
+    "required_changes": 1,
+    "correct_changes": 1,
+    "missed_changes": 0,
+    "wrong_values": 0,
+    "unsupported_changes": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "objective_checks": []
+  },
+  "scoring_seconds": 0.00018360000103712082,
+  "cache_mode": "provider_default_unknown",
+  "cache_verified": null,
+  "measurement_valid": true,
+  "sampling_seed_policy": "unavailable; repetitions collapsed",
+  "feature_applicability": {
+    "cache_control": false,
+    "seed_control": false,
+    "constrained_decoding": false
+  },
+  "gpu_memory": null,
+  "finished_at": "2026-10-08T17:07:24.015577+00:00",
+  "sha256": "5edb9ae9de5c9a861158aef084e5daa187bddb1fe44318fea88eeb88a89c8fb1"
+}
