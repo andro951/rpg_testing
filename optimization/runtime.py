@@ -77,9 +77,9 @@ class GeneratorBackend(NativeBackend):
         text = self.transport.request('/apply-template', {'messages': effective})['prompt']
         return len(self.transport.request('/tokenize', {'content': text, 'add_special': True})['tokens'])
 
-    def propose(self, messages, sampling, reserve, cancel):
+    def propose(self, messages, sampling, output_limit, cancel):
         effective, adaptation = _template_compatible_messages(messages, self.load_metadata.get('properties', {}))
-        body = {'model': self.owned_id, 'messages': effective, **sampling, 'max_tokens': reserve,
+        body = {'model': self.owned_id, 'messages': effective, **sampling, 'max_tokens': output_limit,
                 'stream': True, 'stream_options': {'include_usage': True}, 'cache_prompt': False, 'id_slot': 0}
         result = self.transport.request('/v1/chat/completions', body, stream=True, cancel=cancel)
         return {**result, 'request_messages': effective, 'message_adaptation': adaptation}

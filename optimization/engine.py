@@ -12,20 +12,24 @@ from evaluation.core import assess_record
 from .storage import Store
 from .templates import LABELS, freeze, parse_candidate, projection
 from .runtime import Runtime, discover
+from .token_budget import plan as token_plan, round_context
+from workbench.execution_policy import DoesNotFit
 
 DEFAULTS = {'max_attempts': 20, 'temperature_min': .5, 'temperature_max': .9,
-            'reasoning': False, 'context_tokens': 32768, 'output_reserve': 4096}
+            'reasoning': False}
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def settings(value):
+def settings(value, allow_legacy=False):
+    if allow_legacy and isinstance(value, dict):
+        value = {key: val for key, val in value.items() if key not in ('context_tokens', 'output_reserve')}
     if not isinstance(value, dict) or set(value) - set(DEFAULTS):
         raise ValueError('Unknown optimization setting')
     result = {**DEFAULTS, **value}
-    for key, lo, hi in (('max_attempts', 1, 10000), ('context_tokens', 1024, 1048576), ('output_reserve', 256, 131072)):
+    for key, lo, hi in (('max_attempts', 1, 10000),):
         if type(result[key]) is not int or not lo <= result[key] <= hi:
             raise ValueError('Invalid ' + key)
     for key in ('temperature_min', 'temperature_max'):
@@ -35,8 +39,6 @@ def settings(value):
         raise ValueError('Minimum temperature exceeds maximum.')
     if type(result['reasoning']) is not bool:
         raise ValueError('Reasoning must be a boolean.')
-    if result['output_reserve'] >= result['context_tokens']:
-        raise ValueError('Output reserve must be smaller than context.')
     return result
 
 
@@ -175,9 +177,9 @@ def packet_messages(session, packet):
             {'role': 'user', 'content': session['optimizer_user'].replace('{{optimization_packet_json}}', json.dumps(packet, ensure_ascii=False, indent=2))}]
 
 
-def fit_packet(session, packet, token_count):
+def fit_packet(session, packet, token_count, limits):
     packet = copy.deepcopy(packet)
-    context, reserve = session['settings']['context_tokens'], session['settings']['output_reserve']
+    context, reserve = limits['context_tokens'], limits['output_reserve']
     removable = prune_order(packet['history'])
     while True:
         messages = packet_messages(session, packet)
@@ -186,10 +188,46 @@ def fit_packet(session, packet, token_count):
             return messages, {'input_tokens': count, 'output_reserve': reserve, 'context_tokens': context,
                               'pruned_attempts': packet['pruned_attempts']}
         if not removable:
-            raise ValueError('Protected contract, baseline and top-three summaries exceed the generator context. Increase context explicitly; nothing was truncated.')
+            raise ValueError('Protected contract, baseline and top-three summaries exceed the generator context that fits this model/GPU. Nothing was truncated; use a generator with more capacity.')
         remove = removable.pop(0)
         packet['history'] = [a for a in packet['history'] if a['number'] != remove['number']]
         packet['pruned_attempts'].append(remove['number'])
+
+
+def prepare_generation(session, packet, model, config, runtime, responses=()):
+    limits = token_plan(model, packet_messages(session, packet), config['reasoning'], responses)
+    ceiling = limits['native_tokens']
+    load_attempts = []
+    while True:
+        allocated = limits['context_tokens']
+        try:
+            backend = runtime.generator(model, {**config, 'context_tokens': allocated})
+        except DoesNotFit as exc:
+            load_attempts.append({'context_tokens': allocated, 'status': 'gpu_memory_error',
+                                  'error': str(exc), 'evidence': exc.evidence})
+            ceiling = allocated // 2
+            if ceiling < 1024:
+                exc.evidence = {**exc.evidence, 'automatic_token_planning': load_attempts}
+                raise
+            limits['context_tokens'] = ceiling
+            limits['output_reserve'] = min(limits['desired_output_reserve'], ceiling // 4)
+            continue
+        load_attempts.append({'context_tokens': allocated, 'status': 'loaded'})
+        count = backend.token_count(packet_messages(session, packet))
+        required = count + limits['output_reserve']
+        if required > allocated and allocated < ceiling:
+            limits['context_tokens'] = round_context(required, ceiling)
+            limits['output_reserve'] = min(limits['desired_output_reserve'], limits['context_tokens'] // 4)
+            continue
+        try:
+            messages, measured = fit_packet(session, packet, backend.token_count, limits)
+        except ValueError as exc:
+            exc.evidence = {'automatic_token_planning': load_attempts, 'plan': limits}
+            raise
+        context = {**limits, **measured, 'load_attempts': load_attempts,
+                   'memory_context_ceiling': ceiling, 'output_limit_policy': 'EOS, deadline or remaining allocated context',
+                   'output_tokens_available': allocated - measured['input_tokens'] - 32}
+        return backend, messages, context
 
 
 class Engine:
@@ -284,22 +322,32 @@ class Engine:
         generator = next((m for m in models if m['id'] == self.session['generator_id'] and m['provider'] == 'native'), None)
         if generator is None:
             raise ValueError('The selected generator is unavailable on this host. Saved candidates can still be evaluated here.')
-        config = self.session['settings']
-        backend = self.runtime.generator(generator, config)
+        config = settings(self.session['settings'], allow_legacy=True)
         packet = generation_packet(self.session, models, self.records, self.store)
-        messages, context = fit_packet(self.session, packet, backend.token_count)
+        responses = [self.store.get_evidence(self.session['id'], attempt['response_evidence'])
+                     for attempt in self.session['attempts'] if attempt.get('response_evidence')]
+        try:
+            backend, messages, context = prepare_generation(self.session, packet, generator, config, self.runtime, responses)
+        except Exception as exc:
+            key = self.store.evidence(self.session['id'], {'kind': 'generation_preparation_error', 'at': now(),
+                'error': str(exc), 'evidence': getattr(exc, 'evidence', {}),
+                'load_metadata': copy.deepcopy(getattr(self.runtime.backend, 'load_metadata', {}))})
+            self.session.setdefault('preparation_errors', []).append(key)
+            self.save()
+            raise
         random = secrets.SystemRandom()
         sampling = {'temperature': random.uniform(config['temperature_min'], config['temperature_max']),
                     'seed': random.randrange(2**32), 'top_p': 1, 'top_k': 0, 'min_p': 0}
         request = {'kind': 'generation_request', 'messages': messages, 'sampling': sampling, 'context': context,
-                   'reasoning': config['reasoning'], 'generator_identity': generator['identity'], 'started': now()}
+                   'reasoning': config['reasoning'], 'generator_identity': generator['identity'], 'started': now(),
+                   'load_metadata': copy.deepcopy(getattr(backend, 'load_metadata', {}))}
         attempt = {'number': len(self.session['attempts']) + 1, 'status': 'generating', 'layer': -1,
                    'request_evidence': self.store.evidence(self.session['id'], request)}
         self.session['attempts'].append(attempt)
         self.save('running', 'Generating candidate ' + str(attempt['number']))
         try:
             with backend.budget(300):
-                response = backend.propose(messages, sampling, config['output_reserve'], self.app.cancel_event)
+                response = backend.propose(messages, sampling, context['output_tokens_available'], self.app.cancel_event)
             attempt['response_evidence'] = self.store.evidence(self.session['id'], {'kind': 'generation_response', **response})
             if response.get('finish_reason') != 'stop':
                 raise ValueError('Generator did not complete normally: ' + str(response.get('finish_reason')))

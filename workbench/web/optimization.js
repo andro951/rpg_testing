@@ -10,7 +10,7 @@ const PromptOptimization = {
   titles.optimization = `Prompt Optimization`;
   const navigation = button(`Prompt Optimization`, () => {
    setPage(`optimization`);
-   return PromptOptimization.Refresh();
+   return Promise.all([PromptOptimization.Models(), PromptOptimization.Refresh()]);
   });
   navigation.dataset.page = `optimization`;
   document.querySelector(`nav`).append(navigation);
@@ -33,9 +33,7 @@ const PromptOptimization = {
    [`max_attempts`, `Maximum attempts`, `number`, 20],
    [`temperature_min`, `Temperature minimum`, `number`, .5],
    [`temperature_max`, `Temperature maximum`, `number`, .9],
-   [`reasoning`, `Reasoning for prompt generation`, `checkbox`, false],
-   [`context_tokens`, `Generator context tokens`, `number`, 32768],
-   [`output_reserve`, `Reserved generator output tokens`, `number`, 4096]
+   [`reasoning`, `Reasoning for prompt generation`, `checkbox`, false]
   ];
   for (const [name, text, type, value] of definitions) {
    const label = el(`label`, `${text} `);
@@ -56,7 +54,7 @@ const PromptOptimization = {
    PromptOptimization.Inputs[name] = input;
   }
 
-  const scope = el(`p`, `Refresh host models before starting.`, `muted`);
+  const scope = el(`p`, `Opening this tab scans the host's runnable models.`, `muted`);
   scope.id = `optimization-scope`;
   const actions = el(`div`, undefined, `actions`);
   actions.append(button(`Refresh host models`, PromptOptimization.Models));
@@ -141,10 +139,10 @@ const PromptOptimization = {
    origin.append(item);
   }
 
-  if (previousOrigin)
+  if (options.models.some(model => model.id === previousOrigin))
    origin.value = previousOrigin;
 
-  select.value = previous || options.default_generator || ``;
+  select.value = options.models.some(model => model.provider === `native` && model.id === previous) ? previous : options.default_generator || ``;
   $(`optimization-scope`).textContent = `${options.simulated ? `SIMULATED · ` : ``}Host models: ${options.models.map(model => model.name || model.id).join(`, `) || `none`}. ${options.excluded.map(model => `${model.id}: ${model.reason}`).join(`; `)}`;
   $(`optimization-start`).disabled = options.simulated || !options.models.some(model => model.provider === `native`);
  },

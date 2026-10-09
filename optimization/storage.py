@@ -96,7 +96,7 @@ class Store:
         if not session or session.get('schema_version') != 1:
             raise ValueError('Missing or unsupported session manifest')
         directory = self.directory(session['id'])
-        for key in session.get('observations', []) + [a[field] for a in session.get('attempts', [])
+        for key in session.get('observations', []) + session.get('configuration_history', []) + session.get('preparation_errors', []) + [a[field] for a in session.get('attempts', [])
                                                      for field in ('request_evidence', 'response_evidence', 'error_evidence') if field in a]:
             if 'evidence/' + key + '.json' not in files:
                 raise ValueError('Archive is missing referenced evidence')
@@ -117,6 +117,8 @@ class Store:
                         attempts[attempt['number']] = attempt
                 existing['attempts'] = sorted(attempts.values(), key=lambda a: a['number'])
                 existing['observations'] = list(dict.fromkeys(existing['observations'] + session['observations']))
+                for field in ('configuration_history', 'preparation_errors'):
+                    existing[field] = list(dict.fromkeys(existing.get(field, []) + session.get(field, [])))
                 session = existing
             for name, value in files.items():
                 if name != 'session.json':

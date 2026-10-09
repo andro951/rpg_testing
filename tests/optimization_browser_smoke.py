@@ -42,10 +42,48 @@ def main():
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 page.goto(f'http://127.0.0.1:{server.server_port}/')
                 page.get_by_role('button', name='Prompt Optimization', exact=True).click()
-                page.get_by_role('button', name='Refresh host models', exact=True).click()
                 expect(page.locator('#optimization-generator')).to_have_value('local-a')
+                expect(page.locator('#optimization-origin-model')).to_have_value('local-a')
+                expect(page.get_by_role('button', name='Start new session', exact=True)).to_be_enabled()
+                # Returning to the tab scans again and retains valid selections.
+                cohort['models'].append(native('local-b'))
+                page.locator('nav button[data-page="overview"]').click()
+                page.get_by_role('button', name='Prompt Optimization', exact=True).click()
+                expect(page.locator('#optimization-generator option')).to_have_count(3)
+                expect(page.locator('#optimization-origin-model option')).to_have_count(2)
+                page.locator('#optimization-generator').select_option('local-b')
+                page.locator('#optimization-origin-model').select_option('local-b')
+                page.locator('nav button[data-page="overview"]').click()
+                with page.expect_response('**/api/optimization/options'):
+                    page.get_by_role('button', name='Prompt Optimization', exact=True).click()
+                expect(page.locator('#optimization-generator')).to_have_value('local-b')
+                expect(page.locator('#optimization-origin-model')).to_have_value('local-b')
+                # A disappeared selection falls back to an available model.
+                cohort['models'].pop()
+                page.locator('nav button[data-page="overview"]').click()
+                page.get_by_role('button', name='Prompt Optimization', exact=True).click()
+                expect(page.locator('#optimization-generator')).to_have_value('local-a')
+                expect(page.locator('#optimization-origin-model')).to_have_value('local-a')
+                # A failed scan reports why; entering again retries normally.
+                page.route('**/api/optimization/options', lambda route: route.fulfill(
+                    status=409, content_type='application/json', body='{"error":"Fixture model scan unavailable"}'))
+                page.locator('nav button[data-page="overview"]').click()
+                page.get_by_role('button', name='Prompt Optimization', exact=True).click()
+                expect(page.locator('#alert')).to_be_visible()
+                expect(page.locator('#alert-text')).to_have_text('Fixture model scan unavailable')
+                page.locator('#alert .close-dialog').click()
+                page.unroute('**/api/optimization/options')
+                page.locator('nav button[data-page="overview"]').click()
+                with page.expect_response('**/api/optimization/options'):
+                    page.get_by_role('button', name='Prompt Optimization', exact=True).click()
+                expect(page.locator('#optimization-generator')).to_have_value('local-a')
+                expect(page.locator('#optimization-origin-model')).to_have_value('local-a')
                 expect(page.locator('#optimization-max_attempts')).to_have_value('20')
                 expect(page.locator('#optimization-reasoning')).not_to_be_checked()
+                expect(page.locator('#optimization-context_tokens')).to_have_count(0)
+                expect(page.locator('#optimization-output_reserve')).to_have_count(0)
+                assert 'context_tokens' not in page.evaluate('() => PromptOptimization.Settings()')
+                assert 'output_reserve' not in page.evaluate('() => PromptOptimization.Settings()')
                 page.get_by_role('button', name='Start new session', exact=True).click()
                 expect(page.locator('#optimization-status')).to_contain_text('perfect', timeout=30000)
                 expect(page.locator('#optimization-ranking')).to_contain_text('100.0%')
@@ -55,14 +93,13 @@ def main():
                 expect(page.locator('#optimization-evidence')).to_be_visible()
                 expect(page.locator('#optimization-evidence-content')).to_contain_text('SYSTEM_MESSAGE:')
                 page.locator('#optimization-evidence').get_by_role('button', name='Close', exact=True).click()
-                page.locator('#optimization-context_tokens').fill('65536')
                 page.locator('#optimization-max_attempts').fill('30')
                 with page.expect_response('**/api/optimization/settings') as response:
                     page.get_by_role('button', name='Apply settings to selected session', exact=True).click()
                 assert response.value.status == 200
                 expect(page.locator('#optimization-status')).to_contain_text('1/30 generation attempts')
                 saved = Store(root).list()[0]
-                assert saved['settings']['context_tokens'] == 65536
+                assert 'context_tokens' not in saved['settings'] and 'output_reserve' not in saved['settings']
                 assert len(saved['configuration_history']) == 1
                 page.get_by_role('button', name='Continue session', exact=True).click()
                 page.wait_for_function('() => state && !state.busy')
@@ -90,7 +127,7 @@ def main():
             server.shutdown()
             server.server_close()
             thread.join(5)
-    print('PASS: optimizer browser controls, complete rankings, readable evidence, resume and portable session export/import (simulated inference).')
+    print('PASS: automatic tab-entry model scans, selection preservation/fallback, scan errors/recovery, optimizer controls, complete rankings, readable evidence, resume and portable session export/import (simulated inference).')
 
 
 if __name__ == '__main__':

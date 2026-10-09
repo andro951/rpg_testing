@@ -18,6 +18,8 @@ from optimization.templates import LABELS, bindings, freeze, parse_candidate, pr
 from workbench.controller import Controller
 from workbench.domain import digest
 from workbench.workflows import Cancelled, evaluate
+from workbench.execution_policy import DoesNotFit, RuntimeStall
+from optimization.token_budget import plan as token_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,7 +29,8 @@ def proposal(name='good'):
 
 
 def native(name='local-a'):
-    return {'id': name, 'identity': digest(name), 'provider': 'native', 'name': name}
+    return {'id': name, 'identity': digest(name), 'provider': 'native', 'name': name,
+            'metadata': {'mock.context_length': 65536}}
 
 
 def valid_move(case):
@@ -93,6 +96,23 @@ class MockRuntime:
 
     def close(self):
         self.closed = True
+
+
+class TokenRuntime:
+    def __init__(self, counter, capacity=None, failure=None):
+        self.counter, self.capacity, self.failure = counter, capacity, failure
+        self.loads = []
+        self.backend = None
+
+    def generator(self, model, config):
+        context = config['context_tokens']
+        self.loads.append(context)
+        if self.failure:
+            raise self.failure
+        if self.capacity and context > self.capacity:
+            raise DoesNotFit('Fixture KV allocation does not fit', {'fixture': True})
+        self.backend = SimpleNamespace(token_count=self.counter, context=context)
+        return self.backend
 
 
 class OptimizationTests(unittest.TestCase):
@@ -237,12 +257,13 @@ class OptimizationTests(unittest.TestCase):
         original = copy.deepcopy(packet)
         def counter(messages):
             return 30000 if '"number": 1' in messages[1]['content'] else 1000
-        messages, result = fit_packet(self.session, packet, counter)
+        limits = {'context_tokens': 32768, 'output_reserve': 4096}
+        messages, result = fit_packet(self.session, packet, counter, limits)
         self.assertEqual(result['pruned_attempts'], [1])
         self.assertIn('winner', messages[1]['content'])
         self.assertEqual(packet, original)
         with self.assertRaisesRegex(ValueError, 'Protected'):
-            fit_packet(self.session, packet, lambda _: 999999)
+            fit_packet(self.session, packet, lambda _: 999999, limits)
 
     def test_config_validates_finite_ranges_and_generator_reasoning_only(self):
         for config in ({'max_attempts': True}, {'temperature_min': float('nan')}, {'temperature_min': 1, 'temperature_max': .5},
@@ -501,10 +522,11 @@ class OptimizationTests(unittest.TestCase):
         runner, holder = self.runner()
         runner.run(cohort=self.cohort)
         before = self.store.load(self.session['id'])
-        changed = engine.update_settings(self.app, before['id'], {'context_tokens': 65536, 'max_attempts': 30})
+        changed = engine.update_settings(self.app, before['id'], {'max_attempts': 30})
         self.assertEqual(changed['observations'], before['observations'])
         self.assertEqual(changed['attempts'], before['attempts'])
-        self.assertEqual(changed['settings']['context_tokens'], 65536)
+        self.assertNotIn('context_tokens', changed['settings'])
+        self.assertNotIn('output_reserve', changed['settings'])
         evidence = self.store.get_evidence(changed['id'], changed['configuration_history'][0])
         self.assertEqual(evidence['previous'], before['settings'])
         self.assertEqual(evidence['settings']['max_attempts'], 30)
@@ -561,6 +583,135 @@ class OptimizationTests(unittest.TestCase):
         self.assertEqual(record['status'], 'error')
         self.assertFalse(record['timed_out'])
         self.assertFalse(score(saved, None, self.cohort['models'], [record])['complete'])
+
+    def test_automatic_tokens_are_not_user_settings_and_old_controls_are_ignored(self):
+        self.assertNotIn('context_tokens', settings({}))
+        self.assertNotIn('output_reserve', settings({}))
+        for key in ('context_tokens', 'output_reserve'):
+            with self.assertRaises(ValueError):
+                settings({key: 8192})
+        old = {'max_attempts': 20, 'context_tokens': 1024, 'output_reserve': 256}
+        normalized = settings(old, allow_legacy=True)
+        self.assertEqual(normalized, settings({'max_attempts': 20}))
+        self.assertEqual(old['context_tokens'], 1024)
+
+    def test_token_plan_uses_native_limit_reasoning_and_prior_output(self):
+        messages = [{'role': 'user', 'content': 'hello'}]
+        basic = token_plan(native(), messages)
+        reasoning = token_plan(native(), messages, True)
+        observed = token_plan(native(), messages, False, [{'text': 'x' * 24000}])
+        self.assertGreater(reasoning['desired_output_reserve'], basic['desired_output_reserve'])
+        self.assertGreater(observed['desired_output_reserve'], basic['desired_output_reserve'])
+        tiny = {**native(), 'metadata': {'mock.context_length': 2048}}
+        limited = token_plan(tiny, [{'role': 'user', 'content': 'x' * 100000}], True)
+        self.assertEqual(limited['context_tokens'], 2048)
+        self.assertEqual(limited['output_reserve'], 512)
+        with self.assertRaisesRegex(ValueError, 'metadata'):
+            token_plan({**native(), 'metadata': {}}, messages)
+
+    def test_exact_tokenizer_grows_context_before_pruning_and_uses_remaining_output(self):
+        packet = {'history': [], 'pruned_attempts': [], 'protected': 'keep'}
+        runtime = TokenRuntime(lambda _: 20000)
+        backend, messages, budget = engine.prepare_generation(self.session, packet, native(), settings({}), runtime)
+        self.assertGreater(len(runtime.loads), 1)
+        self.assertGreater(runtime.loads[-1], runtime.loads[0])
+        self.assertEqual(budget['pruned_attempts'], [])
+        self.assertEqual(budget['input_tokens'], 20000)
+        self.assertEqual(budget['output_tokens_available'], backend.context - 20000 - 32)
+        self.assertGreater(budget['output_tokens_available'], budget['output_reserve'])
+
+    def test_gpu_memory_backoff_prunes_only_history_and_records_every_load(self):
+        packet = {'history': [{'number': 1, 'candidate': None, 'text': 'x' * 40000}],
+                  'pruned_attempts': [], 'top_three': [{'candidate': 'winner'}]}
+        original = copy.deepcopy(packet)
+        runtime = TokenRuntime(lambda messages: 9000 if '"number": 1' in messages[1]['content'] else 1000, capacity=8192)
+        backend, messages, budget = engine.prepare_generation(self.session, packet, native(), settings({}), runtime)
+        self.assertEqual(backend.context, 8192)
+        self.assertEqual(budget['memory_context_ceiling'], 8192)
+        self.assertEqual(budget['pruned_attempts'], [1])
+        self.assertIn('winner', messages[1]['content'])
+        self.assertTrue(any(item['status'] == 'gpu_memory_error' for item in budget['load_attempts']))
+        self.assertEqual(packet, original)
+
+    def test_automatic_preparation_does_not_retry_other_runtime_errors(self):
+        packet = {'history': [], 'pruned_attempts': []}
+        runtime = TokenRuntime(lambda _: 1000, failure=RuntimeStall('Fixture loading timed out'))
+        with self.assertRaises(RuntimeStall):
+            engine.prepare_generation(self.session, packet, native(), settings({}), runtime)
+        self.assertEqual(len(runtime.loads), 1)
+
+    def test_automatic_budget_refuses_to_truncate_protected_content(self):
+        packet = {'history': [], 'pruned_attempts': [], 'top_three': ['protected winner']}
+        original = copy.deepcopy(packet)
+        runtime = TokenRuntime(lambda _: 70000)
+        with self.assertRaisesRegex(ValueError, 'Protected'):
+            engine.prepare_generation(self.session, packet, native(), settings({}), runtime)
+        self.assertEqual(runtime.loads[-1], 65536)
+        self.assertEqual(packet, original)
+
+    def test_old_session_uses_automatic_budget_without_erasing_old_settings(self):
+        old = self.store.load(self.session['id'])
+        old['settings'].update(context_tokens=1024, output_reserve=256)
+        self.store.save(old)
+        runner, holder = self.runner()
+        runner.run(cohort=self.cohort)
+        saved = self.store.load(old['id'])
+        self.assertEqual(saved['settings']['context_tokens'], 1024)
+        request = self.store.get_evidence(saved['id'], saved['attempts'][0]['request_evidence'])
+        self.assertEqual(request['context']['policy'], 'automatic-generator-tokens-v1')
+        self.assertGreater(request['context']['context_tokens'], 1024)
+        self.assertEqual(holder[0].requests[0]['reserve'], request['context']['output_tokens_available'])
+        self.assertGreater(holder[0].requests[0]['reserve'], request['context']['output_reserve'])
+
+    def test_preparation_error_saved_without_consuming_attempt_and_resume_reuses_baseline(self):
+        missing = self.store.load(self.session['id'])
+        missing['cohort']['models'][0]['metadata'] = {}
+        self.store.save(missing)
+        with self.assertRaisesRegex(ValueError, 'metadata'):
+            Engine(self.app, missing['id'], MockRuntime).run(cohort=missing['cohort'])
+        failed = self.store.load(missing['id'])
+        self.assertEqual(failed['attempts'], [])
+        error = self.store.get_evidence(failed['id'], failed['preparation_errors'][0])
+        self.assertEqual(error['kind'], 'generation_preparation_error')
+        runner, holder = self.runner()
+        runner.run(cohort=self.cohort)
+        self.assertEqual(len(holder[0].trials), 3)
+        self.assertEqual(self.store.load(missing['id'])['status'], 'perfect')
+
+    def test_generator_output_limit_is_the_automatically_available_context(self):
+        backend = GeneratorBackend({'backend': 'llamacpp'}, {}, lambda *args: None)
+        backend.owned_id = 'test'
+        backend.load_metadata = {}
+        backend.transport = SimpleNamespace(request=lambda endpoint, body, **kwargs: body)
+        result = backend.propose([{'role': 'user', 'content': 'prompt'}], {'temperature': .7}, 12256, threading.Event())
+        self.assertEqual(result['max_tokens'], 12256)
+        self.assertEqual(result['request_messages'][0]['content'], 'prompt')
+
+    def test_automatic_memory_backoff_is_bounded_and_preserves_diagnostics(self):
+        runtime = TokenRuntime(lambda _: 1000, capacity=512)
+        with self.assertRaises(DoesNotFit) as failure:
+            engine.prepare_generation(self.session, {'history': [], 'pruned_attempts': []}, native(), settings({}), runtime)
+        self.assertEqual(runtime.loads[-1], 1024)
+        self.assertEqual(len(runtime.loads), len(set(runtime.loads)))
+        self.assertEqual(len(failure.exception.evidence['automatic_token_planning']), len(runtime.loads))
+
+    def test_archive_preserves_and_requires_preparation_error_evidence(self):
+        saved = self.store.load(self.session['id'])
+        key = self.store.evidence(saved['id'], {'kind': 'generation_preparation_error', 'error': 'capacity'})
+        saved['preparation_errors'] = [key]
+        self.store.save(saved)
+        archive = self.store.export(saved['id'])
+        target = Store(self.root / 'other')
+        target.import_archive(archive)
+        self.assertEqual(target.load(saved['id'])['preparation_errors'], [key])
+        self.assertEqual(target.get_evidence(saved['id'], key)['error'], 'capacity')
+        output = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(archive)) as original, zipfile.ZipFile(output, 'w') as altered:
+            for name in original.namelist():
+                if name != 'evidence/' + key + '.json':
+                    altered.writestr(name, original.read(name))
+        with self.assertRaisesRegex(ValueError, 'missing referenced evidence'):
+            Store(self.root / 'broken').import_archive(output.getvalue())
 
 
 if __name__ == '__main__':
