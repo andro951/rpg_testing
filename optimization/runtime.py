@@ -3,6 +3,7 @@ import copy
 import re
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from workbench import inventory
 from workbench.domain import device_tier, digest
 from workbench.native import NativeBackend, _template_compatible_messages
@@ -22,6 +23,9 @@ def discover(app):
         folder = app.settings.get('model_root')
         if not folder:
             raise ValueError('Choose the host models folder in Worker setup first.')
+        folder = Path(folder).expanduser()
+        if not folder.is_dir():
+            raise ValueError('The host models folder is unavailable. Choose an existing folder in Worker setup.')
         models = inventory.scan_models(folder, app.catalog())
     tier = device_tier(gpu['total_gib'], gpu['name'])
     available, excluded = [], []

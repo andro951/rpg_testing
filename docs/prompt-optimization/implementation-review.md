@@ -1,5 +1,11 @@
 # Implementation review — October 8, 2026
 
+## Follow-up: saved model-folder discovery
+
+The optimizer passed the JSON string `model_root` directly to the inventory scanner, which requires a `Path`. That caused `http_error 'str' object has no attribute 'is_dir'` on a real host; the previous discovery mocks concealed the integration mismatch. `optimization.runtime.discover` now normalizes the setting to a `Path` and reports an actionable setup error for unavailable directories. The shared inventory scanner and benchmark fingerprint inputs are unchanged.
+
+Four regression tests in `tests/test_optimization_discovery.py` exercise the actual HTTP endpoint, controller settings reload, catalogue, GGUF metadata scanner and artifact identity tracking. Only hardware detection and the installed executable/version are mocked. Tiny synthetic GGUF headers contain no model weights. Tests cover saved strings with spaces, highest-parameter Qwen selection, repeated scans after catalogue changes with stable existing identities, missing/file paths and an unconfigured folder. All 50 optimizer-focused tests pass (`.local/opro-folder-focused.log`). The Edge optimizer browser smoke passes, including complete simulated runs, resume and transfer (`.local/opro-folder-browser.log`); inference in that smoke remains simulated. Final full suite: **583 tests passed in 589.666 seconds**, exit 0 (`.local/opro-folder-full.log`). `git diff --check` passes. Restart the execution host's Workbench process to load the Python change.
+
 Reviewed against `optimization-plan.md`, the separately stored optimizer prompts, and Isaac's final instruction to replace intermediate expansion layers with the full matching task type after an origin pass. The results-table evaluator presentation requested while paused is also implemented.
 
 ## Implemented scope
