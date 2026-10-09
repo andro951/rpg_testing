@@ -20,6 +20,8 @@ Update `main` with GitHub Desktop, open the repository folder, and double-click 
 
 This folder choice applies **only to model files and their partial downloads**. Model assignments are stored in a machine-local root `models.json`; a fresh checkout can discover GGUFs before that file exists, and the file is created only when local model metadata is saved. `models.json` is ignored by Git. Tests stay in `test_specs/`. Real benchmark result JSON files are stored under tracked `results/` so they are normal Git evidence. Logs, preflight reports and operational settings stay under `.local/workbench/`; runtime files use `.local/runtime/`. Credentials and weights are excluded from Git. On first launch after this change, legacy result JSON under `.local/workbench/results/` is migrated into `results/` without overwriting conflicting evidence.
 
+On **Logs**, **Download logs** saves the displayed entries as `rpg-testing-logs.txt`, and **Copy logs** copies the same text. The view contains the latest 300 events. Copy supports plain HTTP/Tailscale through a fallback; if the browser blocks automatic copying, a dialog selects the text for Ctrl+C. Both buttons are disabled when the log view is empty.
+
 ## Targeted runs
 
 For the objective results table, double-click **Open_Results_Table.bat**. It now has

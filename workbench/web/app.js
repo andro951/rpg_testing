@@ -48,7 +48,7 @@ $('readiness').textContent=!s.report?'Not checked':s.report.preparation_only?(s.
 const issues=$('issues');issues.replaceChildren();if(s.report){if(!s.report.issues.length)issues.append(el('p',s.report.note,'muted'));for(const i of s.report.issues){const row=el('div',undefined,'issue '+i.level);row.append(el('span',i.level.toUpperCase(),'label'),el('p',i.message));if(i.action){const b=button(i.label,async()=>{if(i.action.type==='setup'||i.action.type==='choose_folder'){setPage('setup');return;}if(i.action.type==='models'){setPage('models');return;}if(i.action.type==='runtime'){setPage('runtime');return;}if(i.action.type==='runtime_install'){if(!confirm('Install an official llama.cpp GPU runtime under this Workbench repository? GPU drivers will not be installed or changed.'))return;await api('/api/fix',{issue_id:i.id});return;}if(!confirm(i.label+'?\n\nOnly this action will be performed. Downloads may use substantial disk space.'))return;await api('/api/fix',{issue_id:i.id});await poll();});b.disabled=busy;row.append(b);}issues.append(row);}}
 queueMicrotask(()=>offerAutomaticRepair(s.report).catch(e=>showAlert(e.message,'Automatic repair failed')));const plan=$('plan');plan.replaceChildren();for(const g of p?.groups||[]){const n=el('div',undefined,'plan-item');n.append(el('b',g.model_id),el('p',g.pending+' pending · '+g.complete+' complete · '+g.reason,'muted'));if(g.context)n.append(el('p','Automatic context allocation: '+g.context.allocated_tokens.toLocaleString()+' tokens','muted'));plan.append(n);}if(p&&!p.groups.length)plan.append(el('p','No models match this hardware tier.','muted'));
 $('folder-note').textContent=s.report?.folder?.path?('Active folder: '+s.report.folder.path+' · '+s.report.folder.source):'No active model folder detected yet.';
-renderModels();$('log-view').textContent=s.logs.map(l=>l.time+' ['+l.category+'] '+l.message).join('\n');$('remote-url').textContent=s.remote?.url||'';
+renderModels();LogsPage.Render(s.logs);$('remote-url').textContent=s.remote?.url||'';
 if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=s.settings.publish_results; }
 renderHub();renderRuntimes();renderRunControls();PerchanceInstall.Render(s.perchance_setup_prompt);WorkerFailure.Render(s.failure);folderPrompts();
 const scope=s.report?.selection;let scopeTests='all enabled tests';if(scope?.test_id)scopeTests=scope.test_id;else if(scope?.test_ids)scopeTests=scope.test_ids.length+' selected test(s)';const scopeModel=scope?.all_models?'all eligible models':scope?.model_id;$('run-scope').textContent=scope?('Scope: '+scopeModel+' · '+scopeTests+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
@@ -405,6 +405,60 @@ const PerchanceSetup = {
  }
 };
 PerchanceSetup.Initialize();
+//#endregion
+//#region Logs
+const LogsPage = {
+ Initialize: () => {
+  const actions = el(`div`, undefined, `actions`);
+  const download = button(`Download logs`, LogsPage.Download);
+  download.id = `download-logs`;
+  const copy = button(`Copy logs`, LogsPage.Copy);
+  copy.id = `copy-logs`;
+  download.disabled = copy.disabled = true;
+  actions.append(download, copy);
+  $(`log-view`).before(actions);
+ },
+ Render: logs => {
+  $(`log-view`).textContent = logs.map(log => `${log.time} [${log.category}] ${log.message}`).join(`\n`);
+  $(`download-logs`).disabled = $(`copy-logs`).disabled = !logs.length;
+ },
+ Download: () => {
+  const url = URL.createObjectURL(new Blob([$(`log-view`).textContent], {type: `text/plain;charset=utf-8`}));
+  const link = el(`a`);
+  link.href = url;
+  link.download = `rpg-testing-logs.txt`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+ },
+ Copy: () => {
+  const text = $(`log-view`).textContent;
+  if (!navigator.clipboard?.writeText)
+   return LogsPage.CopyFallback(text);
+
+  return navigator.clipboard.writeText(text).then(() => toast(`Logs copied.`), () => LogsPage.CopyFallback(text));
+ },
+ CopyFallback: text => {
+  const dialog = el(`dialog`);
+  dialog.id = `copy-logs-dialog`;
+  const input = el(`textarea`);
+  input.value = text;
+  input.readOnly = true;
+  input.rows = 12;
+  input.style.width = `100%`;
+  input.setAttribute(`aria-label`, `Logs to copy`);
+  dialog.append(el(`h2`, `Copy logs`), el(`p`, `Press Ctrl+C to copy the selected logs.`), input, button(`Close`, () => dialog.close()));
+  dialog.addEventListener(`close`, () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  input.focus();
+  input.select();
+  if (document.execCommand(`copy`)) {
+   dialog.close();
+   toast(`Logs copied.`);
+  }
+ }
+};
+LogsPage.Initialize();
 //#endregion
 const optimizationScript=el(`script`);optimizationScript.src=`/optimization.js`;document.body.append(optimizationScript);
 poll();setInterval(poll,1200);

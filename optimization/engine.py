@@ -225,7 +225,7 @@ def prepare_generation(session, packet, model, config, runtime, responses=()):
             exc.evidence = {'automatic_token_planning': load_attempts, 'plan': limits}
             raise
         context = {**limits, **measured, 'load_attempts': load_attempts,
-                   'memory_context_ceiling': ceiling, 'output_limit_policy': 'EOS, deadline or remaining allocated context',
+                   'memory_context_ceiling': ceiling, 'output_limit_policy': 'EOS, manual stop or remaining allocated context',
                    'output_tokens_available': allocated - measured['input_tokens'] - 32}
         return backend, messages, context
 
@@ -340,14 +340,14 @@ class Engine:
                     'seed': random.randrange(2**32), 'top_p': 1, 'top_k': 0, 'min_p': 0}
         request = {'kind': 'generation_request', 'messages': messages, 'sampling': sampling, 'context': context,
                    'reasoning': config['reasoning'], 'generator_identity': generator['identity'], 'started': now(),
+                   'timeout_seconds': None, 'timeout_policy': 'completion_or_manual_stop',
                    'load_metadata': copy.deepcopy(getattr(backend, 'load_metadata', {}))}
         attempt = {'number': len(self.session['attempts']) + 1, 'status': 'generating', 'layer': -1,
                    'request_evidence': self.store.evidence(self.session['id'], request)}
         self.session['attempts'].append(attempt)
         self.save('running', 'Generating candidate ' + str(attempt['number']))
         try:
-            with backend.budget(300):
-                response = backend.propose(messages, sampling, context['output_tokens_available'], self.app.cancel_event)
+            response = backend.propose(messages, sampling, context['output_tokens_available'], self.app.cancel_event)
             attempt['response_evidence'] = self.store.evidence(self.session['id'], {'kind': 'generation_response', **response})
             if response.get('finish_reason') != 'stop':
                 raise ValueError('Generator did not complete normally: ' + str(response.get('finish_reason')))

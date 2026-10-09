@@ -66,9 +66,10 @@ def discover(app):
 
 
 class GeneratorBackend(NativeBackend):
-    """Reasoning is independently enabled only on the optimizer process."""
+    """Independent optimizer reasoning and socket reads without elapsed-time limits."""
     def __init__(self, settings, gpu, log, reasoning=False):
         super().__init__(settings, gpu, log)
+        self.transport.timeout = None
         self.reasoning = reasoning
 
     def launch_arguments(self, *args, **kwargs):

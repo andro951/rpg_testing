@@ -53,7 +53,7 @@ class MockGenerator:
         return 1000
 
     def budget(self, seconds):
-        return nullcontext()
+        raise AssertionError('Prompt writing must not arm an elapsed-time watchdog')
 
     def propose(self, messages, sampling, reserve, cancel):
         self.runtime.requests.append({'messages': messages, 'sampling': sampling, 'reserve': reserve})
@@ -389,9 +389,21 @@ class OptimizationTests(unittest.TestCase):
         self.assertEqual(args[args.index('--reasoning') + 1], 'on')
         from workbench.native import NativeBackend
         benchmark = NativeBackend({'backend': 'llamacpp'}, {})
+        self.assertIsNone(generator.transport.timeout)
+        self.assertEqual(benchmark.transport.timeout, 60)
         benchmark.owned_id = 'test'
         args = benchmark.launch_arguments('server', model, {'allocated_tokens': 32768}, '')
         self.assertEqual(args[args.index('--reasoning') + 1], 'off')
+
+    def test_prompt_generation_has_no_watchdog_and_records_unlimited_time_policy(self):
+        runner, holder = self.runner()
+        runner.run(cohort=self.cohort)
+        saved = self.store.load(self.session['id'])
+        self.assertEqual(saved['status'], 'perfect')
+        self.assertEqual(len(holder[0].requests), 1)
+        request = self.store.get_evidence(saved['id'], saved['attempts'][0]['request_evidence'])
+        self.assertIsNone(request['timeout_seconds'])
+        self.assertEqual(request['timeout_policy'], 'completion_or_manual_stop')
 
     def test_origin_gate_uses_selected_model_then_widens_to_all_models(self):
         second = native('local-b')

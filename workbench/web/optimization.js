@@ -5,6 +5,7 @@ const PromptOptimization = {
  Selected: null,
  Current: null,
  Loading: false,
+ ModelRequest: null,
  Inputs: {},
  Initialize: () => {
   titles.optimization = `Prompt Optimization`;
@@ -20,14 +21,10 @@ const PromptOptimization = {
   section.append(el(`h2`, `Array move prompt optimization`), el(`p`, `Pass the starting case, then test the candidate on every Array move JSON Patch test and every runnable model on this host. Rankings use full repetitions and only this host’s models. Benchmark reasoning stays off.`, `muted`));
   const controls = el(`section`);
   const generatorLabel = el(`label`, `Prompt-writing model `);
-  const generator = el(`select`);
-  generator.id = `optimization-generator`;
-  generatorLabel.append(generator);
+  generatorLabel.append(PromptOptimization.ModelSelect(`optimization-generator`));
   controls.append(generatorLabel);
   const originLabel = el(`label`, `Starting-case model `);
-  const origin = el(`select`);
-  origin.id = `optimization-origin-model`;
-  originLabel.append(origin);
+  originLabel.append(PromptOptimization.ModelSelect(`optimization-origin-model`));
   controls.append(el(`br`), originLabel);
   const definitions = [
    [`max_attempts`, `Maximum attempts`, `number`, 20],
@@ -56,8 +53,11 @@ const PromptOptimization = {
 
   const scope = el(`p`, `Opening this tab scans the host's runnable models.`, `muted`);
   scope.id = `optimization-scope`;
+  scope.setAttribute(`role`, `status`);
   const actions = el(`div`, undefined, `actions`);
-  actions.append(button(`Refresh host models`, PromptOptimization.Models));
+  const refresh = button(`Refresh host models`, PromptOptimization.Models);
+  refresh.id = `optimization-refresh-models`;
+  actions.append(refresh);
   const start = button(`Start new session`, () => PromptOptimization.Run(null), `primary`);
   start.id = `optimization-start`;
   start.disabled = true;
@@ -118,33 +118,101 @@ const PromptOptimization = {
     PromptOptimization.Refresh().catch(error => { $(`optimization-status`).textContent = error.message; });
   }, 2000);
  },
- Models: async () => {
-  const options = await api(`/api/optimization/options`);
+ ModelSelect: id => {
+  const control = el(`span`);
+  control.style.position = `relative`;
+  control.style.display = `block`;
+  const select = el(`select`);
+  select.id = id;
+  select.style.width = `100%`;
+  select.disabled = true;
+  const spinner = el(`span`);
+  spinner.id = `${id}-loading`;
+  spinner.hidden = true;
+  spinner.setAttribute(`aria-hidden`, `true`);
+  Object.assign(spinner.style, {position: `absolute`, left: `12px`, top: `50%`, marginTop: `-7px`, width: `14px`, height: `14px`, border: `2px solid #ffc36f55`, borderTopColor: `#ffc36f`, borderRadius: `50%`, pointerEvents: `none`});
+  control.append(select, spinner);
+  return control;
+ },
+ ModelLoading: loading => {
+  for (const id of [`optimization-generator`, `optimization-origin-model`]) {
+   const select = $(id);
+   const spinner = $(`${id}-loading`);
+   select.setAttribute(`aria-busy`, `${loading}`);
+   spinner.hidden = !loading;
+   for (const animation of spinner.getAnimations()) {
+    animation.cancel();
+   }
+
+   if (loading) {
+    select.disabled = true;
+    const option = el(`option`, `Loading Models`);
+    option.value = ``;
+    select.replaceChildren(option);
+    Object.assign(select.style, {backgroundColor: `#483924`, borderColor: `#ffc36f`, color: `#ffc36f`, paddingLeft: `38px`, cursor: `wait`});
+    if (!matchMedia(`(prefers-reduced-motion: reduce)`).matches)
+     spinner.animate([{transform: `rotate(0deg)`}, {transform: `rotate(360deg)`}], {duration: 800, iterations: Infinity});
+   }
+   else {
+    for (const property of [`backgroundColor`, `borderColor`, `color`, `paddingLeft`, `cursor`]) {
+     select.style[property] = ``;
+    }
+   }
+  }
+
+  $(`optimization-refresh-models`).disabled = loading;
+  if (loading) {
+   $(`optimization-start`).disabled = true;
+   $(`optimization-scope`).textContent = `Loading models on the host…`;
+  }
+ },
+ Models: () => {
+  if (PromptOptimization.ModelRequest)
+   return PromptOptimization.ModelRequest;
+
   const select = $(`optimization-generator`);
   const previous = select.value;
-  select.replaceChildren(el(`option`, `Select a prompt-writing model`));
-  select.firstChild.value = ``;
-  for (const model of options.models.filter(model => model.provider === `native`)) {
-   const item = el(`option`, model.name || model.id);
-   item.value = model.id;
-   select.append(item);
-  }
-
   const origin = $(`optimization-origin-model`);
   const previousOrigin = origin.value;
-  origin.replaceChildren();
-  for (const model of options.models) {
-   const item = el(`option`, model.name || model.id);
-   item.value = model.id;
-   origin.append(item);
-  }
+  PromptOptimization.ModelLoading(true);
+  PromptOptimization.ModelRequest = api(`/api/optimization/options`).then(options => {
+   const nativeModels = options.models.filter(model => model.provider === `native`);
+   select.replaceChildren(el(`option`, nativeModels.length ? `Select a prompt-writing model` : `No prompt-writing models available`));
+   select.firstChild.value = ``;
+   for (const model of nativeModels) {
+    const item = el(`option`, model.name || model.id);
+    item.value = model.id;
+    select.append(item);
+   }
 
-  if (options.models.some(model => model.id === previousOrigin))
-   origin.value = previousOrigin;
+   origin.replaceChildren();
+   for (const model of options.models) {
+    const item = el(`option`, model.name || model.id);
+    item.value = model.id;
+    origin.append(item);
+   }
 
-  select.value = options.models.some(model => model.provider === `native` && model.id === previous) ? previous : options.default_generator || ``;
-  $(`optimization-scope`).textContent = `${options.simulated ? `SIMULATED · ` : ``}Host models: ${options.models.map(model => model.name || model.id).join(`, `) || `none`}. ${options.excluded.map(model => `${model.id}: ${model.reason}`).join(`; `)}`;
-  $(`optimization-start`).disabled = options.simulated || !options.models.some(model => model.provider === `native`);
+   if (!options.models.length)
+    origin.append(el(`option`, `No models available`));
+
+   if (options.models.some(model => model.id === previousOrigin))
+    origin.value = previousOrigin;
+
+   select.value = nativeModels.some(model => model.id === previous) ? previous : options.default_generator || ``;
+   select.disabled = !nativeModels.length;
+   origin.disabled = !options.models.length;
+   $(`optimization-scope`).textContent = `${options.simulated ? `SIMULATED · ` : ``}Host models: ${options.models.map(model => model.name || model.id).join(`, `) || `none`}. ${options.excluded.map(model => `${model.id}: ${model.reason}`).join(`; `)}`;
+   $(`optimization-start`).disabled = options.simulated || !nativeModels.length;
+  }, error => {
+   select.replaceChildren(el(`option`, `Unable to load models`));
+   origin.replaceChildren(el(`option`, `Unable to load models`));
+   $(`optimization-scope`).textContent = `Unable to load models: ${error.message}. Click Refresh host models to try again.`;
+   throw error;
+  }).finally(() => {
+   PromptOptimization.ModelRequest = null;
+   PromptOptimization.ModelLoading(false);
+  });
+  return PromptOptimization.ModelRequest;
  },
  Run: async (id, mode = `optimize`) => {
   if (state?.busy)

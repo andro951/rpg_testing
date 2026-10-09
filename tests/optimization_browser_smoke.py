@@ -1,5 +1,6 @@
 """Real browser/HTTP/UI with simulated model generation and objective trials."""
 import os
+import json
 import shutil
 import sys
 import tempfile
@@ -41,9 +42,36 @@ def main():
                 errors = []
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 page.goto(f'http://127.0.0.1:{server.server_port}/')
+                pending_scans = []
+                page.route('**/api/optimization/options', lambda route: pending_scans.append(route))
                 page.get_by_role('button', name='Prompt Optimization', exact=True).click()
+                for id in ('optimization-generator', 'optimization-origin-model'):
+                    select = page.locator('#' + id)
+                    expect(select).to_be_disabled()
+                    expect(select).to_have_attribute('aria-busy', 'true')
+                    expect(select.locator('option')).to_have_text('Loading Models')
+                    expect(select).to_have_css('background-color', 'rgb(72, 57, 36)')
+                    expect(select).to_have_css('color', 'rgb(255, 195, 111)')
+                    expect(page.locator('#' + id + '-loading')).to_be_visible()
+                expect(page.locator('#optimization-refresh-models')).to_be_disabled()
+                expect(page.locator('#optimization-start')).to_be_disabled()
+                expect(page.locator('#optimization-scope')).to_have_text('Loading models on the host…')
+                page.wait_for_function('() => document.getElementById("optimization-generator-loading").getAnimations().some(animation => animation.playState === "running")')
+                page.screenshot(path=str(ROOT / '.local/opro-model-loading-preview.png'))
+                # Re-entering during a scan shares the request instead of racing another scan.
+                page.locator('nav button[data-page="overview"]').click()
+                page.get_by_role('button', name='Prompt Optimization', exact=True).click()
+                assert len(pending_scans) == 1
+                pending_scans.pop().fulfill(status=200, content_type='application/json', body=json.dumps(cohort))
+                page.unroute('**/api/optimization/options')
                 expect(page.locator('#optimization-generator')).to_have_value('local-a')
                 expect(page.locator('#optimization-origin-model')).to_have_value('local-a')
+                for id in ('optimization-generator', 'optimization-origin-model'):
+                    expect(page.locator('#' + id)).to_be_enabled()
+                    expect(page.locator('#' + id)).to_have_attribute('aria-busy', 'false')
+                    expect(page.locator('#' + id + '-loading')).to_be_hidden()
+                    assert not page.locator('#' + id + '-loading').evaluate('(spinner) => spinner.getAnimations().length')
+                    assert page.locator('#' + id).evaluate('(select) => select.style.backgroundColor') == ''
                 expect(page.get_by_role('button', name='Start new session', exact=True)).to_be_enabled()
                 # Returning to the tab scans again and retains valid selections.
                 cohort['models'].append(native('local-b'))
@@ -71,11 +99,31 @@ def main():
                 page.get_by_role('button', name='Prompt Optimization', exact=True).click()
                 expect(page.locator('#alert')).to_be_visible()
                 expect(page.locator('#alert-text')).to_have_text('Fixture model scan unavailable')
+                for id in ('optimization-generator', 'optimization-origin-model'):
+                    expect(page.locator('#' + id)).to_be_disabled()
+                    expect(page.locator('#' + id)).to_have_attribute('aria-busy', 'false')
+                    expect(page.locator('#' + id)).to_contain_text('Unable to load models')
+                    expect(page.locator('#' + id + '-loading')).to_be_hidden()
+                expect(page.locator('#optimization-refresh-models')).to_be_enabled()
+                expect(page.locator('#optimization-start')).to_be_disabled()
                 page.locator('#alert .close-dialog').click()
                 page.unroute('**/api/optimization/options')
                 page.locator('nav button[data-page="overview"]').click()
                 with page.expect_response('**/api/optimization/options'):
                     page.get_by_role('button', name='Prompt Optimization', exact=True).click()
+                expect(page.locator('#optimization-generator')).to_have_value('local-a')
+                # An empty successful scan is distinguishable from a pending or failed scan.
+                page.route('**/api/optimization/options', lambda route: route.fulfill(
+                    status=200, content_type='application/json', body=json.dumps({**cohort, 'models': [], 'default_generator': None})))
+                page.locator('#optimization-refresh-models').click()
+                expect(page.locator('#optimization-generator')).to_contain_text('No prompt-writing models available')
+                expect(page.locator('#optimization-origin-model')).to_contain_text('No models available')
+                expect(page.locator('#optimization-generator')).to_be_disabled()
+                expect(page.locator('#optimization-origin-model')).to_be_disabled()
+                expect(page.locator('#optimization-refresh-models')).to_be_enabled()
+                expect(page.locator('#optimization-generator-loading')).to_be_hidden()
+                page.unroute('**/api/optimization/options')
+                page.locator('#optimization-refresh-models').click()
                 expect(page.locator('#optimization-generator')).to_have_value('local-a')
                 expect(page.locator('#optimization-origin-model')).to_have_value('local-a')
                 expect(page.locator('#optimization-max_attempts')).to_have_value('20')
@@ -101,9 +149,13 @@ def main():
                 saved = Store(root).list()[0]
                 assert 'context_tokens' not in saved['settings'] and 'output_reserve' not in saved['settings']
                 assert len(saved['configuration_history']) == 1
-                page.get_by_role('button', name='Continue session', exact=True).click()
+                with page.expect_response('**/api/optimization/run'):
+                    page.get_by_role('button', name='Continue session', exact=True).click()
+                if app.thread:
+                    app.thread.join(10)
+                    assert not app.thread.is_alive()
                 page.wait_for_function('() => state && !state.busy')
-                assert len(created) == 2 and created[1].trials == [] and created[1].requests == []
+                assert len(created) == 2 and created[1].trials == [] and created[1].requests == [], [(len(runtime.trials), len(runtime.requests)) for runtime in created]
                 with page.expect_download() as download:
                     page.get_by_role('button', name='Export session', exact=True).click()
                 archive = root / 'session.zip'
@@ -127,7 +179,7 @@ def main():
             server.shutdown()
             server.server_close()
             thread.join(5)
-    print('PASS: automatic tab-entry model scans, selection preservation/fallback, scan errors/recovery, optimizer controls, complete rankings, readable evidence, resume and portable session export/import (simulated inference).')
+    print('PASS: amber disabled model dropdowns with animated loading circles, shared in-flight scans, loading/error/empty recovery, automatic tab-entry model scans, selection preservation/fallback, optimizer controls, complete rankings, readable evidence, resume and portable session export/import (simulated inference).')
 
 
 if __name__ == '__main__':
