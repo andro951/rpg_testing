@@ -53,19 +53,7 @@ const ResultsMatrix = {
         return ordered.slice(0, 5).map(([reason, count]) => `${ordered.length > 1 || count > 1 ? `${count} × ` : ``}${reason}`).join(`\n`) +
             (ordered.length > 5 ? `\n${ordered.length - 5} more reasons; open evidence for all checks.` : ``);
     },
-    Inspect: (ids, heading) => {
-        const parent = StatisticsReport.Details;
-        parent.replaceChildren();
-        StatisticsReport.Element("h2", parent, heading);
-        StatisticsReport.Element("p", parent, `${ids.length} unique saved result(s). Open a result for its score and original evidence. Only independently executed observations contribute to totals.`);
-        for (const id of ids) {
-            const summary = StatisticsReport.Data.matrix.records[id];
-            const record = summary.metadata;
-            StatisticsReport.EvidenceButton(parent, id, `${summary.outcome.toUpperCase()} · ${record.test_id} / ${record.variant_id} / repetition ${(record.repetition || 0) + 1} · ${id.slice(0, 8)}`);
-        }
-
-        parent.scrollIntoView({ behavior: "smooth" });
-    },
+    Inspect: ids => StatisticsReport.OpenEvidence(ids),
     //#region Timing badge
     TimingMarker: (cell, ids) => {
         const summaries = ids.map(id => StatisticsReport.Data.matrix.records[id]);

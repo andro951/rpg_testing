@@ -140,8 +140,16 @@ def main():
             assert square['width'] <= 26, square
             total_square = page.locator('#matrix-totals td').last.bounding_box()
             assert abs(total_square['width'] - total_square['height']) <= 1, total_square
-            page.locator('#results-matrix tbody tr[data-kind=case] td[data-outcome=pass] button').first.click()
-            assert 'expected_answers' in page.locator('#drilldown').inner_text()
+            page.locator('#results-matrix tbody tr[data-kind=case] td[data-outcome=pass] button').first.scroll_into_view_if_needed()
+            before_scroll = page.evaluate('scrollY')
+            with page.expect_popup() as opened:
+                page.locator('#results-matrix tbody tr[data-kind=case] td[data-outcome=pass] button').first.click()
+            evidence = opened.value
+            evidence.get_by_role('heading', name='Expected result', exact=True).wait_for()
+            assert 'expected_answers' in evidence.locator('[data-evidence-block="Expected result"]').inner_text()
+            assert page.locator('#drilldown').count() == 0
+            assert page.evaluate('scrollY') == before_scroll
+            evidence.close()
             page.get_by_label('Find test').fill('array_index_replace_010')
             assert page.locator('#results-matrix tbody tr[data-kind=case]').count() == 3
             page.get_by_label('Find test').fill('')

@@ -38,11 +38,15 @@ class ReviewServer(ThreadingHTTPServer):
                     self.snapshot = snapshot
                     self.snapshot_stamp = stamp
 
-    def rendered(self):
+    def rendered(self, evidence_view=False):
         with self.lock:
             self.refresh()
             annotate(self.snapshot['matrix'], JudgementStore(self.root).read())
-            report = copy.deepcopy(self.snapshot)
+            if evidence_view:
+                # Result tabs need summaries, not another copy of all raw streams.
+                report = {'matrix': {'records': copy.deepcopy(self.snapshot['matrix']['records'])}, 'evidence': {}}
+            else:
+                report = copy.deepcopy(self.snapshot)
             report['judgement_api'] = {'url': '/api/judgements', 'token': self.token}
             for cid, summary in report['matrix']['records'].items():
                 summary['source_uri'] = '/evidence/' + cid
@@ -79,6 +83,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
         try:
             if self.path == '/':
                 self.reply(200, self.server.rendered(), 'text/html; charset=utf-8')
+            elif self.path == '/result/':
+                self.reply(200, self.server.rendered(evidence_view=True), 'text/html; charset=utf-8')
             elif self.path == '/identity':
                 self.reply(200, {'application': 'rpg-test-review-v1', 'root': str(self.server.root)})
             elif self.path.startswith('/evidence/'):

@@ -164,6 +164,19 @@ class ReviewServerTests(unittest.TestCase):
         self.assertEqual(len(self.server.snapshot['matrix']['rows']), len(changed['matrix']['rows']))
         self.assertEqual(len(self.report['matrix']['rows']), len(changed['matrix']['rows']) + 1)
 
+    def test_result_tab_document_is_compact_and_uses_full_evidence_endpoint(self):
+        with urlopen(self.url + '/result/') as response:
+            html = response.read().decode('utf-8')
+        payload = json.loads(html.split('<script type="application/json" id="evidence-data">', 1)[1].split('</script>', 1)[0])
+        self.assertEqual(payload['evidence'], {})
+        self.assertNotIn('cohorts', payload)
+        self.assertEqual(set(payload['matrix']['records']), set(self.report['matrix']['records']))
+        for cid, summary in payload['matrix']['records'].items():
+            self.assertEqual(summary['source_uri'], '/evidence/' + cid)
+        with self.assertRaises(HTTPError) as error:
+            urlopen(Request(self.url + '/result/', headers={'Host': 'evil.example'}))
+        self.assertEqual(error.exception.code, 403)
+
     def test_complete_evidence_endpoint_preserves_multiline_text(self):
         cid, summary = next(iter(self.report['matrix']['records'].items()))
         original = {'case_id': cid, 'calls': [{'messages': [{'role': 'user', 'content':

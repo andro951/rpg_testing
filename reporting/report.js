@@ -25,6 +25,14 @@ const StatisticsReport = {
         document.body.style.fontFamily = "system-ui, sans-serif";
         document.body.style.margin = "24px";
         document.body.style.color = "#17212f";
+        if (location.hash.startsWith(`#results=`)) {
+            StatisticsReport.Content = StatisticsReport.Element(`main`, document.body);
+            StatisticsReport.Content.style.overflowWrap = `anywhere`;
+            window.addEventListener(`hashchange`, StatisticsReport.InitializeEvidence);
+            StatisticsReport.InitializeEvidence();
+            return;
+        }
+
         StatisticsReport.Element("h1", document.body, "RPG testing statistics");
         StatisticsReport.Element("p", document.body, `Offline snapshot · ${StatisticsReport.Data.version} · ${Object.keys(StatisticsReport.Data.matrix.records).length} saved objective results`);
         const filters = StatisticsReport.Element("div", document.body);
@@ -33,15 +41,13 @@ const StatisticsReport = {
         filters.style.gap = "16px";
         ResultsMatrix.Initialize(filters);
         StatisticsReport.Content = StatisticsReport.Element("main", document.body);
-        StatisticsReport.Details = StatisticsReport.Element("section", document.body);
-        StatisticsReport.Details.id = "drilldown";
         StatisticsReport.Render();
     },
     ModelLabel: key => `${StatisticsReport.Data.models[key].label} [${key.slice(-12)}]`,
     //#region Readable evidence
-    EvidenceText: (parent, value) => {
+    EvidenceText: (parent, value, formatJson = true) => {
         let text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-        if (typeof value === "string" && /^[\s]*[\[{]/.test(value)) {
+        if (formatJson && typeof value === "string" && /^[\s]*[\[{]/.test(value)) {
             try {
                 text = JSON.stringify(JSON.parse(value), null, 2);
             }
@@ -94,64 +100,131 @@ const StatisticsReport = {
         StatisticsReport.EvidenceValue(details, value);
         return details;
     },
+    EvidenceBlock: (parent, title) => {
+        const section = StatisticsReport.Element(`section`, parent);
+        section.dataset.evidenceBlock = title;
+        StatisticsReport.Element(`h2`, section, title);
+        return section;
+    },
+    PromptText: (parent, value) => {
+        const exact = typeof value === `string` ? value : JSON.stringify(value, null, 2);
+        const readable = exact.split(`\n`).map(line => {
+            if (!/^\s*[\[{]/.test(line))
+                return line;
+
+            try {
+                return JSON.stringify(JSON.parse(line), null, 2);
+            }
+            catch (error) {
+                //Only complete JSON lines are expanded; instructions and partial JSON stay intact.
+                return line;
+            }
+        }).join(`\n`);
+        const text = StatisticsReport.EvidenceText(parent, readable, false);
+        if (readable !== exact) {
+            const toggle = StatisticsReport.Element(`button`, parent, `Show exact sent text`);
+            let showingExact = false;
+            toggle.addEventListener(`click`, () => {
+                showingExact = !showingExact;
+                text.textContent = showingExact ? exact : readable;
+                toggle.textContent = showingExact ? `Show readable JSON` : `Show exact sent text`;
+            });
+        }
+
+        return text;
+    },
     ShowEvidence: (id, record, complete) => {
-        const parent = StatisticsReport.Details;
+        const parent = StatisticsReport.Content;
         parent.replaceChildren();
-        StatisticsReport.Element("h2", parent, `Evidence ${id}`);
         const summary = StatisticsReport.Data.matrix.records[id];
-        StatisticsReport.Element("p", parent, `${summary.outcome.toUpperCase()} · ${summary.metadata.model_id} · ${summary.metadata.test_id} / ${summary.metadata.variant_id}`);
-        StatisticsReport.EvaluationFeedback(parent, summary);
-        if (summary.source_uri) {
-            const link = StatisticsReport.Element("a", parent, "Open complete original result JSON");
-            link.href = summary.source_uri;
-            link.target = "_blank";
-            link.rel = "noopener";
-        }
+        document.title = `${summary.outcome.toUpperCase()} · ${summary.metadata.test_id} · RPG test result`;
+        StatisticsReport.Element(`h1`, parent, summary.outcome.toUpperCase());
+        const prompt = StatisticsReport.EvidenceBlock(parent, `Full prompt sent to the AI`);
+        const output = StatisticsReport.EvidenceBlock(parent, `Full text result`);
+        const expected = StatisticsReport.EvidenceBlock(parent, `Expected result`);
+        const failure = StatisticsReport.EvidenceBlock(parent, `Failure reason`);
+        if (complete) {
+            const calls = record.calls || [];
+            if (!calls.length)
+                StatisticsReport.Element(`p`, prompt, `No AI request was captured in this saved record.`);
 
-        if (!complete) {
-            StatisticsReport.Element("p", parent, "Limited saved preview. Open this report through Open_Results_Table.bat to load complete prompts and responses.");
-            StatisticsReport.EvidenceSection(parent, "Model output preview (up to 4,000 characters)", summary.output_preview);
-            StatisticsReport.EvidenceSection(parent, "Expected answer preview (up to 4,000 characters)", summary.oracle_preview);
-            StatisticsReport.EvidenceSection(parent, "Result and scoring", summary.metadata);
-            return;
-        }
+            for (const [index, call] of calls.entries()) {
+                const label = `Call ${index + 1}${call.step ? ` · ${call.step}` : ``}${call.iteration ? ` · iteration ${call.iteration}` : ``}`;
+                StatisticsReport.Element(`h3`, prompt, label);
+                const messages = call.request_messages || call.messages || [];
+                if (!messages.length)
+                    StatisticsReport.Element(`p`, prompt, `No request messages were captured for this call.`);
 
-        StatisticsReport.EvidenceSection(parent, "Result and scoring", { status: record.status, timed_out: record.timed_out ?? false, error: record.error ?? null, score: record.score ?? null });
-        StatisticsReport.EvidenceSection(parent, "Model outputs", record.outputs ?? {});
-        const expected = {};
-        for (const key of ["expected_answers", "expected_patch", "result"]) {
-            if (Object.hasOwn(record.variant_definition || {}, key))
-                expected[key] = record.variant_definition[key];
-        }
+                for (const [number, message] of messages.entries()) {
+                    StatisticsReport.Element(`h4`, prompt, `Message ${number + 1} · ${message.role || `unknown role`}`);
+                    StatisticsReport.PromptText(prompt, message.content);
+                }
 
-        if (Object.hasOwn(record.test_definition || {}, "expected_state"))
-            expected.expected_state = record.test_definition.expected_state;
+                StatisticsReport.Element(`h3`, output, label);
+                if (call.incomplete || record.timed_out && index === calls.length - 1)
+                    StatisticsReport.Element(`p`, output, `Partial response saved when the run stopped.`);
 
-        StatisticsReport.EvidenceSection(parent, "Expected result", expected);
-        const calls = StatisticsReport.Element("details", parent);
-        calls.open = true;
-        StatisticsReport.Element("summary", calls, `Requests and responses (${record.calls?.length || 0})`).style.fontWeight = "600";
-        for (const [index, call] of (record.calls || []).entries()) {
-            const section = StatisticsReport.Element("details", calls);
-            section.open = index === 0;
-            StatisticsReport.Element("summary", section, `Call ${index + 1}${call.step ? ` · ${call.step}` : ""}`);
-            for (const [number, message] of (call.request_messages || call.messages || []).entries()) {
-                StatisticsReport.Element("h4", section, `Message ${number + 1} · ${message.role || "unknown role"}`);
-                StatisticsReport.EvidenceText(section, message.content);
+                StatisticsReport.EvidenceText(output, call.text ?? ``);
             }
 
-            StatisticsReport.Element("h4", section, "Model response");
-            StatisticsReport.EvidenceText(section, call.text ?? "");
-            if (call.reasoning_text)
-                StatisticsReport.EvidenceSection(section, "Saved reasoning", call.reasoning_text, false);
+            if (!calls.length)
+                StatisticsReport.EvidenceText(output, record.outputs ?? {});
 
-            const metadata = Object.fromEntries(Object.entries(call).filter(([key]) => !["messages", "text", "reasoning_text", "raw_chunks"].includes(key)));
-            StatisticsReport.EvidenceSection(section, "Call settings and timing", metadata, false);
+            const oracle = {};
+            for (const key of [`expected_answers`, `expected_patch`]) {
+                if (Object.hasOwn(record.variant_definition || {}, key))
+                    oracle[key] = record.variant_definition[key];
+            }
+
+            if (Object.hasOwn(record.test_definition || {}, `expected_state`))
+                oracle.expected_state = record.test_definition.expected_state;
+
+            if (Object.keys(oracle).length)
+                StatisticsReport.EvidenceText(expected, oracle);
+            else
+                StatisticsReport.Element(`p`, expected, `No expected answer or final state was captured in this record.`);
+        }
+        else {
+            StatisticsReport.Element(`p`, prompt, `Complete prompt unavailable in this snapshot. Open the table through Open_Results_Table.bat to load the saved record.`);
+            StatisticsReport.Element(`p`, output, `Limited output preview (up to 4,000 characters).`);
+            StatisticsReport.EvidenceText(output, summary.output_preview);
+            StatisticsReport.Element(`p`, expected, `Limited expected-result preview (up to 4,000 characters).`);
+            StatisticsReport.EvidenceText(expected, summary.oracle_preview);
         }
 
-        StatisticsReport.EvidenceSection(parent, "Test definition", { test_definition: record.test_definition, variant_definition: record.variant_definition }, false);
-        const raw = StatisticsReport.Element("details", parent);
-        StatisticsReport.Element("summary", raw, "Complete raw record (JSON)");
+        const evaluation = summary.evaluation;
+        const failed = summary.outcome !== `pass` || evaluation?.objective_outcome === `FAIL`;
+        StatisticsReport.Element(`p`, failure, failed ? evaluation?.reason || record?.error || record?.reason || `No detailed failure reason was captured.` : `None — this result passed.`);
+        if (evaluation?.score_comparison === `disagreement`)
+            StatisticsReport.Element(`p`, failure, `The detailed evaluator disagrees with the saved score shown at the top.`);
+
+        const other = StatisticsReport.EvidenceBlock(parent, `Additional information`);
+        StatisticsReport.Element(`p`, other, `${summary.metadata.model_id} · ${summary.metadata.test_id} / ${summary.metadata.variant_id} · repetition ${(summary.metadata.repetition || 0) + 1} · ${id}`);
+        StatisticsReport.EvaluationFeedback(other, summary);
+        StatisticsReport.EvidenceSection(other, `Timing`, summary.timing || {}, false);
+        StatisticsReport.EvidenceSection(other, `Result and scoring`, summary.metadata, false);
+        if (summary.source_uri) {
+            const link = StatisticsReport.Element(`a`, other, `Open complete original result JSON`);
+            link.href = summary.source_uri;
+            link.target = `_blank`;
+            link.rel = `noopener`;
+        }
+
+        if (!complete)
+            return;
+
+        StatisticsReport.EvidenceSection(other, `Captured outputs`, record.outputs || {}, false);
+        for (const [index, call] of (record.calls || []).entries()) {
+            if (call.reasoning_text)
+                StatisticsReport.EvidenceSection(other, `Call ${index + 1} saved reasoning`, call.reasoning_text, false);
+
+            const settings = Object.fromEntries(Object.entries(call).filter(([key]) => ![`messages`, `request_messages`, `text`, `reasoning_text`, `raw_chunks`].includes(key)));
+            StatisticsReport.EvidenceSection(other, `Call ${index + 1} settings and timing`, settings, false);
+        }
+
+        StatisticsReport.EvidenceSection(other, `Test definition`, { test_definition: record.test_definition, variant_definition: record.variant_definition }, false);
+        const raw = StatisticsReport.Element(`details`, other);
+        StatisticsReport.Element(`summary`, raw, `Complete raw record (JSON)`);
         StatisticsReport.EvidenceText(raw, record);
     },
     EvaluationFeedback: (parent, summary) => {
@@ -181,30 +254,72 @@ const StatisticsReport = {
 
         StatisticsReport.Element(`small`, section, `Evaluator diagnostics are separate from manual test judgements. Cell colors and totals retain saved scores.${evaluation.evaluator_version ? ` Evaluator: ${evaluation.evaluator_version}.` : ``}`);
     },
-    Inspect: async id => {
+    EvidenceUrl: ids => {
+        const url = new URL(location.href);
+        if (StatisticsReport.Data.judgement_api)
+            url.pathname = `/result/`;
+
+        url.hash = `results=${ids.join(`,`)}`;
+        return url.href;
+    },
+    Inspect: id => StatisticsReport.OpenEvidence([id]),
+    OpenEvidence: ids => {
+        //Open during the click so loading evidence cannot trigger popup blocking.
+        window.open(StatisticsReport.EvidenceUrl(ids), `_blank`, `noopener`);
+    },
+    InitializeEvidence: async () => {
+        const parent = StatisticsReport.Content;
         const request = (StatisticsReport.EvidenceRequest || 0) + 1;
         StatisticsReport.EvidenceRequest = request;
+        parent.replaceChildren();
+        const ids = [...new Set(location.hash.slice(`#results=`.length).split(`,`))];
+        if (!ids.length || ids.some(id => !Object.hasOwn(StatisticsReport.Data.matrix.records, id))) {
+            StatisticsReport.Element(`h1`, parent, `Result unavailable`);
+            StatisticsReport.Element(`p`, parent, `This saved result is not in the current report.`);
+            return;
+        }
+
+        if (ids.length > 1) {
+            document.title = `Selected test results`;
+            StatisticsReport.Element(`h1`, parent, `Selected test results`);
+            StatisticsReport.Element(`p`, parent, `${ids.length} unique saved results. Select one to see its complete prompt, response, expected result and failure reason.`);
+            const list = StatisticsReport.Element(`ul`, parent);
+            for (const id of ids) {
+                const summary = StatisticsReport.Data.matrix.records[id];
+                const metadata = summary.metadata;
+                const link = StatisticsReport.Element(`a`, StatisticsReport.Element(`li`, list), `${summary.outcome.toUpperCase()} · ${metadata.model_id} · ${metadata.test_id} / ${metadata.variant_id} · repetition ${(metadata.repetition || 0) + 1}`);
+                link.href = StatisticsReport.EvidenceUrl([id]);
+            }
+
+            return;
+        }
+
+        const id = ids[0];
         const summary = StatisticsReport.Data.matrix.records[id];
         const original = StatisticsReport.Data.evidence[id];
-        StatisticsReport.ShowEvidence(id, original, Boolean(original));
-        StatisticsReport.Details.scrollIntoView({ behavior: "smooth" });
-        if (original || !summary.source_uri || !StatisticsReport.Data.judgement_api)
+        if (!StatisticsReport.Data.judgement_api || !summary.source_uri) {
+            StatisticsReport.ShowEvidence(id, original, Boolean(original));
             return;
+        }
 
-        const loading = StatisticsReport.Element("p", StatisticsReport.Details, "Loading complete saved evidence…");
-        loading.setAttribute("role", "status");
+        const loading = StatisticsReport.Element(`p`, parent, `Loading complete saved evidence…`);
+        loading.setAttribute(`role`, `status`);
         try {
             const response = await fetch(summary.source_uri);
             if (!response.ok)
                 throw new Error(`Evidence request failed (${response.status})`);
 
             const record = await response.json();
-            if (StatisticsReport.EvidenceRequest === request)
+            if (request === StatisticsReport.EvidenceRequest)
                 StatisticsReport.ShowEvidence(id, record, true);
         }
         catch (error) {
-            if (StatisticsReport.EvidenceRequest === request)
-                loading.textContent = `Could not load complete evidence: ${error.message}. The limited preview remains available.`;
+            if (request !== StatisticsReport.EvidenceRequest)
+                return;
+
+            StatisticsReport.ShowEvidence(id, original, Boolean(original));
+            const message = StatisticsReport.Element(`p`, parent.lastElementChild, `Could not load complete evidence: ${error.message}.${original ? ` The embedded saved record is displayed.` : ` The limited preview remains available.`}`);
+            message.setAttribute(`role`, `status`);
         }
     },
     //#endregion
@@ -293,7 +408,6 @@ const StatisticsReport = {
     Render: () => {
         StatisticsReport.EvidenceRequest = (StatisticsReport.EvidenceRequest || 0) + 1;
         StatisticsReport.Content.replaceChildren();
-        StatisticsReport.Details.replaceChildren();
         ResultsMatrix.Render();
     }
 };
