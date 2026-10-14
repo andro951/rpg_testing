@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -62,22 +64,63 @@ def launch(executable, profile, port, url, headless=False):
                             **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
 
 
+def _stop_probe_browser(child):
+    if child is None:
+        return
+    try:
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.terminate()
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f'Perchance probe shutdown warning: {exc}', file=sys.stderr)
+
+
+def _cleanup_probe_profile(profile):
+    #Delete only the temporary profile created by this dependency check.
+    profile = Path(profile).resolve()
+    if profile.parent != Path(tempfile.gettempdir()).resolve() or not profile.name.startswith('rpg-cdp-probe-'):
+        print(f'Perchance probe cleanup warning: refusing unexpected profile path {profile}', file=sys.stderr)
+        return
+    for attempt in range(6):
+        try:
+            shutil.rmtree(profile)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            if attempt == 5:
+                print(f'Perchance probe cleanup warning: temporary profile retained at {profile}: {exc}', file=sys.stderr)
+            else:
+                time.sleep(.1 * (attempt + 1))
+
+
 def probe(executable):
     """Local dependency/CDP check only; no Perchance page or generation request."""
     from playwright.sync_api import sync_playwright
-    with tempfile.TemporaryDirectory(prefix='rpg-cdp-probe-') as profile:
+    profile = tempfile.mkdtemp(prefix='rpg-cdp-probe-')
+    child = None
+    try:
         with socket.socket() as reservation:
             reservation.bind(('127.0.0.1', 0)); port = reservation.getsockname()[1]
         child = launch(executable, profile, port, 'about:blank', headless=True)
-        try:
-            address = wait_for_browser(port, lambda: False)
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.connect_over_cdp(address, timeout=10000)
-                browser.close()
-        finally:
-            if child.poll() is None:
-                child.terminate()
-            child.wait(timeout=10)
+        address = wait_for_browser(port, lambda: False)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.connect_over_cdp(address, timeout=10000)
+            try:
+                #An attached Browser.close() disconnects Playwright. CDP closes
+                #the owned probe browser, letting its children release files.
+                browser.new_browser_cdp_session().send('Browser.close')
+            except Exception as exc:
+                print(f'Perchance probe shutdown warning: {exc}', file=sys.stderr)
+    finally:
+        _stop_probe_browser(child)
+        _cleanup_probe_profile(profile)
 
 
 class ControlledBrowserBackend(perchance.BrowserBackend):

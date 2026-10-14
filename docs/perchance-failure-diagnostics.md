@@ -27,3 +27,38 @@ A subsequent browser startup was blocked before any generation by Cloudflare's e
 The user subsequently supplied successful comparison artifacts from the EmberAdventures harness: its normal Edge/CDP session produced text through both the unchanged RPG worker and the exact RPG role-labeled instruction. The Workbench now uses the normal-browser/CDP transport in `workbench/perchance_connection.py`, including both targeted Perchance and the final Run-all phase. It retains a dedicated RPG profile, separate loopback CDP port, hosted page and browser across requests/runs. It leaves manual verification visible on the host and keeps startup readiness distinct from successful generation. The provider adapter/worker, serializer, 300-second deadline, raw evidence and observation IDs are unchanged. Connection implementation/version metadata is captured separately in the environment.
 
 One harmless live request through the revised connection completed in **4.410 seconds**, with natural stop, nonempty final text and streamed chunks. Complete response evidence is saved at `tools/perchance-text/diagnostics/2026-10-08-cdp-response.json`, separate from benchmark results. This establishes successful text generation on this PC with the revised connection. It does not identify which exact launch flag, profile/session state or service restriction caused the previous path to stall. The existing failure popup and export diagnostics remain in place.
+
+## Repeated installation prompt: temporary profile cleanup
+
+On October 14, the reported worker traceback ended in Python 3.10's
+`TemporaryDirectory` cleanup with `NotADirectoryError: [WinError 267]` on the
+probe profile's `Default/Account Web Data` file. The subprocess's cleanup exception
+was treated as a failed browser dependency check, causing another installation
+offer. This error by itself does not establish that Playwright is missing or
+that reinstalling it will help.
+
+The dependency probe now asks its own temporary browser to close through CDP,
+waits for that process, and retries profile deletion briefly. Cleanup errors are
+logged as warnings rather than replacing the launch/connection verdict. A real
+launch or CDP failure still propagates, even when cleanup also fails. Shutdown
+fallbacks only target the process launched by that probe. Deletion is restricted
+to its `rpg-cdp-probe-*` directory under the system temporary directory; the
+persistent Perchance browser and profile are separate. The setup subprocess has
+enough time for those shutdown steps. Benchmark and prompt-writing deadlines
+are unchanged.
+
+Regression tests simulate transient and persistent Windows cleanup errors,
+launch/connection failures, shutdown failures, fallback termination, and path
+guards. Three actual local Edge/CDP probes all exited and removed their profiles.
+Three successive eligible preflights reported ready without installation prompts
+or installer calls. Those checks used `about:blank`, with no Perchance service
+request or benchmark observation. The user's `E:/Source/Repos/rpg_testing` worker
+checkout is not available on this computer; it must receive the updated source
+and restart Workbench to use the repair.
+
+Validation passed all 622 repository tests (605.960 seconds), the 45 focused
+connection/setup/scheduling tests, and the browser setup UI smoke, including
+decline, approval, explicit cancellation and terminal resume. The UI smoke's
+installer and inference were simulated; its browser/HTTP path was real. Logs and
+the actual Edge probe report are under `.local/perchance-probe-cleanup-*`.
+A two-file Git patch for the host is `.local/perchance-browser-setup-fix.patch`.

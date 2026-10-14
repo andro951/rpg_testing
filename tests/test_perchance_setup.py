@@ -39,6 +39,14 @@ class BrowserSetupTests(unittest.TestCase):
             process.assert_called_once()
             self.assertEqual(self.app.settings['perchance_browser'], '')
 
+    def test_successful_probe_with_cleanup_warning_does_not_offer_reinstallation(self):
+        warning = 'Perchance probe cleanup warning: temporary profile retained: [WinError 267]'
+        with patch.object(setup.importlib.util, 'find_spec', return_value=object()), \
+             patch.object(setup.perchance, 'browser_executable', return_value='fixture.exe'), \
+             patch.object(setup, 'process', return_value=(0, '', warning)), patch.object(self.app, 'log') as log:
+            self.assertEqual(setup.health(self.app), {'ready': True, 'reason': ''})
+        log.assert_called_once_with('perchance_setup', warning)
+
     def test_installs_managed_browser_if_existing_browser_unusable_and_rechecks(self):
         with patch.object(setup, 'process', side_effect=[(0, '', ''), (0, '', ''), (0, 'managed.exe\n', '')]) as process, \
              patch.object(setup, 'health', side_effect=[{'ready': False, 'reason': 'no browser'}, {'ready': True, 'reason': ''}]) as health:
