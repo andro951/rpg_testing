@@ -1,3 +1,4 @@
+import io
 import json
 import sys
 import tempfile
@@ -6,6 +7,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from contextlib import redirect_stderr
 
 from workbench import perchance, perchance_connection as connection
 from workbench.controller import Controller
@@ -147,6 +149,84 @@ class ControlledConnectionTests(unittest.TestCase):
         self.assertEqual(app.settings['perchance_cdp_port'], 9234)
         for value in (True, '9223', 65536):
             with self.assertRaises(ValueError):app.configure({'perchance_cdp_port': value})
+
+
+class ProbeLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.profile = Path(tempfile.gettempdir()).resolve() / 'rpg-cdp-probe-fixture'
+        self.client = MagicMock()
+        self.child = MagicMock()
+        self.browser = self.client.chromium.connect_over_cdp.return_value
+        context = MagicMock(); context.__enter__.return_value = self.client
+        self.module = patch.dict(sys.modules, {'playwright.sync_api': SimpleNamespace(sync_playwright=lambda: context)})
+
+    def run_probe(self, wait_error=None, cleanup_errors=None, launch_error=None):
+        stderr = io.StringIO()
+        with self.module, patch.object(connection.tempfile, 'mkdtemp', return_value=str(self.profile)), \
+             patch.object(connection, 'launch', return_value=self.child, side_effect=launch_error), \
+             patch.object(connection, 'wait_for_browser', return_value='http://127.0.0.1:9223', side_effect=wait_error), \
+             patch.object(connection.shutil, 'rmtree', side_effect=cleanup_errors) as cleanup, \
+             patch.object(connection.time, 'sleep'), redirect_stderr(stderr):
+            connection.probe('edge.exe')
+        return cleanup, stderr.getvalue()
+
+    def test_success_closes_only_owned_probe_browser_before_profile_cleanup(self):
+        cleanup, warning = self.run_probe()
+        self.browser.new_browser_cdp_session.return_value.send.assert_called_once_with('Browser.close')
+        self.browser.close.assert_not_called()
+        self.child.wait.assert_called_once_with(timeout=5)
+        self.child.terminate.assert_not_called()
+        cleanup.assert_called_once_with(self.profile)
+        self.assertEqual(warning, '')
+
+    def test_transient_windows_profile_lock_is_retried_without_failing_probe(self):
+        cleanup, warning = self.run_probe(cleanup_errors=[NotADirectoryError(267, 'Account Web Data'), None])
+        self.assertEqual(cleanup.call_count, 2)
+        self.assertEqual(warning, '')
+
+    def test_persistent_windows_cleanup_error_is_warning_not_failed_readiness(self):
+        cleanup, warning = self.run_probe(cleanup_errors=NotADirectoryError(267, 'Account Web Data'))
+        self.assertEqual(cleanup.call_count, 6)
+        self.assertIn('cleanup warning', warning)
+        self.assertIn(str(self.profile), warning)
+
+    def test_real_connection_error_survives_profile_cleanup_error(self):
+        with self.assertRaisesRegex(RuntimeError, 'CDP unavailable'):
+            self.run_probe(wait_error=RuntimeError('CDP unavailable'),
+                           cleanup_errors=NotADirectoryError(267, 'Account Web Data'))
+        self.client.chromium.connect_over_cdp.assert_not_called()
+        self.child.wait.assert_called_once_with(timeout=5)
+
+    def test_launch_failure_still_cleans_profile_and_preserves_failure(self):
+        with self.assertRaisesRegex(OSError, 'browser missing'):
+            self.run_probe(launch_error=OSError('browser missing'))
+        self.child.wait.assert_not_called()
+
+    def test_stubborn_probe_child_is_terminated_then_killed(self):
+        self.child.wait.side_effect = [connection.subprocess.TimeoutExpired('probe', 5),
+                                       connection.subprocess.TimeoutExpired('probe', 5), None]
+        self.run_probe()
+        self.child.terminate.assert_called_once()
+        self.child.kill.assert_called_once()
+        self.assertEqual(self.child.wait.call_count, 3)
+
+    def test_shutdown_error_does_not_mask_real_connection_failure(self):
+        self.child.wait.side_effect = OSError('shutdown failed')
+        with self.assertRaisesRegex(RuntimeError, 'CDP unavailable'):
+            self.run_probe(wait_error=RuntimeError('CDP unavailable'))
+
+    def test_cdp_shutdown_error_falls_back_to_owned_child_cleanup(self):
+        self.browser.new_browser_cdp_session.return_value.send.side_effect = RuntimeError('connection closed')
+        cleanup, warning = self.run_probe()
+        self.assertIn('shutdown warning', warning)
+        self.child.wait.assert_called_once_with(timeout=5)
+        cleanup.assert_called_once_with(self.profile)
+
+    def test_cleanup_refuses_persistent_profile(self):
+        with patch.object(connection.shutil, 'rmtree') as cleanup, redirect_stderr(io.StringIO()) as stderr:
+            connection._cleanup_probe_profile(Path(tempfile.gettempdir()) / 'perchance-controlled-profile')
+        cleanup.assert_not_called()
+        self.assertIn('refusing unexpected profile', stderr.getvalue())
 
 
 if __name__ == '__main__':unittest.main()

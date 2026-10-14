@@ -49,9 +49,11 @@ def health(app):
               'from workbench.perchance_connection import probe; probe(sys.argv[1])')
     try:
         code, out, err = process(app, [sys.executable, '-c', script, browser,
-                                     str(Path(__file__).resolve().parents[1])], timeout=45)
+                                     str(Path(__file__).resolve().parents[1])], timeout=60)
     except (RuntimeError, OSError) as exc:
         return {'ready': False, 'reason': str(exc)}
+    if code == 0 and err.strip():
+        app.log('perchance_setup', err.strip())
     return {'ready': code == 0, 'reason': '' if code == 0 else (err or out or 'Browser launch failed')[-2000:]}
 
 
