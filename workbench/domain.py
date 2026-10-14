@@ -85,11 +85,24 @@ def recommend_vram(size_bytes: int) -> int | None:
     return next((tier for tier in TIERS if tier >= needed), None)
 
 
-def code_fingerprint():
-    """Only experiment-affecting implementation, not CSS or laptop paths."""
+def implementation_fingerprint():
+    """Exact source provenance, including operational loading code."""
     base=Path(__file__).parent
     return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
                    for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py','presentation.py','seedcheck.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
+
+
+def code_fingerprint():
+    """Preserve experiment identity for explicitly reviewed operational changes."""
+    current=implementation_fingerprint()
+    path=Path(__file__).with_name('operational-source-compatibility.json')
+    if not path.exists():return current
+    reviewed=read_json(path)
+    if reviewed.get('schema_version')!=1:raise ValueError('Invalid operational source compatibility version')
+    result=reviewed.get('equivalent_implementations',{}).get(current,current)
+    if not isinstance(result,str) or not re.fullmatch(r'[0-9a-f]{64}',result):
+        raise ValueError('Invalid reviewed experiment fingerprint')
+    return result
 
 
 def experiment_spec(test: dict, variant: dict) -> dict:

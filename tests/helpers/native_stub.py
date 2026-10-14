@@ -3,6 +3,12 @@ import argparse,json,os,time
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 p=argparse.ArgumentParser();p.add_argument('--port',type=int);p.add_argument('--alias');p.add_argument('--ctx-size',type=int);args=p.parse_args()
 print('offloaded '+os.environ.get('STUB_LAYERS','33/33')+' layers to GPU',flush=True)
+if os.environ.get('STUB_STARTUP_DELAY'):
+ print('load_tensors: loading model tensors',flush=True)
+ time.sleep(float(os.environ['STUB_STARTUP_DELAY']))
+if os.environ.get('STUB_LOAD_ERROR'):
+ print(os.environ['STUB_LOAD_ERROR'],flush=True)
+ raise SystemExit(2)
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def send(self,body):self.send_response(200);self.end_headers();self.wfile.write(json.dumps(body).encode())
@@ -19,7 +25,9 @@ class Handler(BaseHTTPRequestHandler):
   elif self.path=='/v1/chat/completions':
    self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
    messages=str(body.get('messages'))
-   if 'READY' in messages:content='Ready.'
+   if 'READY' in messages:
+    time.sleep(float(os.environ.get('STUB_PROBE_DELAY','0')))
+    content='Ready.'
    elif 'SEED_REPRODUCIBILITY_CHECK' in messages:
     seed=body.get('seed',-1)
     content=('At Observatory '+str(seed)+', Mara found a sealed metal box beneath the broken telescope. '

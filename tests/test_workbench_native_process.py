@@ -1,8 +1,9 @@
 import os,sys,tempfile,threading,time,unittest
 from pathlib import Path
 from unittest.mock import patch
-from workbench.native import NativeBackend,capabilities
+from workbench.native import NativeBackend,capabilities,loading_phase
 from workbench.execution_policy import CPUOffload,RunFailure,RuntimeStall
+from workbench.workflows import Cancelled
 ROOT=Path(__file__).resolve().parents[1]
 class ProcessTests(unittest.TestCase):
  def setUp(self):
@@ -34,9 +35,60 @@ class ProcessTests(unittest.TestCase):
   self.assertIn('--reasoning',str(cm.exception))
   with patch('workbench.native.diagnostic_command',side_effect=[required+' --reasoning MODE','v']):
    self.assertIn('--reasoning',capabilities('llama-server',preparation=True)['help'])
- def test_configured_load_timeout_extends_default_floor(self):
-  self.b.settings['load_timeout_seconds']=900
-  metadata=self.load();self.assertEqual(metadata['load_timeout_seconds'],900)
+ def test_legacy_load_timeout_is_ignored_and_no_watchdog_is_armed(self):
+  self.b.settings['load_timeout_seconds']=.01
+  with patch.object(self.b,'budget',side_effect=AssertionError('Loading must not arm a watchdog')), \
+       patch.dict(os.environ,{'STUB_STARTUP_DELAY':'.2','STUB_PROBE_DELAY':'.2'}):
+   metadata=self.load()
+  self.assertIsNone(metadata['load_timeout_seconds'])
+  self.assertEqual(metadata['load_timeout_policy'],'completion_manual_stop_or_runtime_error')
+  self.assertEqual(self.b.transport.timeout,60)
+  self.assertEqual(metadata['loading_diagnostics']['phase'],'Ready')
+ def test_loading_readiness_has_unlimited_reads_but_health_polling_is_bounded(self):
+  timeouts=[];request=self.b.transport.request
+  def capture(path,*args,**kwargs):
+   timeouts.append((path,self.b.transport.timeout));return request(path,*args,**kwargs)
+  with patch.object(self.b.transport,'request',side_effect=capture):self.load()
+  self.assertTrue(any(path=='/v1/chat/completions' and value is None for path,value in timeouts))
+  self.assertTrue(all(value==1 for path,value in timeouts if path=='/health'))
+  self.assertEqual(self.b.transport.timeout,60)
+ def test_loading_reports_phase_elapsed_time_and_runtime_activity(self):
+  events=[];progress=[];self.b.log=lambda category,message:events.append((category,message))
+  self.b.progress=lambda *args:progress.append(args)
+  with patch('workbench.native.LOAD_DIAGNOSTIC_INTERVAL',.05),patch.dict(os.environ,{'STUB_STARTUP_DELAY':'.3'}):
+   metadata=self.load()
+  status=[message for category,message in events if category=='model_loading']
+  self.assertTrue(any(s['phase']=='Loading model weights' and s['seconds_since_runtime_output'] is not None for s in status))
+  self.assertTrue(any(s['elapsed_seconds']>.1 for s in status))
+  self.assertTrue(any('last runtime output' in str(item) for item in progress))
+  self.assertNotIn(self.b.token,str(status))
+ def test_manual_stop_interrupts_loading_and_unloads_only_owned_process(self):
+  cancel=threading.Event();errors=[]
+  def load():
+   try:self.b.load({'id':'stopped-stub','paths':['unused']},{'allocated_tokens':8192},cancel)
+   except Exception as exc:errors.append(exc)
+  with patch.dict(os.environ,{'STUB_STARTUP_DELAY':'10'}):
+   worker=threading.Thread(target=load);worker.start()
+   until=time.monotonic()+3
+   while not self.b.lines and time.monotonic()<until:time.sleep(.01)
+   process=self.b.process
+   try:cancel.set();self.b.cancel();worker.join(3)
+   finally:
+    if worker.is_alive():self.b.unload();worker.join(3)
+  self.assertFalse(worker.is_alive());self.assertIsInstance(errors[0],Cancelled)
+  self.assertIsNotNone(process.poll());self.assertIsNone(self.b.process)
+  self.assertEqual(self.b.transport.timeout,60)
+ def test_runtime_crash_during_loading_preserves_error_without_waiting_for_deadline(self):
+  with patch.dict(os.environ,{'STUB_LOAD_ERROR':'Runtime failed: invalid model artifact'}):
+   with self.assertRaisesRegex(RunFailure,'invalid model artifact'):self.load()
+  self.assertIsNone(self.b.process);self.assertEqual(self.b.transport.timeout,60)
+  self.assertIsNone(self.b.load_metadata['load_timeout_seconds'])
+ def test_loading_phases_follow_runtime_evidence(self):
+  self.assertEqual(loading_phase('llama_model_loader: loaded meta data'),'Reading model metadata')
+  self.assertEqual(loading_phase('load_tensors: loading model tensors'),'Loading model weights')
+  self.assertEqual(loading_phase('llama_context: constructing llama_context'),'Allocating context and runtime buffers')
+  self.assertEqual(loading_phase('warming up the model with an empty run'),'Warming up model')
+  self.assertIsNone(loading_phase('A silence is not proof of a hang'))
  def test_owned_process_load_probe_generation_unload(self):
   metadata=self.load();process=self.b.process
   self.assertEqual(metadata['placement']['status'],'full_gpu');self.assertFalse(metadata['health_exact_ready'])

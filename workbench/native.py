@@ -1,6 +1,7 @@
-"""Owned llama.cpp process; explicit device placement and bounded unattended operations."""
+"""Owned llama.cpp process; cancellable loading and bounded benchmark requests."""
 from __future__ import annotations
 import contextlib
+import http.client
 import os
 import re
 import secrets
@@ -10,9 +11,21 @@ import threading
 import time
 from pathlib import Path
 from .execution_policy import (CPUOffload, ContextCapacity, DoesNotFit, RunFailure, RuntimeStall,
-    UnverifiedPlacement, LOAD_TIMEOUT_SECONDS, classify_load_failure, placement)
+    UnverifiedPlacement, classify_load_failure, placement)
 from .inventory import executable
+from .domain import implementation_fingerprint
 from .workflows import Cancelled, Unsupported
+
+LOAD_DIAGNOSTIC_INTERVAL = 5
+
+
+def loading_phase(line):
+    if 'warming up the model' in line:return 'Warming up model'
+    if any(text in line for text in ('llama_context:', 'llama_kv_cache:', 'llama_memory_recurrent:', 'sched_reserve:')):
+        return 'Allocating context and runtime buffers'
+    if 'load_tensors:' in line:return 'Loading model weights'
+    if 'llama_model_loader:' in line or 'load_model: loading model' in line:return 'Reading model metadata'
+    return None
 
 
 def diagnostic_command(args, timeout=30):
@@ -80,6 +93,45 @@ class NativeBackend:
         self.process=None;self.reader=None;self.owned_id=None;self.context=None
         self.load_metadata={};self.version_info={};self.lines=[];self.timed_out=False
         self.requested_layers='all';self.execution_class='full_gpu';self.progress=lambda task,pct,detail='':None
+        self._loading_lock=threading.RLock();self._loading_status={}
+
+    def _loading_snapshot(self,started):
+        with self._loading_lock:status=dict(self._loading_status)
+        stamp=time.perf_counter()
+        last=status.pop('last_output_at',None)
+        return {**status,'elapsed_seconds':stamp-started,
+                'seconds_since_runtime_output':stamp-last if last is not None else None}
+
+    @contextlib.contextmanager
+    def _loading_scope(self,model,started):
+        original_timeout=self.transport.timeout
+        self.transport.timeout=None;self.timed_out=False
+        done=threading.Event()
+        def report():
+            status=self._loading_snapshot(started)
+            self.log('model_loading',{'model_id':model['id'],'load_timeout_seconds':None,
+                                     'load_timeout_policy':'completion_manual_stop_or_runtime_error',**status})
+            age=status['seconds_since_runtime_output']
+            detail=f"{status['phase']} · {status['elapsed_seconds']:.0f}s elapsed"
+            detail+=f' · last runtime output {age:.0f}s ago' if age is not None else ' · waiting for first runtime output'
+            self.progress('Loading model',None,detail)
+        def monitor():
+            while not done.wait(LOAD_DIAGNOSTIC_INTERVAL):report()
+        reporter=threading.Thread(target=monitor,name='model-loading-progress',daemon=True)
+        report();reporter.start()
+        try:yield
+        finally:
+            done.set();reporter.join()
+            self.load_metadata.update(load_timeout_seconds=None,
+                load_timeout_policy='completion_manual_stop_or_runtime_error',
+                loading_diagnostics=self._loading_snapshot(started))
+            self.transport.timeout=original_timeout
+
+    def _model_health(self,cancel):
+        #A short polling request is retried, not an overall model-load deadline.
+        previous=self.transport.timeout;self.transport.timeout=1
+        try:return self.transport.request('/health',cancel=cancel)
+        finally:self.transport.timeout=previous
 
     def cancel_request(self):
         self.transport.cancel()
@@ -136,7 +188,7 @@ class NativeBackend:
 
     def load(self,model,context,cancel=None,layers='all',execution_class='full_gpu'):
         self.progress('Loading model',0,'Checking runtime and GPU controls.')
-        self.lines=[];self.load_metadata={};self.context=context['allocated_tokens']
+        self.lines=[];self.load_metadata={};self.context=context['allocated_tokens'];self.timed_out=False
         self.requested_layers=layers;self.execution_class=execution_class
         self.owned_id='rpg-workbench-'+model['id']
         exe=executable('llama-server',self.settings.get('llama_path',''))
@@ -168,11 +220,9 @@ class NativeBackend:
         cache=Path(self.settings.get('runtime_cache',Path.cwd()/'.local/runtime-cache'));cache.mkdir(parents=True,exist_ok=True)
         env.update(CUDA_CACHE_PATH=str(cache),XDG_CACHE_HOME=str(cache),HF_HOME=str(cache/'huggingface'))
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
-        configured_timeout=self.settings.get('load_timeout_seconds',LOAD_TIMEOUT_SECONDS)
-        if type(configured_timeout) not in (int,float) or configured_timeout<=0:
-            raise RunFailure('load_timeout_seconds must be a positive number')
-        load_timeout=max(LOAD_TIMEOUT_SECONDS,configured_timeout)
         started=time.perf_counter()
+        with self._loading_lock:
+            self._loading_status={'phase':'Starting runtime','last_output_at':None,'last_runtime_line':None}
         try:
             self.progress('Loading model',25,'Starting model process and waiting for readiness.')
             self.process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,
@@ -182,8 +232,14 @@ class NativeBackend:
                 for line in process.stdout:
                     line=line.rstrip().replace(self.token,'[REDACTED]')
                     self.lines.append(line);self.log('backend',line)
+                    with self._loading_lock:
+                        self._loading_status.update(last_output_at=time.perf_counter(),last_runtime_line=line)
+                        phase=loading_phase(line)
+                        if phase and self._loading_status['phase'] not in ('Verifying model','Readiness probe','Ready'):
+                            self._loading_status['phase']=phase
             self.reader=threading.Thread(target=drain,daemon=True);self.reader.start()
-            with self.budget(load_timeout):
+            with self._loading_scope(model,started):
+                from .backends import BackendError
                 while True:
                     if cancel and cancel.is_set():raise Cancelled('Stopped during loading')
                     if process.poll() is not None:
@@ -193,11 +249,16 @@ class NativeBackend:
                     if execution_class=='full_gpu' and evidence['status']=='cpu_offloaded':
                         raise CPUOffload('CPU model placement detected before benchmark',evidence)
                     try:
-                        if self.transport.request('/health').get('status')=='ok':
+                        if self._model_health(cancel).get('status')=='ok':
+                            with self._loading_lock:self._loading_status['phase']='Verifying model'
                             self.progress('Loading model',75,'llama-server is healthy; verifying placement and context.')
                             break
-                    except Exception:
-                        if self.timed_out:raise RuntimeStall('Model load timed out')
+                    except BackendError as exc:
+                        #503 means loading; connection errors can occur before
+                        #the owned process starts listening. Other errors fail.
+                        if not str(exc).startswith('HTTP 503:') and not isinstance(exc.__cause__,(OSError,http.client.HTTPException)):
+                            raise
+                        with self._loading_lock:self._loading_status['last_health_error']=str(exc)
                     time.sleep(.15)
                 evidence=placement(self.lines)
                 if evidence['status']=='unverified':raise UnverifiedPlacement('No verifiable layer-placement report',evidence)
@@ -212,25 +273,33 @@ class NativeBackend:
                 actual=settings.get('n_ctx') or settings.get('params',{}).get('n_ctx')
                 if actual and actual!=self.context:raise RunFailure('Runtime changed the context allocation')
                 self.load_metadata={'placement':evidence,'execution_class':execution_class,'requested_gpu_layers':layers,
-                    'context':context,'load_seconds':time.perf_counter()-started,'load_timeout_seconds':load_timeout,
+                    'context':context,'load_seconds':time.perf_counter()-started,'load_timeout_seconds':None,
+                    'implementation_fingerprint':implementation_fingerprint(),
                     'arguments':['[REDACTED]' if a==self.token else a for a in args],
                     'runtime':self.version_info,'properties':props,
                     'full_gpu_layers_verified':evidence['status']=='full_gpu',
                     'independent_os_residency_verified':False}
+                with self._loading_lock:self._loading_status['phase']='Readiness probe'
                 self.progress('Loading model',90,'Placement verified; running readiness probe.')
                 probe=self.generate([{'role':'user','content':'Reply with the single word READY.'}],
                                     {'temperature':0,'seed':42,'top_p':1},None,'default',cancel)
                 if probe['finish_reason']!='stop' or not probe['text'].strip():raise RunFailure('Readiness probe did not finish normally')
                 self.load_metadata['health_check']=probe;self.load_metadata['health_exact_ready']=probe['text'].strip()=='READY'
-                self.clear_cache();self.progress('Loading model',100,'Model loaded and ready.')
+                self.clear_cache()
+                with self._loading_lock:self._loading_status['phase']='Ready'
+                self.progress('Loading model',100,'Model loaded and ready.')
             return self.load_metadata
         except Exception as exc:
             from .backends import BackendError
-            if isinstance(exc,BackendError):
+            if cancel and cancel.is_set() and not isinstance(exc,Cancelled):
+                exc=Cancelled('Stopped during loading')
+            elif isinstance(exc,BackendError):
                 converted=classify_load_failure(str(exc));converted.partial_response=getattr(exc,'partial_response',{})
                 exc=converted
             self.load_metadata.update(context=context,execution_class=execution_class,
-                placement=placement(self.lines),load_seconds=time.perf_counter()-started,load_timeout_seconds=load_timeout)
+                placement=placement(self.lines),load_seconds=time.perf_counter()-started,load_timeout_seconds=None,
+                load_timeout_policy='completion_manual_stop_or_runtime_error',loading_diagnostics=self._loading_snapshot(started),
+                implementation_fingerprint=implementation_fingerprint())
             if isinstance(exc,RunFailure):exc.evidence={**self.load_metadata,**exc.evidence}
             self.unload();raise exc
 

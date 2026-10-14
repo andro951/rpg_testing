@@ -152,6 +152,8 @@ class Runtime:
             else:
                 self.backend = NativeBackend(self.app.settings, self.cohort['gpu'], self.app.log)
             self.app.backend = self.backend
+            self.backend.progress = lambda task, percent, detail='': self.app.set_progress(
+                'optimization', task, percent, None, model.get('name', model['id']) + ' · ' + detail)
             context = settings.get('context_tokens', 32768)
             limits = [int(v) for k, v in model.get('metadata', {}).items() if k.endswith('.context_length') and isinstance(v, (int, float))]
             if limits and context > max(limits):

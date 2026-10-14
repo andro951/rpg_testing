@@ -114,8 +114,15 @@ class EdgeTests(unittest.TestCase):
             self.assertFalse(self.app.operation.locked());self.assertEqual(self.app.state,'stopped')
             self.assertTrue(any(r['status']=='aborted' for r in self.app.store.all()))
     def test_context_policy_part_of_result_identity(self):
-        source=(ROOT/'workbench/domain.py').read_text()
-        self.assertIn("'inventory.py'",source.split('def code_fingerprint():',1)[1].split('def case_id',1)[0])
+        from workbench import domain
+        test=read_json(self.root/'test_specs/time_only.json');model=self.app.catalog()[0]
+        args=(model,test,test['variants'][0],0,{'vram_gb':8})
+        original=domain.case_id(*args);read_bytes=Path.read_bytes
+        def changed_context_policy(path):
+            data=read_bytes(path)
+            return data+b'\n# different automatic context policy\n' if path.name=='inventory.py' else data
+        with patch.object(Path,'read_bytes',changed_context_policy):
+            self.assertNotEqual(domain.case_id(*args),original)
     def test_health_check_not_semantic_readiness_gate(self):
         source=(ROOT/'workbench/native.py').read_text()
         self.assertIn("self.load_metadata['health_exact_ready']",source)

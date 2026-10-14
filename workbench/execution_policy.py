@@ -4,7 +4,7 @@ import re
 from .domain import digest
 
 POLICY_VERSION = 'native-two-pass-v1'
-LOAD_TIMEOUT_SECONDS = 600
+LOAD_TIMEOUT_SECONDS = None
 MAX_CONTEXT_EXPANSIONS = 2
 MAX_RECOVERY_LOADS = 4
 
