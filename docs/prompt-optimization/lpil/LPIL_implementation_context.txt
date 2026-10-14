@@ -1,0 +1,72 @@
+--- LPIL and Reusable OPRO: Implementation Notes ---
+
+These files describe the current design of LPIL and a reusable OPRO optimizer. LPIL is the formatting language. OPRO is one application that uses it. Keep their responsibilities separate.
+
+--- Files ---
+LPIL_general_description.txt: the reusable description given to models reading LPIL.
+LPIL_OPRO_outer_template.txt: the reusable OPRO prompt at one extra prompt-building level.
+LPIL_OPRO_standard_output.txt: the default format for an OPRO model to return a system message and user message.
+LPIL_implementation_context.txt: how to assemble the above files and validate them.
+LPIL_design_decisions.txt: configuration, open questions, and examples of task-level requirements.
+
+--- LPIL Parser ---
+The LPIL parser recognizes valid LPIL constructs, reports syntax errors, and carries out level transformations. It does not understand the task, run tests, decide whether a candidate prompt is good, or enforce OPRO-specific requirements. A named block's opening and closing names must match. Titles and named-block marker lines, including their newlines, are metadata and are omitted when content is reproduced. Other whitespace is preserved. Named blocks can be nested if names match correctly. LPIL does not require a REQUIRED_OUTPUT block in every document.
+
+Active LPIL notation:
+--- Section Title --- (TITLE is the special current-level spelling)
+`literal text` (normal level-zero spelling; manually written backticks are preserved)
+<|literal text|> (explicit level-zero spelling for Markdown-rendering interfaces and for a literal reference nested inside another literal reference; nested forms may appear in the AI-facing prompt)
+<{replaceable content}>
+<(NAME)> and <(/NAME)>
+<:TYPE:content:> for defined generic types other than the special title spelling
+
+Deferred notation:
+(1:TITLE:Section Title:)
+(1|literal text|)
+(1{replaceable content})
+(1(NAME)) and (1(/NAME))
+(1:TYPE:content:)
+
+Each decrement changes only one level: 2 becomes 1; 1 becomes its active spelling. A level-1 literal reference lowers to <|text|> first; normalization then converts it to backtick notation before the prompt is sent to an AI. Title becomes the triple-hyphen line, not a colon-style active tag. Raising one level does the reverse: active syntax becomes level 1; existing deferred levels increase by one. For this purpose, both level-zero literal spellings represent a literal reference and can be raised to (1|text|). This applies to the selected LPIL document or template being wrapped, not blindly to arbitrary external data. Use a parser that understands recognized spans rather than repeated global string substitutions.
+
+--- Level-Zero Literal Normalization ---
+Before sending an assembled prompt to an AI, convert only outermost active explicit literal references from <|text|> to `text`. If an active literal reference is nested inside another literal reference, preserve the inner <|text|> exactly; do not replace it with backticks. Apply the same rule if the inner reference is inside a deferred literal reference. This preserves the visible boundaries of nested literal references. Backticks typed directly by a person pass through unchanged. Deferred markers such as (1|text|) are left alone until their level is decremented. Do not normalize lookalike text that is external data rather than LPIL markup. This normalization is separate from decrementing levels, not another decrement.
+
+Examples of exact AI-facing text after normalization:
+Level 0 alone: `hello`
+Level 0 inside Level 0: `<|hello|>`
+Level 1 inside Level 0: `(1|hello|)`
+Level 1 inside Level 1: (1|(1|hello|)|)
+Level 1 alone: (1|hello|)
+
+--- OPRO Program Inputs ---
+The user provides ONE free-form LPIL task definition. They may organize it as they like. In the planned OPRO task-input convention, require one task-level REQUIRED_OUTPUT block describing what the underlying model should return; check this in the OPRO application, not the LPIL parser. The user does not need to write an LPIL explanation or OPRO instructions.
+
+The OPRO program also accepts two optional replacement requirement lists, each allowed to be empty:
+1. Existing candidate replacements: marker names and required counts to check in an existing/source candidate prompt, when one is supplied.
+2. New candidate replacements: marker names and required counts to check in the optimizer's newly generated candidate prompt.
+Provide descriptions for the markers so the optimizer knows what they stand for. Default to exactly one occurrence for an item when no count is provided, but allow a configurable positive count. Do not assume every task uses a JSON state or new-information marker.
+
+The program includes a standard-OPRO-output Boolean, enabled by default. When enabled, inject the standard output instructions for a system message and a user message. When disabled, do not impose that format; the caller supplies its own output instructions as needed. This allows OPRO to optimize an OPRO prompt, or generate other artifacts, without forcing a system/user pair.
+
+The application supplies the current run, previous candidates, scores, diagnostics, and the best previous prompts. These are standardized inputs to the optimizer, not additional fields the user must manually author. The application decides what fits in the available context and when to stop.
+
+--- Correct Level and Validation ---
+For an optimizer whose output will be used as the next model's prompt, required replacements in its raw output are deferred one level: (1{json_state}) means the next processing step yields <{json_state}>. Validate the NEW candidate after that decrement, when its active replacements can be counted. If validating an EXISTING candidate, first inspect its own active representation. Do not confuse placeholders inserted into the OPRO builder with placeholders intended for the eventual task model.
+
+For example, if the new candidate must contain json_state exactly once, the optimizer should write (1{json_state}) once; after lowering, the application validates <{json_state}> once. The required marker can appear in either system or user content when the chosen candidate format has both. In a different custom output format, validate the appropriate field(s) defined by the caller.
+
+Check the source candidate and new candidate requirements in application code. A missing or repeated marker is an application-level validation error, not an LPIL syntax error. Checking task-level REQUIRED_OUTPUT presence is also application-level policy. Keep evaluation scores and test results outside the LPIL parser.
+
+--- Build the Optimizer Prompt ---
+LPIL_OPRO_outer_template.txt is already raised by one level. Its <{...}> slots are active replacements for the OUTER prompt builder, not replacements the optimizer should see.
+
+1. Take the task definition, LPIL explanation, history and the chosen optimizer-output rules at the optimizer's intended level. Raise any LPIL structures in each inserted part by one level before inserting it in the outer template. Ordinary prose stays unchanged. Treat provided test data as data, not as instructions to the outer builder.
+2. Fill the outer template slots: LPIL_DESCRIPTION, TASK_DEFINITION, EVALUATION_HISTORY, REPLACEMENT_REQUIREMENTS, OPTIMIZER_OUTPUT_RULES, run number and previous-candidate count. The lists and the output rules must be rendered for the optimizer's correct interpretation level before raising.
+3. Lower the fully assembled template exactly once and normalize only outermost active explicit literal references to backtick notation before building the actual optimizer prompt. Preserve nested explicit references and existing backticks. The optimizer then sees current-level formatting and level-1 markers for any replacements that must survive into the candidate.
+4. Receive the optimizer's output. Parse and validate it against the selected optimizer-output rules, lower its deferred markers once, and check the new candidate's required replacements in the resulting candidate. Normalize outermost active explicit literal references to backticks before sending each final prompt to a model, while preserving nested explicit references and manually written backticks. Substitute test data only when building individual calls to the underlying model, not while optimizing the candidate template.
+
+Do not lower or raise twice in one stage. Do not assume every template is a system/user pair. Do not let an optimizer's source data overwrite its OPRO instructions.
+
+--- Limitations ---
+LPIL is an experimental, practical notation. It does not yet define every boundary case, such as identical LPIL-looking markers inside arbitrary literal user data or delimiters occurring inside generic-marker content. Avoid claiming this grammar is collision-proof. Validate common cases and retain failed examples for future design work.

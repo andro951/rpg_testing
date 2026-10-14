@@ -108,6 +108,8 @@ class Store:
                 fixed = ('scope', 'definition', 'settings', 'generator_id', 'origin_model_id', 'optimizer_system', 'optimizer_user')
                 if any(existing[k] != session[k] for k in fixed):
                     raise ValueError('Session contracts conflict; nothing was overwritten.')
+                if existing.get('prompt_builder') and session.get('prompt_builder') and existing['prompt_builder'] != session['prompt_builder']:
+                    raise ValueError('Session prompt-builder contracts conflict; nothing was overwritten.')
                 attempts = {a['number']: a for a in existing['attempts']}
                 for attempt in session['attempts']:
                     previous = attempts.get(attempt['number'])

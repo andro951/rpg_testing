@@ -1,5 +1,51 @@
 # Prompt Optimization tab
 
+## LPIL prompt writer (October 9)
+
+New sessions use one user message and no system message for the prompt-writing
+request. The source files from Isaac's LPIL ZIP are preserved under
+`docs/prompt-optimization/lpil/`. `prompt_builder.py` combines the language
+description, outer template, Array move task, results and writer-output rules.
+The Array move task is a separate free-form document with one task-level
+REQUIRED_OUTPUT block. That block describes the benchmark answer, while the
+writer's own output rules describe its system/user candidate pair.
+
+The writer emits replacements such as `(1{current_state})`. The application
+lowers them once to `<{current_state}>` and checks the required counts (one each
+for this pilot). It inserts actual test values only when making a benchmark
+call. Literal references are normalized separately, and external evidence and
+inserted data are never reparsed as LPIL. Empty candidate system messages are
+supported. The reusable builder/validator also accepts optional source/new
+replacement lists and custom writer-output rules; the Workbench executor still
+runs the Array move system/user-message pilot, not arbitrary custom artifacts.
+
+Identical captured requests are shown once with IDs used by the trial results.
+Responses remain separate observations even when their text matches. Feedback
+contains the verdict, reason, passed checks and other checks once. Full states,
+duplicate score/check payloads, raw stream chunks and private generator reasoning
+stay in saved evidence instead of being copied into the writer request. Complete
+and partial outputs are included without truncation. Captured workflow messages
+are used when an effective provider request was not recorded, and are labeled as
+such. Foreign-host records do not influence the current-host feedback.
+
+Continuing an old session that never produced a candidate adopts the new writer
+and records that change. Its baseline results, original prompt snapshots and
+preparation errors remain intact. Sessions that already have legacy candidates
+keep their frozen writer and supported `${label}` templates. Pruning removes the
+least successful removable history and any requests used only by that history.
+Capacity errors now save the actual tokenizer count and output/context allowance.
+
+Export the next request without running inference or changing the session:
+
+```powershell
+.\.venv-workbench\Scripts\python.exe -m optimization.export_prompt --session SESSION_ID --output .local/diagnostics/first-run-prompt.txt
+```
+
+The text file is the exact user-message content. The accompanying messages JSON
+preserves API roles, and the metadata records the baseline, request digest and
+automatic allocation estimate. Native tokenizer verification still happens before
+actual generation. See the [implementation review](../docs/prompt-optimization/lpil-implementation-review.md).
+
 The executable pilot is `definitions/array_move_patch.json`. Opening the Workbench Prompt Optimization tab automatically scans runnable host models and populates both dropdowns. It rescans on each visit, preserving available selections; Refresh host models also remains available. Select the generator and starting model, then Start new session. Maximum attempts defaults to 20, temperature bounds to 0.5–0.9, and generator reasoning to off. A pass at the full origin repetition count opens all three Array move JSON Patch presentation variants across all host models. Benchmark reasoning stays off; unsupported Perchance controls remain unverified and its provider runs last only on 8 GB hosts.
 
 `templates.py` implements per-experiment literal labels and immutable bindings, `engine.py` controls sessions/coverage/rankings/context, `runtime.py` isolates generator and benchmark processes, and `storage.py` preserves checksummed evidence under `optimization_results/`. Continue preserves terminal answers and attempt counts. Evaluate remaining creates the current host cohort without generating new prompts. Export/import transfers sessions between machines; candidate export does not change test definitions.

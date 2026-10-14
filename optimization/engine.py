@@ -13,6 +13,8 @@ from .storage import Store
 from .templates import LABELS, freeze, parse_candidate, projection
 from .runtime import Runtime, discover
 from .token_budget import plan as token_plan, round_context
+from .feedback import EvidencePacket
+from . import prompt_builder
 from workbench.execution_policy import DoesNotFit
 
 DEFAULTS = {'max_attempts': 20, 'temperature_min': .5, 'temperature_max': .9,
@@ -62,6 +64,7 @@ def create(app, payload, cohort=None):
                'cohort': cohort, 'cohort_history': [cohort], 'attempts': [], 'observations': [], 'message': '',
                'optimizer_system': (app.root / 'docs/prompt-optimization/optimizer-system.txt').read_text(encoding='utf-8'),
                'optimizer_user': (app.root / 'docs/prompt-optimization/optimizer-user-template.txt').read_text(encoding='utf-8')}
+    session['prompt_builder'] = prompt_builder.snapshot(app.root, definition)
     Store(app.root).save(session)
     return session
 
@@ -145,27 +148,34 @@ def prune_order(history):
 def generation_packet(session, models, records, store):
     top = top_three(session, models, records)
     protected_ids = {item['attempt'] for item in top}
-    def trial_evidence(record):
-        return {k: record.get(k) for k in ('model_id', 'case_id', 'repetition', 'status', 'pass', 'outputs', 'score', 'evaluation')} | {
-            'calls': [{k: call.get(k) for k in ('step', 'request_messages', 'text', 'finish_reason', 'sampling', 'requested_sampling', 'applied_sampling')}
-                      for call in record.get('calls', [])]}
-    baseline = [trial_evidence(r) for r in records if r.get('candidate') is None]
+    evidence_packet = EvidencePacket()
+    # Saved records from other machines are preserved, but neither their scores
+    # nor their failures should influence this host's optimization request.
+    identities = {m['identity'] for m in models}
+    ids = {m['id'] for m in models}
+    local_records = [r for r in records if r.get('model_id') in ids and
+                     (not r.get('model_identity') or r['model_identity'] in identities)]
+    baseline = [evidence_packet.trial(r) for r in local_records if r.get('candidate') is None]
     def detailed(attempt):
-        item = copy.deepcopy(attempt)
+        item = {key: copy.deepcopy(attempt[key]) for key in ('number', 'status', 'layer', 'feedback', 'candidate') if key in attempt}
         if item.get('candidate'):
             item['score'] = score(session, item['candidate'], models, records)
-        evidence = item.get('response_evidence') or item.get('error_evidence')
-        if evidence:
-            item['generation'] = store.get_evidence(session['id'], evidence)
-        item['trials'] = [trial_evidence(r) for r in records if r.get('candidate') == item.get('candidate') and item.get('candidate') is not None]
+        evidence = attempt.get('response_evidence') or attempt.get('error_evidence')
+        if evidence and not item.get('candidate'):
+            response = store.get_evidence(session['id'], evidence)
+            partial = response.get('partial_response') or response.get('partial') or {}
+            item['generation'] = {'text': response.get('text', partial.get('text', '')),
+                                  'finish_reason': response.get('finish_reason', partial.get('finish_reason'))}
+        item['trials'] = [evidence_packet.trial(r) for r in local_records if r.get('candidate') == item.get('candidate') and item.get('candidate') is not None]
         return item
     history = [detailed(a) for a in session['attempts'] if a['number'] not in protected_ids]
     packet = {'experiment': session['definition']['id'], 'immutable_contract': session['definition']['candidate_control'],
               'required_labels': session['definition']['required_labels'], 'evaluation_policy': 'Unchanged objective oracles; benchmark reasoning off; full repetitions. Origin pass then complete task type on all current host models.',
-              'current_machine_models': [{'id': m['id'], 'identity': m['identity'], 'provider': m['provider']} for m in models],
+              'current_machine_models': [{'id': m['id'], 'name': m.get('name', m['id']), 'identity': m['identity'], 'provider': m['provider']} for m in models],
               'scope': {'type': 'Array move', 'cases': list(session['scope']['cases']), 'origin_model_id': session['origin_model_id']},
               'baseline_summary': score(session, None, models, records),
               'reference_evidence': baseline, 'top_three': top, 'history': history,
+              'prompts': evidence_packet.prompts,
               'pruned_attempts': [], 'attempt_limit': session['settings']['max_attempts']}
     # Protected top-three exact templates and model/case summaries survive all pruning.
     return packet
@@ -173,6 +183,8 @@ def generation_packet(session, models, records, store):
 
 def packet_messages(session, packet):
     import json
+    if session.get('prompt_builder'):
+        return prompt_builder.build(session, packet)
     return [{'role': 'system', 'content': session['optimizer_system']},
             {'role': 'user', 'content': session['optimizer_user'].replace('{{optimization_packet_json}}', json.dumps(packet, ensure_ascii=False, indent=2))}]
 
@@ -188,10 +200,20 @@ def fit_packet(session, packet, token_count, limits):
             return messages, {'input_tokens': count, 'output_reserve': reserve, 'context_tokens': context,
                               'pruned_attempts': packet['pruned_attempts']}
         if not removable:
-            raise ValueError('Protected contract, baseline and top-three summaries exceed the generator context that fits this model/GPU. Nothing was truncated; use a generator with more capacity.')
+            error = ValueError(f'Protected task, baseline and top-three feedback needs {count} input tokens plus {reserve} output tokens, but the available context is {context}. No benchmark evidence was truncated.')
+            error.evidence = {'input_tokens': count, 'output_reserve': reserve, 'context_tokens': context,
+                              'input_bytes': sum(len(m['content'].encode('utf-8')) for m in messages)}
+            raise error
         remove = removable.pop(0)
         packet['history'] = [a for a in packet['history'] if a['number'] != remove['number']]
         packet['pruned_attempts'].append(remove['number'])
+        # Requests used only by omitted attempts must not remain as hidden bulk.
+        referenced = {call['prompt_id'] for trial in packet.get('reference_evidence', [])
+                      for call in trial.get('calls', []) if call.get('prompt_id')}
+        referenced.update(call['prompt_id'] for attempt in packet['history'] for trial in attempt.get('trials', [])
+                          for call in trial.get('calls', []) if call.get('prompt_id'))
+        if 'prompts' in packet:
+            packet['prompts'] = {key: value for key, value in packet['prompts'].items() if key in referenced}
 
 
 def prepare_generation(session, packet, model, config, runtime, responses=()):
@@ -222,7 +244,7 @@ def prepare_generation(session, packet, model, config, runtime, responses=()):
         try:
             messages, measured = fit_packet(session, packet, backend.token_count, limits)
         except ValueError as exc:
-            exc.evidence = {'automatic_token_planning': load_attempts, 'plan': limits}
+            exc.evidence = {**getattr(exc, 'evidence', {}), 'automatic_token_planning': load_attempts, 'plan': limits}
             raise
         context = {**limits, **measured, 'load_attempts': load_attempts,
                    'memory_context_ceiling': ceiling, 'output_limit_policy': 'EOS, manual stop or remaining allocated context',
@@ -351,7 +373,12 @@ class Engine:
             attempt['response_evidence'] = self.store.evidence(self.session['id'], {'kind': 'generation_response', **response})
             if response.get('finish_reason') != 'stop':
                 raise ValueError('Generator did not complete normally: ' + str(response.get('finish_reason')))
-            candidate = parse_candidate(response['text'], self.session['definition']['required_labels'])
+            if self.session.get('prompt_builder'):
+                candidate = prompt_builder.parse_output(response['text'], self.session['prompt_builder'])
+                if not isinstance(candidate, dict):
+                    raise ValueError('The Array move benchmark executor needs candidate system/user messages. Custom artifacts can be built and validated separately.')
+            else:
+                candidate = parse_candidate(response['text'], self.session['definition']['required_labels'])
             attempt['candidate'] = candidate
             if any(a.get('candidate') == candidate for a in self.session['attempts'][:-1]):
                 attempt.update(status='duplicate', feedback='Duplicate template pair; attempt saved, no duplicate trials or ranking slot.')
@@ -372,6 +399,16 @@ class Engine:
         with review_lock(self.app.root):
             if code_fingerprint() != self.session['scope']['workflow_fingerprint']:
                 raise ValueError('Workflow changed since this session was frozen; create a new reviewed session.')
+            if mode == 'optimize' and not self.session.get('prompt_builder') and not self.session['attempts']:
+                # A preparation failure consumed no candidate. Adopt the corrected
+                # writer for the next request without changing frozen tests or
+                # overwriting original messages, results or error evidence.
+                config = prompt_builder.snapshot(self.app.root, self.session['definition'])
+                evidence = self.store.evidence(self.session['id'], {'kind': 'prompt_builder_adopted',
+                    'at': now(), 'previous': 'legacy-packet', 'prompt_builder': config})
+                self.session.setdefault('configuration_history', []).append(evidence)
+                self.session['prompt_builder'] = config
+                self.save()
             cohort = cohort or discover(self.app)
             # Optimization resumes use their original local cohort. Cross-machine
             # evaluation deliberately establishes a new local comparison cohort.

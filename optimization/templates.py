@@ -12,7 +12,7 @@ LABELS = ('current_state', 'new_information', 'task_requirements', 'presentation
 MARKER = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
 
 
-def parse_candidate(text, labels=LABELS):
+def split_candidate(text):
     if not isinstance(text, str):
         raise ValueError('Candidate response must be text.')
     text = text.replace('\r\n', '\n')
@@ -24,6 +24,11 @@ def parse_candidate(text, labels=LABELS):
     system, user = text[len('SYSTEM_MESSAGE:\n'):].split('\nUSER_MESSAGE:\n', 1)
     if not user.strip():
         raise ValueError('USER_MESSAGE must not be empty.')
+    return system, user
+
+
+def parse_candidate(text, labels=LABELS):
+    system, user = split_candidate(text)
     combined = system + '\n' + user
     found = set(MARKER.findall(combined))
     if '${' in MARKER.sub('', combined):
@@ -39,6 +44,11 @@ def substitute(template, values):
 
 
 def render(candidate, values):
+    if candidate.get('template_format') == 'lpil':
+        from . import lpil
+        # Normalize the authored template before inserting arbitrary test data.
+        return [{'role': role, 'content': lpil.substitute(lpil.normalize(candidate[role]), values)}
+                for role in ('system', 'user') if candidate[role].strip()]
     return [{'role': role, 'content': substitute(candidate[role], values)} for role in ('system', 'user')]
 
 

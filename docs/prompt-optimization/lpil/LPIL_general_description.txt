@@ -1,0 +1,30 @@
+Layered Prompt Interpretation Language (LPIL) is a way to show an AI what text means when a prompt can contain instructions for another AI. It distinguishes exact text, places to insert content, named sections, and formatting that belongs to a later prompt.
+
+1. Titles are written as --- Background Info --- on their own line. A title tells you what follows. It is for organization, not an instruction or text to reproduce. When producing content from the section, act as though the entire title line, including its newline, was removed.
+
+2. At level zero, backticks refer to exact text, such as `status` or `"Red"`. The backticks are not part of the referenced text. You can use backticks anywhere when writing LPIL by hand; they remain unchanged when sent to the AI. The explicit form <|text|> is useful when writing through Markdown-rendering interfaces such as ChatGPT, or when one literal reference appears inside another. Before sending a prompt to an AI, the program converts an outermost active explicit literal reference to backticks. Any literal references inside it keep their explicit LPIL forms, rather than becoming another pair of backticks. This means the AI can receive <|text|> when it is nested inside another literal reference. LPIL does not use double quotation marks to group or format text.
+
+3. <{description}> is a replaceable region. The content describes what should go in its place. Replace the entire marker, including its symbols. For example, <{Person's Name}> can become Jenna Smith. The meaning and source of the replacement are supplied by the surrounding task or application.
+
+4. <(NAME)> begins a named block; <(/NAME)> ends it. Put each on its own line. Their entire lines, including their newlines, do not count as content. The name tells you the purpose of the enclosed material. For example, REQUIRED_OUTPUT shows the format that a model is required to produce. The block's contents can include replaceable regions. LPIL does not require every document to contain a REQUIRED_OUTPUT block.
+
+5. <:TYPE:content:> is a general-purpose inline marker. TYPE says what the enclosed content means. It has no separate closing marker, and its content is allowed to span lines. Types need to be defined before they are used. TITLE is a special type: at the active level, write a title as --- content --- on its own line instead of using the generic inline form.
+
+A marker with outer < and > is active in the current prompt. Markers with outer parentheses are deferred to future prompts. A positive number immediately after the opening parenthesis tells the application how many level changes remain. For example:
+
+(2|hello|) -> (1|hello|) -> <|hello|> -> `hello` (normalization of a non-nested reference)
+(2{name}) -> (1{name}) -> <{name}>
+(2(OUTPUT)) -> (1(OUTPUT)) -> <(OUTPUT)>
+(2(/OUTPUT)) -> (1(/OUTPUT)) -> <(/OUTPUT)>
+(2:TITLE:Background Info:) -> (1:TITLE:Background Info:) -> --- Background Info ---
+
+One completed generation triggers exactly one level change, not repeated changes until everything is active. Lowering a level-1 literal marker first produces the explicit level-zero form, <|text|>. Normalization is a separate step before sending a prompt to an AI: it converts an active explicit level-zero literal reference to backticks only when that reference is not nested inside another literal reference. Nested active references keep their explicit form. Backticks written by a person pass through unchanged, and deferred markers are never normalized as active markup. You may need to write deferred markers yourself when creating prompts for later models. Understand what the markers will become, but don't apply deferred markers as active formatting in your own prompt. Ordinary parentheses are still ordinary punctuation.
+
+These are examples of the exact text an AI may receive after normalization:
+Level 0 alone: `hello`
+Level 0 inside Level 0: `<|hello|>`
+Level 1 inside Level 0: `(1|hello|)`
+Level 1 inside Level 1: (1|(1|hello|)|)
+Level 1 alone: (1|hello|)
+
+A program handles the mechanical level changes. The model chooses the right content and level. LPIL is intended to be clear and practical; it does not yet have rules for every possible collision when arbitrary user data contains marker-shaped text. The parser should recognize actual LPIL constructs in their intended context and leave ordinary content alone.

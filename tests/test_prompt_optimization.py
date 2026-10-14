@@ -59,7 +59,11 @@ class MockGenerator:
         self.runtime.requests.append({'messages': messages, 'sampling': sampling, 'reserve': reserve})
         if self.runtime.proposal_error:
             raise self.runtime.proposal_error
-        return {'text': self.runtime.proposals.pop(0), 'finish_reason': 'stop', 'raw_chunks': [], 'reasoning_text': ''}
+        text = self.runtime.proposals.pop(0)
+        if len(messages) == 1 and messages[0]['role'] == 'user':
+            import re
+            text = re.sub(r'\$\{([A-Za-z_][A-Za-z_0-9]*)\}', r'(1{\1})', text)
+        return {'text': text, 'finish_reason': 'stop', 'raw_chunks': [], 'reasoning_text': ''}
 
 
 class MockRuntime:
@@ -256,11 +260,11 @@ class OptimizationTests(unittest.TestCase):
                                'score': {'percentage': 5}}], 'top_three': [{'candidate': {'system': 'winner'}, 'summary': []}], 'pruned_attempts': []}
         original = copy.deepcopy(packet)
         def counter(messages):
-            return 30000 if '"number": 1' in messages[1]['content'] else 1000
+            return 30000 if '"number": 1' in messages[0]['content'] else 1000
         limits = {'context_tokens': 32768, 'output_reserve': 4096}
         messages, result = fit_packet(self.session, packet, counter, limits)
         self.assertEqual(result['pruned_attempts'], [1])
-        self.assertIn('winner', messages[1]['content'])
+        self.assertIn('winner', messages[0]['content'])
         self.assertEqual(packet, original)
         with self.assertRaisesRegex(ValueError, 'Protected'):
             fit_packet(self.session, packet, lambda _: 999999, limits)
@@ -300,7 +304,7 @@ class OptimizationTests(unittest.TestCase):
         first = saved['attempts'][0]
         self.assertIn('bad response', self.store.get_evidence(saved['id'], first['response_evidence'])['text'])
         request = self.store.get_evidence(saved['id'], saved['attempts'][1]['request_evidence'])
-        self.assertIn('bad response', request['messages'][1]['content'])
+        self.assertIn('bad response', request['messages'][0]['content'])
         self.assertTrue(.5 <= request['sampling']['temperature'] <= .9)
         self.assertTrue(0 <= request['sampling']['seed'] < 2**32)
 
@@ -636,12 +640,12 @@ class OptimizationTests(unittest.TestCase):
         packet = {'history': [{'number': 1, 'candidate': None, 'text': 'x' * 40000}],
                   'pruned_attempts': [], 'top_three': [{'candidate': 'winner'}]}
         original = copy.deepcopy(packet)
-        runtime = TokenRuntime(lambda messages: 9000 if '"number": 1' in messages[1]['content'] else 1000, capacity=8192)
+        runtime = TokenRuntime(lambda messages: 9000 if '"number": 1' in messages[0]['content'] else 1000, capacity=8192)
         backend, messages, budget = engine.prepare_generation(self.session, packet, native(), settings({}), runtime)
         self.assertEqual(backend.context, 8192)
         self.assertEqual(budget['memory_context_ceiling'], 8192)
         self.assertEqual(budget['pruned_attempts'], [1])
-        self.assertIn('winner', messages[1]['content'])
+        self.assertIn('winner', messages[0]['content'])
         self.assertTrue(any(item['status'] == 'gpu_memory_error' for item in budget['load_attempts']))
         self.assertEqual(packet, original)
 

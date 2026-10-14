@@ -1,0 +1,38 @@
+--- LPIL + OPRO Design Decisions ---
+
+Working name: Layered Prompt Interpretation Language (LPIL). It is an interpretation language, not ordinary Markdown. We borrow readable conventions but do not inherit Markdown's meaning for headings or content.
+
+LPIL uses current-level outer angle brackets and deferred outer parentheses with a positive integer level. Within them: |text| is literal text, {text} is a replaceable region, (NAME) is a named block marker, and :TYPE:content: is a generic inline marker. At level zero, backticks are the normal way to refer to literal text everywhere. They can be written directly by a person and pass unchanged to the AI. The explicit <|text|> form is an authoring compatibility option, especially when a Markdown-rendering interface such as ChatGPT hides backticks, and is also the form for literal references nested inside other literal references. Before sending a prompt to an AI, the normalizer converts only outermost active explicit literal references to backticks. Nested active literal references keep <|text|>; the AI can receive that form inside another literal reference. Deferred literal references still use (1|text|), (2|text|), etc.; a level-1 decrement first gives <|text|>, and normalization is a separate step. The active title convention is --- Title --- on its own line; deferred titles use (1:TITLE:Title:), (2:TITLE:Title:), etc. A title's full line, including its newline, is metadata rather than content. Paired named markers, each on its own line, are removed the same way. They may appear around an exact required-output template.
+
+No backslash escaping scheme is part of LPIL. A model writing through a Markdown-rendering interface can be asked to use explicit literal markers rather than backticks. The program normalizes the outermost explicit literal reference but leaves nested explicit references intact. Handwritten backticks need no conversion and are kept exactly as written. The resulting AI-facing text can therefore include an explicit level-zero marker only when it is nested inside another literal reference. LPIL is intentionally designed to be easy to write with standard keyboard characters and to be understood by an AI that has never seen it before. Formalizing more edge cases remains future work.
+
+A reusable OPRO application has one free-form task-definition input, not a mandatory form with separate task/background/output text fields. The proposed OPRO task convention requires the caller's task definition to contain exactly one task-level REQUIRED_OUTPUT block; this is validated by OPRO, not required of all LPIL documents. The task-level block describes the eventual task model's output. The optimizer's own output rules are a separate configuration.
+
+The OPRO instructions remain mostly fixed: describe OPRO briefly, give run information and prior results, ask for one improved candidate, and preserve the underlying task. The program supplies the history and evaluator feedback. There is no need for separate OPRO modes for individual iteration numbers.
+
+The default optimizer output is a system/user prompt pair. A Boolean named use_standard_opro_output (default true) selects it. When false, a caller-provided output contract is used, allowing experiments that optimize OPRO itself or produce another format.
+
+Two optional replacement lists are distinct: one validates markers in an existing/source candidate, the other validates markers in the newly generated candidate. Each entry has a name, description, and expected occurrence count (default one). Both lists may be empty. These are checks performed by OPRO application code, not LPIL grammar rules. For markers meant for the next prompt, the optimizer emits level-1 deferred LPIL replacements; the program lowers them once and then checks the active candidate.
+
+LPIL parser: verify syntax, matching paired tags and valid levels, then produce useful errors or transform known markers. No OPRO, JSON, test-score, or task evaluation logic belongs in it.
+
+Open questions for testing: delimiter collisions in arbitrary text, how generic inline markers that span multiple lines should terminate when their content contains the closing sequence, whether title text should allow all characters, and how small models follow the conventions. These are limitations, not reasons to add a complicated escaping scheme now.
+
+--- Example Task Input ---
+This is only an illustration of a free-form task definition for the OPRO app, not a built-in JSON Patch requirement.
+
+Classify each customer message as billing, technical, or general. Return only the classification, without explanation. Preserve the same rule for all messages.
+
+<(REQUIRED_OUTPUT)>
+<{One of: billing, technical, general}>
+<(/REQUIRED_OUTPUT)>
+
+The application could separately require the generated candidate to include the marker <{customer_message}> exactly once. That requirement belongs in the new-candidate replacement list, not in this task-definition text.
+
+--- Literal Nesting Examples ---
+These five samples are the intended exact text an AI sees after normalization.
+Level 0 alone: `hello`
+Level 0 inside Level 0: `<|hello|>`
+Level 1 inside Level 0: `(1|hello|)`
+Level 1 inside Level 1: (1|(1|hello|)|)
+Level 1 alone: (1|hello|)
