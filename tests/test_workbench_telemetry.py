@@ -1,6 +1,5 @@
 import ctypes
 import threading
-import time
 import unittest
 from unittest.mock import patch
 from workbench.telemetry import GpuMonitor, NvmlProvider, Memory, Utilization, TelemetryUnavailable, monitored_execute
@@ -44,8 +43,21 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(p.i,count);m.close()
     def test_sampler_uses_in_memory_provider_no_file_writes(self):
         p=Provider('GPU-test');m=GpuMonitor('GPU-test',provider_factory=lambda x:p,interval=.005)
+        background_sampled=threading.Event()
+        sample=m._sample
+        def observed_sample():
+            sample()
+            with m.lock:
+                if threading.current_thread() is m.thread and m.active and m.count>=2:
+                    background_sampled.set()
+        m._sample=observed_sample
         with patch('builtins.open',side_effect=AssertionError('No disk logging')):
-            m.start();m.begin_case();time.sleep(.025);r=m.end_case();m.close()
+            m.start()
+            try:
+                m.begin_case()
+                self.assertTrue(background_sampled.wait(5),'Background sampler did not collect an in-case sample')
+                r=m.end_case()
+            finally:m.close()
         self.assertGreater(r['sample_count'],2)
     def test_case_state_is_reset(self):
         m=GpuMonitor('GPU-test',provider_factory=Provider,interval=10);m.start()

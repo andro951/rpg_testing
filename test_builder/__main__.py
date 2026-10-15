@@ -68,7 +68,8 @@ def build(root=REPO):
     timing = read_json(root/'reporting/timing_expectations.json')
     for test_id in old_ids:
         timing.pop(test_id, None)
-    manifest = {'version':'database-v3', 'status':'pending_joint_prompt_review', 'model_runs_started_by_builder':0, 'prompts':[]}
+    ready = bool(definitions) and all(test['enabled'] for test in definitions)
+    manifest = {'version':'database-v3', 'status':'ready' if ready else 'pending_joint_prompt_review', 'model_runs_started_by_builder':0, 'prompts':[]}
     with review_lock(root):
         for number, (fixture, method, test) in enumerate(pairs, 1):
             path = root/'test_specs'/(test['id']+'.json')
@@ -120,6 +121,7 @@ def build(root=REPO):
         write_json(root/'prompts/patch-suite/manifest.json',manifest)
         lines = ['DATABASE SUITE — PROMPT REVIEW INDEX', '',
             f"{len(fixtures)} data cases, {len(set(TASK_TEMPLATES.values()))} task templates, {len(manifest['prompts'])} prompts.",
+            'Ready for benchmark runs: all exact prompts approved.' if ready else 'Pending exact-prompt approval; unapproved cases remain disabled.',
             'No model inference is run by this builder. Both people must approve the exact prompts before running tests.',
             'prompt-review contains only complete prompts, one text file per prompt. The system message is empty.', '']
         lines.extend(p['review_file'] for p in manifest['prompts'])

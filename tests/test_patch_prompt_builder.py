@@ -91,8 +91,8 @@ class PatchPromptBuilderTests(unittest.TestCase):
             path=Path(folder)/'method.txt';path.write_text('Different method instructions')
             with patch.dict(METHODS,{'value_patch':{**METHODS['value_patch'],'file':str(path)}}):
                 self.assertFalse(compile_test(fixture,reviews)['enabled'])
-        self.assertEqual(load_catalog(REPO/'test_specs'),[])
-        with self.assertRaisesRegex(ValueError,'reviewed, enabled'):freeze(REPO)
+        self.assertEqual(len(load_catalog(REPO/'test_specs')),len(self.fixtures))
+        self.assertEqual(len(freeze(REPO)['cases']),9)
 
     def test_task_schema_and_data_are_independent_of_method_selection(self):
         fixture=self.by_id['db_v3_update_record']
@@ -245,7 +245,7 @@ class PatchPromptBuilderTests(unittest.TestCase):
     def test_current_metadata_and_optimizer_bindings_preserve_shared_rules_without_duplicate_data(self):
         timing=expectations();operations=set()
         for f in self.fixtures:
-            test=compile_test(f)
+            test=compile_test(f,read_json(ROOT/'reviews.json'))
             for v in test['variants']:
                 group=row_grouping(test,v,test['id'],v['id'])
                 self.assertNotIn('unreviewed',group['prompt_comparison_set']['key'])
@@ -306,8 +306,13 @@ class PatchPromptBuilderTests(unittest.TestCase):
             review=root/'prompt-review/00-obsolete.txt';review.parent.mkdir();review.write_text('old')
             write_json(root/'prompts/patch-suite/manifest.json',{'prompts':[{'test_id':'obsolete','file':old.relative_to(root).as_posix(),'review_file':review.relative_to(root).as_posix()}]})
             result=build(root)
-            self.assertEqual(result['prompts'],41);self.assertEqual(result['enabled'],0)
+            self.assertEqual(result['prompts'],41);self.assertEqual(result['enabled'],len(self.fixtures))
             self.assertFalse(old.exists());self.assertFalse(review.exists());self.assertFalse((root/'test_specs/obsolete.json').exists())
             before={p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file()}
             build(root)
             self.assertEqual(before,{p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file()})
+            self.assertEqual(read_json(root/'prompts/patch-suite/manifest.json')['status'],'ready')
+            with patch('test_builder.__main__.read_json',side_effect=lambda path: {} if Path(path)==ROOT/'reviews.json' else read_json(path)):
+                pending=build(root)
+            self.assertEqual(pending['enabled'],0)
+            self.assertEqual(read_json(root/'prompts/patch-suite/manifest.json')['status'],'pending_joint_prompt_review')
