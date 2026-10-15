@@ -238,7 +238,7 @@ const ResultsMatrix = {
             th.title = text;
             return th;
         };
-        const presentationOrder = { "Normal JSON": 0, "Indexed arrays": 1, "Full paths": 2, "Unspecified": 3 };
+        const presentationOrder = { "Normal JSON": 0, "ID-keyed arrays": 1, "Indexed arrays": 1, "Full paths": 2, "Unspecified": 3 };
         const leafOrder = (left, right) => {
             for (const axis of ["ability_category", "task_type", "prompt_comparison_set", "test_version"]) {
                 const difference = ResultsMatrix.Compare(left.grouping[axis].label, right.grouping[axis].label);

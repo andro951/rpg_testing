@@ -99,19 +99,27 @@ class EdgeTests(unittest.TestCase):
             self.assertFalse(self.app.operation.locked());self.assertEqual(self.app.report['plan']['pending'],0)
             self.assertEqual(len(self.app.store.all()),4)
     def test_stop_now_records_aborted_without_deadlock(self):
+        # Confirm generation has begun before requiring an aborted measurement.
+        test=read_json(self.root/'test_specs/time_only.json')
+        selection={'model_id':self.app.catalog()[0]['id'],
+                   'test_id':test['id'],'variant_id':test['variants'][0]['id']}
+        entered=threading.Event()
+        def stop_worker():
+            self.app.control('stop')
+            if self.app.thread and self.app.thread.is_alive():self.app.thread.join(10)
+        self.addCleanup(stop_worker)
         class Slow(DemoBackend):
-            def generate(self,*a,**kw):
-                cancel=a[-1]
-                for _ in range(100):
-                    if cancel and cancel.is_set():
-                        from workbench.workflows import Cancelled
-                        raise Cancelled('test cancel')
-                    time.sleep(.01)
-                return super().generate(*a,**kw)
+            def generate(self,messages,settings,schema,cache='default',cancel=None):
+                entered.set()
+                if cancel is None or not cancel.wait(10):
+                    raise RuntimeError('Stop fixture did not receive cancellation')
+                from workbench.workflows import Cancelled
+                raise Cancelled('test cancel')
         with patch('workbench.demo_native.DemoNative',Slow):
-            self.app.start('run');deadline=time.monotonic()+5
-            while (not self.app.current or not self.app.current.get('test')) and time.monotonic()<deadline:time.sleep(.01)
-            self.app.control('stop');self.app.thread.join(5)
+            self.app.start('run',{'selection':selection})
+            self.assertTrue(entered.wait(10),'Demo generation did not start')
+            self.app.control('stop');self.app.thread.join(10)
+            self.assertFalse(self.app.thread.is_alive(),'Cancelled demo run did not finish')
             self.assertFalse(self.app.operation.locked());self.assertEqual(self.app.state,'stopped')
             self.assertTrue(any(r['status']=='aborted' for r in self.app.store.all()))
     def test_context_policy_part_of_result_identity(self):

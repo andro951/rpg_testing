@@ -9,14 +9,13 @@ from jsonschema import Draft202012Validator
 from workbench.domain import digest, local_schema, validate_test
 from workbench.presentation import render_source_text
 from workbench.scoring import apply, equal, pointer
+from .presentation import full_paths, id_keyed_arrays
 
 ROOT = Path(__file__).resolve().parent
-PRESENTATIONS = ('normal_json', 'indexed_arrays', 'full_paths')
-LABELS = {'normal_json': 'Normal JSON', 'indexed_arrays': 'Indexed arrays', 'full_paths': 'Full paths'}
-METHODS = {'json_patch': {'name': 'JSON Patch', 'file': 'methods/json_patch.txt', 'representation': 'json_patch',
-    'operations': {'update': 'replace', 'append': 'add', 'remove': 'remove', 'move': 'move', 'no_change': None}},
-    'value_patch': {'name': 'Value-based patch', 'file': 'methods/value_patch.txt', 'representation': 'value_patch',
-    'operations': {'update': 'replace', 'append': 'add', 'remove': 'remove', 'move': 'move', 'no_change': None}}}
+PRESENTATIONS = ('normal_json', 'id_keyed_arrays', 'full_paths')
+LABELS = {'normal_json': 'Normal JSON', 'id_keyed_arrays': 'ID-keyed arrays', 'full_paths': 'Full paths'}
+METHODS = {'value_patch': {'name': 'Value-based patch', 'file': 'methods/value_patch.txt', 'representation': 'value_patch',
+    'operations': {'update': 'replace', 'append': 'add', 'remove': 'remove', 'move': 'move', 'copy': 'copy', 'no_change': None}}}
 DEFAULT_METHOD = 'value_patch'
 TASKS = {
     'update_field': ('update', ('property_path', 'new_value')),
@@ -28,6 +27,8 @@ TASKS = {
     'remove_record': ('remove', ('array_path', 'id_field', 'id_value')),
     'move_value': ('move', ('array_path', 'value', 'destination_array')),
     'move_record': ('move', ('array_path', 'id_field', 'id_value', 'destination_array')),
+    'copy_value': ('copy', ('array_path', 'value', 'destination_array')),
+    'copy_record': ('copy', ('array_path', 'id_field', 'id_value', 'destination_array')),
     'no_change': ('no_change', ('array_path', 'id_field', 'id_value', 'property_path', 'new_value')),
 }
 TASK_TEMPLATES = {task: 'update_record' if task in ('update_record_nested', 'no_change') else task for task in TASKS}
@@ -135,9 +136,9 @@ def validate_fixture(fixture):
         at(state, p['property_path'])
     if 'destination_array' in p:
         if p['destination_array'] == p['array_path'] or not isinstance(at(state, p['destination_array']), list):
-            raise ValueError('Move requires a different destination collection')
+            raise ValueError('Transfer requires a different destination collection')
         if pointer(p['destination_array'])[:len(pointer(p['array_path']))] == pointer(p['array_path']):
-            raise ValueError('Move destinations must be independent collections')
+            raise ValueError('Transfer destinations must be independent collections')
 
 
 def structure_text(schema):
@@ -158,24 +159,6 @@ def structure_text(schema):
             lines.append(prefix + label + ': ' + kind + '.')
     walk(schema, 'Database', 0)
     return '\n'.join(lines)
-
-
-def full_paths(value, path='', schema=None, value_selected=False):
-    lines = []
-    if isinstance(value, list):
-        lines.append(literal(path) + ' (array)')
-        for index, item in enumerate(value):
-            from workbench.value_paths import identity, selector
-            part = selector(identity(item, schema)) if value_selected else str(index)
-            lines.extend(full_paths(item, path + '/' + part, schema['items'] if schema else None, value_selected))
-    elif isinstance(value, dict) and value:
-        for key, item in value.items():
-            from workbench.value_paths import selector
-            part = selector(key) if value_selected and key.startswith('"') else escape(key)
-            lines.extend(full_paths(item, path + '/' + part, schema['properties'][key] if schema else None, value_selected))
-    else:
-        lines.append(literal(path) + ' = ' + literal(value))
-    return lines
 
 
 def contains_array(value):
@@ -221,16 +204,21 @@ def prompt_parts(fixture, presentation, method=DEFAULT_METHOD, templates=ROOT / 
     if method not in METHODS or presentation not in presentations(fixture):
         raise ValueError('Unknown operation method or inapplicable presentation')
     if presentation == 'full_paths':
-        selected = METHODS[method]['representation'] == 'value_patch'
-        state = '\n'.join(full_paths(fixture['state'], schema=fixture['schema'], value_selected=selected))
-        note = ('The data is displayed as value-based paths and values. A quoted path followed by (array) identifies a collection, including an empty collection. Paths use the value-selection rules explained above.' if selected else
-                'The data is displayed as JSON Pointer paths and values. A quoted path followed by (array) identifies a collection, including an empty collection. Paths use the JSON Pointer rules explained above.')
+        state = '\n'.join(full_paths(fixture['state'], fixture['schema']))
+        note = ('Each line shows a path followed immediately by a colon and its JSON value. '
+                'The path is written exactly as it selects that value, using the rules above. '
+                'Empty collections are shown as [] and empty objects as {}. '
+                'When putting a path into an operation, encode it as a JSON string.')
     else:
-        state = render_source_text(fixture['state'], 'raw_json' if presentation == 'normal_json' else 'indexed_arrays')
-        note = ('Collections are displayed as objects whose keys are their array positions, counted from 0. An empty collection is displayed as {}. Use the database structure to distinguish collections from ordinary objects. The underlying collections remain arrays; output paths must address those arrays.'
-                if presentation == 'indexed_arrays' else '')
-        if presentation == 'indexed_arrays' and METHODS[method]['representation'] == 'value_patch':
-            note += ' The numeric display keys are not element identifiers. Select collection elements by their actual unique values or designated IDs in output paths.'
+        state = (json.dumps(id_keyed_arrays(fixture['state'], fixture['schema']), ensure_ascii=False, indent=2, allow_nan=False)
+                 if presentation == 'id_keyed_arrays' else render_source_text(fixture['state'], 'raw_json'))
+        note = ('Collections are displayed as objects keyed by each element\'s unique ID. '
+                'For an object element, the key is its designated ID field\'s value; the ID field is also kept inside the element. '
+                'For a primitive element, the key is the element\'s own value. '
+                'JSON object keys are strings, so non-string IDs use their JSON spelling as keys; their values keep their original JSON types. '
+                'An empty collection is shown as {}. Use the database structure to distinguish collections from ordinary objects. '
+                'The underlying collections remain arrays. Select their elements using the path rules above.'
+                if presentation == 'id_keyed_arrays' else '')
     guidance = ('Database rules:\n' + (ROOT/'database-rules.txt').read_text(encoding='utf-8').strip() +
         '\n\n' + (ROOT/METHODS[method]['file']).read_text(encoding='utf-8').strip() +
         '\n\nDatabase structure:\n' + structure_text(fixture['schema']))
@@ -262,7 +250,7 @@ def oracle(fixture, method=DEFAULT_METHOD):
     else:
         index = locate(at(original, p['array_path']), p.get('id_field'), p.get('id_value', p.get('value')))
         path = p['array_path'] + '/' + str(index)
-        patch = [{'op': 'remove', 'path': path}] if kind == 'remove' else [{'op': 'move', 'from': path, 'path': p['destination_array'] + '/-'}]
+        patch = [{'op': 'remove', 'path': path}] if kind == 'remove' else [{'op': kind, 'from': path, 'path': p['destination_array'] + '/-'}]
     final = apply(original, patch, 'json_patch')
     if kind == 'update' and equal(original, final):
         raise ValueError('Update fixtures must change a value; use the no-change task for an already satisfied request')
@@ -275,7 +263,7 @@ def oracle(fixture, method=DEFAULT_METHOD):
             out = copy.deepcopy(item)
             if 'from' in item:
                 out['from'] = from_pointer(context, fixture['schema'], item['from'])
-            target = item['path'][:-2] if item['op'] in ('add','move') else item['path']
+            target = item['path'][:-2] if item['op'] in ('add','move','copy') else item['path']
             out['path'] = from_pointer(context, fixture['schema'], target)
             result.append(out)
             context = apply(context, [item], 'json_patch')
@@ -303,7 +291,8 @@ def compile_test(fixture, reviews=None, method=DEFAULT_METHOD):
     for mode, prompt in prompts.items():
         from .response_contract import json_patch_schema, value_patch_schema
         test['variants'].append({'id': mode, 'prompt_style': 'direct_text_v1',
-            'state_presentation': 'indexed_arrays' if mode == 'indexed_arrays' else 'raw_json', 'cache': 'default',
+            # direct_text_v1 sends the already-rendered prompt unchanged; the variant ID records its view.
+            'state_presentation': 'raw_json', 'cache': 'default',
             'steps': [{'id': 'patch', 'type': 'generate', 'prompt': prompt, 'output': {'type': 'text'}, 'sampling': {'temperature': 0, 'top_p': 1, 'seed': 42}}],
             'result': {'step': 'patch', 'representation': METHODS[method]['representation'], 'required_ops': [operation] if operation else [],
                        'response_schema': value_patch_schema(fixture['state'],fixture['schema']) if METHODS[method]['representation']=='value_patch' else json_patch_schema(fixture['state'])}})

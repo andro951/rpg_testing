@@ -1,20 +1,27 @@
 DATABASE SUITE — BUILD AND PROMPT REVIEW
 
-Current active suite: 14 cases, 10 task purposes, 8 task templates, 1 operation method,
-41 complete prompts. No benchmark inference was started by finalization.
-All 14 cases are enabled with both exact-prompt approvals recorded on release (October 15, 2026).
+Current suite: 21 cases, 12 task purposes, 10 task templates, 1 operation method,
+62 complete prompts. No benchmark inference was started by finalization.
+See five-operation-coverage.txt for the current review and reasons for every case.
+Earlier activation and validation entries below record their historical counts.
+The ID-only presentation revision later that day was reviewed and explicitly
+approved by Isaac: "Enable the revised prompts". Earlier review digests are
+preserved in test_builder/reviews.json, under previous_reviews.
+The subsequent five-operation revision was also explicitly approved by Isaac:
+"Enable the revised suite" (21 tests / 62 prompt variations).
 
 The task purposes are update an existing object field, update an identified
 element field, update a nested element field, append a unique value, append a
 complete element, remove by unique value, remove by ID, transfer a unique value,
-transfer an identified element, and no change when the request is already met.
-Four additional cases cover empty append collections, a nested collection and
-an empty move destination. Normal JSON, Indexed arrays and Full paths show the
-same input data/task; the first case has no arrays, so its identical Indexed
+transfer an identified element, copy a unique value, copy an identified element,
+and no change when the request is already met. Boundary cases cover empty append,
+move and copy destinations, a nested collection and removing the last element.
+Normal JSON, ID-keyed arrays and Full paths show the
+same input data/task; the first case has no arrays, so its identical ID-keyed
 arrays version is omitted. Each case has three configured repetitions.
 
 No standalone index calculation, before/after insertion, same-collection
-reordering, copy or JSON Patch test-operation case remains in the active suite.
+reordering or JSON Patch test-operation case remains in the active suite.
 Obsolete draft definitions, templates and generated review files were removed.
 The original 61 definitions remain in archives/test-suite-2026-10-14. The ten
 previously deferred purposes remain in deferred-tests.txt/deferred-tests.json.
@@ -22,16 +29,22 @@ previously deferred purposes remain in deferred-tests.txt/deferred-tests.json.
 Authoring layers:
   test_builder/database-rules.txt — shared database requirements for all methods.
   test_builder/methods/value_patch.txt — the active shared explanation of all
-    four operations, typed value selection and empty lists. No @ or array indexes.
-  test_builder/methods/json_patch.txt — retained standard JSON Patch instructions
-    for a separate method comparison; not part of the current active exports.
+    five operations, typed value selection and empty lists. No @ or array indexes.
+  Standard positional JSON Patch prompt generation is retired. Its original
+    templates and evidence remain archived; its legacy evaluator stays available.
   test_builder/templates/*.txt — reusable tasks, separate from method instructions.
     Nested element updates and no-change cases reuse the element-update template.
   test_builder/fixtures.json — predefined schemas, synthetic data, identifier
     fields/values and task parameters. No expected answers are stored here.
-  test_builder/builder.py — method registry and assembly; value-based patch and
-    standard JSON Patch are implemented separately. Future methods need a result adapter/
+  test_builder/builder.py — method registry and assembly. Future methods need a result adapter/
     reference encoder. Task data and final-state oracles can be reused.
+  test_builder/presentation.py — schema-aware ID dictionary and full-path views.
+    Dictionary keys copy each object element's declared ID value and retain its
+    ID field. Primitive elements use their own value. JSON keys are strings;
+    non-string IDs use JSON spelling. Colliding keys are rejected, never merged.
+    Full-path lines use the actual value-selection path immediately followed by
+    a colon and JSON value, with no outer path quoting or separator whitespace.
+    Example: /people/"jx1b"/hair:"black". Empty containers stay visible as []/{}.
 
 Every prompt explains the fixed fields, types and each collection's identity
 rule in plain language. Empty collections retain that explicit structure.
@@ -40,14 +53,14 @@ Records deliberately share non-ID names. New values are literal data and are
 inserted once, so marker-shaped strings are not interpreted as templates.
 
 Review files:
-  prompt-review/ — only 41 .txt files, one complete prompt in each, nothing else.
+  prompt-review/ — only 62 .txt files, one complete prompt in each, nothing else.
   prompts/patch-suite/INDEX.txt — file list outside the prompt-only folder.
   prompts/patch-suite/<test>/<presentation>.txt — identical prompt bytes.
   Adjacent .messages.json files record the empty system/user role fields.
   prompts/patch-suite/manifest.json — prompt hashes and managed export paths.
 
 Review performed: read the shared instructions, then individually inspected
-the structure, presentation, current data and requested task in all 41 prompts.
+the structure, presentation, current data and requested task in all 62 prompts.
 Verified each prompt contains exactly one identical shared method block and
 no reference patch or expected final state. Both approvals in reviews.json
 are bound to exact prompt digests. Isaac approved the release on October 15. Editing a
@@ -88,7 +101,7 @@ Validation logs:
   .local/database-suite-focused-tests.log
   .local/database-suite-full-tests.log
   .local/database-suite-optimization-smoke.log
-Mock repeat/resume: python tests/patch_suite_smoke.py — 123 simulated observations;
+Mock repeat/resume: python tests/patch_suite_smoke.py — 186 simulated observations;
 second run makes no calls and preserves every saved result byte. Temporary mock
 approvals are not written to the user's suite or counted as model results.
 
@@ -206,3 +219,49 @@ FINAL ACTIVATION VALIDATION
     50 repeated runs before the successful final full-suite run.
   Archive paths preserve exact bytes through Git checkout; prompt-review text
     files explicitly retain LF line endings so their approved hashes stay valid.
+
+ID-ONLY PRESENTATION REVISION — OCTOBER 15, 2026
+  The active views are Normal JSON, ID-keyed arrays and Full paths. Positional
+    views and the standard positional method cannot be selected by the builder.
+  Reviewed the shared guidance plus every current-data/task section in all 41
+    actual prompts. None requests an index or displays a positional selector.
+    Every leaf/empty-container full path matches the runtime value-path resolver.
+  Removed the superseded indexed-array exports through the builder manifest.
+    Refreshed evaluation, reporting, timing and optimization sidecars. Prompt
+    Optimization binds these exact prompt sections before any legacy renderer.
+  Verified all 14 source states, schemas, expected states, repetition counts
+    and execution deadlines are unchanged. Archived bytes remain immutable.
+  Focused checks: 68 tests, OK. Log: .local/id-presentation-focused-tests.log.
+  Mock repeat/resume: 123 passing simulated observations, then zero requests
+    and unchanged result bytes. Log: .local/id-presentation-repeat-smoke.log.
+  JavaScript syntax check: node --check reporting/matrix.js, OK.
+  Full unittest discovery: 681 tests in 662.271 seconds, OK (4 skipped).
+    Log: .local/id-presentation-full-tests.log.
+  All 14 cases / 41 prompt variations remain enabled under Isaac's explicit
+    revision approval. No real model inference was started during validation.
+
+FIVE-OPERATION COVERAGE REVISION — OCTOBER 15, 2026
+  Reviewed every existing case; no standalone indexing or positional tasks
+    remained. Kept the 14 useful cases and documented their distinct purposes.
+  Added four Copy cases (primitive/object, empty/nonempty destination), the
+    missing primitive Move into an empty destination, and two Remove cases
+    that leave the source collection empty. The suite now has 21 cases, 62
+    prompt variations and 186 observations per eligible model.
+  Implemented value-path Copy in the reference builder, runtime and both
+    evaluators. Copy appends an independent complete element to a different
+    collection and leaves the source unchanged. Move removes the source.
+  Checked all 62 actual prompts, the shared five-operation instructions,
+    ID-keyed and full-path views, source/expected-state preservation, grouping
+    and exact approvals. Isaac explicitly approved: "Enable the revised suite".
+  Focused tests: 49, OK. Log: .local/five-operation-focused-tests.log.
+  Mock repeat/resume: 186 simulated passes, zero requests on the second run,
+    and unchanged saved bytes. Log: .local/five-operation-repeat-smoke.log.
+  The first full run found a timing-sensitive stop/cancel test. It could stop
+    before generation began, then incorrectly expect an aborted generation.
+    The test now waits for confirmed generation start and uses a bounded
+    selected case. Production cancellation is unchanged. The corrected test
+    passed once plus 25 repeated runs before the final full-suite rerun.
+  Full rerun log: .local/five-operation-full-tests-final.log.
+  Final full unittest discovery: 693 tests in 727.366 seconds, OK (4 skipped).
+    All 21 cases / 62 prompts remain enabled under Isaac's explicit approval.
+  Original archived definitions, saved results and sessions remain untouched.

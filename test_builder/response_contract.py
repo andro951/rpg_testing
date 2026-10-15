@@ -11,7 +11,8 @@ def value_patch_schema(state, schema):
         return {'type':'object','required':list(properties),'properties':properties}
     return {'type':'array','items':{'oneOf':[
         operation('replace',{'value':{}}),operation('add',{'value':{}}),
-        operation('remove'),operation('move',{'from':{'type':'string'}})]}}
+        operation('remove'),operation('move',{'from':{'type':'string'}}),
+        operation('copy',{'from':{'type':'string'}})]}}
 
 
 def json_patch_schema(state):

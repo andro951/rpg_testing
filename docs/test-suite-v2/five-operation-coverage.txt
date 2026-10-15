@@ -1,0 +1,83 @@
+FIVE-OPERATION SUITE REVIEW — OCTOBER 15, 2026
+
+The 14 current cases already excluded standalone indexing, positional insertion,
+same-array reordering and JSON Patch test/precondition tests. No such cases were
+left to remove. Their remaining differences exercise supported database behavior.
+
+Update (4 cases kept):
+1. Change an existing field outside a collection.
+2. Change a field in an element selected by its declared ID.
+3. Change a nested field inside an ID-selected element.
+4. Change an element field when its collection is nested inside other objects.
+The third case navigates deeper after selecting an element; the fourth navigates
+deeper before finding the collection. Neither asks for a numerical position.
+
+Append (4 cases kept):
+5. Append a new unique primitive value to a nonempty collection.
+6. Append a complete identified object element to a nonempty collection.
+7. Append a new unique primitive value to an empty collection.
+8. Append a complete identified object element to an empty collection.
+Empty collections require the model to use the declared structure rather than
+infer it from existing elements. Object payloads must include every field.
+
+Remove (2 kept, 2 added):
+9. Remove a primitive value while other elements remain.
+10. Remove an identified object element while other elements remain.
+11. Remove the last primitive value, leaving an empty collection. NEW
+12. Remove the last identified object element, leaving an empty collection. NEW
+The last-element cases check that the collection remains present as an empty
+array rather than being deleted or changed into a different JSON type.
+
+Move (3 kept, 1 added):
+13. Move a primitive value into a nonempty different collection.
+14. Move an identified object element into a nonempty different collection.
+15. Move a primitive value into an empty different collection. NEW
+16. Move an identified object element into an empty different collection.
+Move means removing the complete source element and appending it to the other
+collection. The remaining source elements and previous destination stay intact.
+
+Copy (4 added):
+17. Copy a primitive value into a nonempty different collection. NEW
+18. Copy an identified object element into a nonempty different collection. NEW
+19. Copy a primitive value into an empty different collection. NEW
+20. Copy an identified object element into an empty different collection. NEW
+Copy appends the complete element to the other collection while leaving the
+source unchanged. The program creates an independent deep copy. The copy keeps
+its ID, which is unique within each collection, not globally across the database.
+
+No change (1 case kept):
+21. Return an empty operation list when the existing field already has the value.
+This checks whether a model invents unnecessary changes. It is a control, not a
+sixth operation.
+
+Outcome: 21 cases, 62 prompt presentations, 3 repetitions = 186 observations
+per eligible model. Four cases cover each operation, plus one no-change case.
+Presentation variations do not count as different conceptual operations/tests.
+
+Implementation and review checks:
+- Reusable task templates remain separate from schemas, data and method rules.
+- One common instruction block explains all five operations in every prompt.
+- Normal JSON, ID-keyed arrays and Full paths use the same data and task.
+- All selectors use declared IDs or unique primitive values; no index answers.
+- Copy uses op/from/path, like Move, and its path selects the destination array.
+- Reference final states and both evaluators check complete transferred payloads,
+  source preservation/removal, destination append order and unrelated data.
+- Invalid paths, missing IDs, duplicate destination IDs, schema violations,
+  same-collection transfers and copying into the source's own children are
+  covered by unit tests. These are program guardrails, not extra model tasks.
+- The existing 14 states, schemas and expected states were retained. Archived
+  source definitions and saved evidence were not changed or rescored.
+- Prompt changes invalidate the previous exact approvals. Isaac approved this
+  reviewed revision explicitly: "Enable the revised suite". The exact updated
+  digests and previous review history are recorded in test_builder/reviews.json.
+
+Final validation:
+- Full unittest discovery: 693 tests in 727.366 seconds, OK (4 skipped).
+- Focused builder, presentation, operation-coverage and evaluator checks: 49, OK.
+- Mock benchmark: 186 passing simulated observations; repeat makes zero requests
+  and preserves every saved result byte. No real model inference was performed.
+- A timing-sensitive cancellation test found in the first full run now waits
+  for confirmed generation start; it passed once plus 25 repeats and the final
+  full suite. Production stop/cancel behavior was not changed.
+- Logs: .local/five-operation-full-tests-final.log and
+  .local/five-operation-repeat-smoke.log.

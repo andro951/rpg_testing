@@ -33,13 +33,13 @@ class PatchPromptBuilderTests(unittest.TestCase):
         self.assertEqual(len(read_json(REPO/'docs/test-suite-v2/deferred-tests.json')['tests']),10)
 
     def test_only_applicable_tasks_remain_and_review_directory_contains_only_exact_prompts(self):
-        self.assertEqual(len(self.fixtures),14)
+        self.assertEqual(len(self.fixtures),21)
         self.assertEqual(set(TASKS),{f['task'] for f in self.fixtures})
         self.assertEqual({p.stem for p in (ROOT/'templates').glob('*.txt')},set(TASK_TEMPLATES.values()))
         self.assertFalse(any((REPO/'test_specs').glob('patch_v2*')))
         self.assertFalse(any((REPO/'prompts/patch-suite').glob('patch_v2*')))
         manifest = read_json(REPO/'prompts/patch-suite/manifest.json')['prompts']
-        self.assertEqual(len(manifest),41)
+        self.assertEqual(len(manifest),62)
         paths = {REPO/p['review_file'] for p in manifest}
         self.assertEqual(set((REPO/'prompt-review').iterdir()),paths)
         for entry in manifest:
@@ -92,7 +92,7 @@ class PatchPromptBuilderTests(unittest.TestCase):
             with patch.dict(METHODS,{'value_patch':{**METHODS['value_patch'],'file':str(path)}}):
                 self.assertFalse(compile_test(fixture,reviews)['enabled'])
         self.assertEqual(len(load_catalog(REPO/'test_specs')),len(self.fixtures))
-        self.assertEqual(len(freeze(REPO)['cases']),9)
+        self.assertEqual(len(freeze(REPO)['cases']),12)
 
     def test_task_schema_and_data_are_independent_of_method_selection(self):
         fixture=self.by_id['db_v3_update_record']
@@ -107,17 +107,13 @@ class PatchPromptBuilderTests(unittest.TestCase):
                 self.assertNotEqual(compile_test(fixture,method='synthetic')['id'],compile_test(fixture)['id'])
         with self.assertRaisesRegex(ValueError,'Unknown'):compile_test(fixture,method='unsupported')
 
-    def test_standard_method_remains_independent_and_uses_its_own_reference_encoding(self):
+    def test_positional_method_and_presentation_are_not_available_for_new_prompts(self):
         for f in self.fixtures:
             with self.subTest(fixture=f['id']):
-                test=compile_test(f,method='json_patch')
-                response=oracle(f,method='json_patch')[0]
-                for v in test['variants']:
-                    values={'patch':json.dumps(response)}
-                    self.assertEqual(v['result']['representation'],'json_patch')
-                    self.assertTrue(evaluate(test,v,values)['exact_match'])
-                    self.assertEqual(assess(test,v,values)['objective_outcome'],'PASS')
-                self.assertNotEqual(test['id'],compile_test(f)['id'])
+                with self.assertRaisesRegex(ValueError,'Unknown operation method'):
+                    compile_test(f,method='json_patch')
+                with self.assertRaisesRegex(ValueError,'inapplicable presentation'):
+                    build_prompt(f,'indexed_arrays')
 
     def test_nested_collection_task_parameters_use_value_paths_for_the_selected_method(self):
         f=copy.deepcopy(self.by_id['db_v3_update_record'])
@@ -237,7 +233,8 @@ class PatchPromptBuilderTests(unittest.TestCase):
             'required':['a/b','empty','object'],'additionalProperties':False}
         f['parameters']={'property_path':'/a~1b/~0key','new_value':2}
         prompt=build_prompt(f,'full_paths')
-        self.assertIn('"/a~1b/~0key" = 1',prompt);self.assertIn('"/empty" (array)',prompt)
+        self.assertIn('/a~1b/~0key:1',prompt);self.assertIn('/empty:[]',prompt)
+        self.assertIn('/object:{}',prompt)
         self.assertEqual(oracle(f)[1]['a/b']['~key'],2)
         for path in ('/a/-1','/a/01','/a/2','/a~2'):
             with self.assertRaises(ValueError):at({'a':[1,2]},path)
@@ -255,7 +252,7 @@ class PatchPromptBuilderTests(unittest.TestCase):
                 expected=prompt_parts(f,v['id'])
                 for key in ('current_state','new_information','task_requirements','presentation_notes'):
                     self.assertEqual(value[key],expected[key])
-        self.assertEqual(operations,{'replace','add','remove','move'})
+        self.assertEqual(operations,{'replace','add','remove','move','copy'})
 
     def test_generated_workflow_repeated_requests_are_identical_without_constrained_decoding(self):
         f=self.by_id['db_v3_move_record'];test=compile_test(f);v=test['variants'][0];captured=[]
@@ -289,7 +286,7 @@ class PatchPromptBuilderTests(unittest.TestCase):
             data=sharing(root)
             with patch('optimization.templates.catalog',return_value=data):
                 scope=freeze(root)
-            self.assertEqual(len(scope['cases']),9)
+            self.assertEqual(len(scope['cases']),12)
             for case in scope['cases'].values():
                 self.assertEqual(case['variant']['result']['representation'],'value_patch')
                 self.assertIn('value-based paths',bindings(case)['task_requirements'])
@@ -306,7 +303,7 @@ class PatchPromptBuilderTests(unittest.TestCase):
             review=root/'prompt-review/00-obsolete.txt';review.parent.mkdir();review.write_text('old')
             write_json(root/'prompts/patch-suite/manifest.json',{'prompts':[{'test_id':'obsolete','file':old.relative_to(root).as_posix(),'review_file':review.relative_to(root).as_posix()}]})
             result=build(root)
-            self.assertEqual(result['prompts'],41);self.assertEqual(result['enabled'],len(self.fixtures))
+            self.assertEqual(result['prompts'],62);self.assertEqual(result['enabled'],len(self.fixtures))
             self.assertFalse(old.exists());self.assertFalse(review.exists());self.assertFalse((root/'test_specs/obsolete.json').exists())
             before={p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file()}
             build(root)

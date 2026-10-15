@@ -30,8 +30,8 @@ class SuiteActivationTests(unittest.TestCase):
 
     def test_default_catalog_contains_only_finalized_new_cases(self):
         tests=load_catalog(ROOT/'test_specs')
-        self.assertEqual(len(tests),14)
-        self.assertEqual(sum(len(t['variants'])*t['repetitions'] for t in tests),123)
+        self.assertEqual(len(tests),21)
+        self.assertEqual(sum(len(t['variants'])*t['repetitions'] for t in tests),186)
         reviews=read_json(ROOT/'test_builder/reviews.json')
         for test in tests:
             self.assertEqual(test['prompt_builder']['method'],'value_patch')

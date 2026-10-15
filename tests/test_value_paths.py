@@ -114,11 +114,56 @@ class ValuePathTests(unittest.TestCase):
                      {'op':'add','path':'/items/2','value':{'key':'new','count':0}},
                      {'op':'move','from':'/items/"item-2"','path':'/items'},
                      {'op':'move','from':'/items/"item-2"/count','path':'/values'},
-                     {'op':'copy','from':'/items/"item-2"','path':'/storage'},
+                     {'op':'copy','from':'/items/"item-2"','path':'/items'},
                      {'op':'test','path':'/items/"item-2"/count','value':2}):
             with self.subTest(item=item),self.assertRaises(ValueError):self.run_patch([item])
         self.state['storage']=[{'key':'item-2','count':5}]
         with self.assertRaises(ValueError):self.run_patch([{'op':'move','from':'/items/"item-2"','path':'/storage'}])
+
+    def test_copy_appends_complete_element_and_updates_do_not_alias_source(self):
+        self.state['storage'] = [{'key':'existing','count':7}]
+        copied = self.run_patch([{'op':'copy','from':'/items/"item-2"','path':'/storage'}])
+        self.assertEqual(copied['items'], self.state['items'])
+        self.assertEqual(copied['storage'], [{'key':'existing','count':7},{'key':'item-2','count':2}])
+        changed = self.run_patch([{'op':'copy','from':'/items/"item-2"','path':'/storage'},
+                                  {'op':'replace','path':'/storage/"item-2"/count','value':99}])
+        self.assertEqual(changed['items'], self.state['items'])
+        self.assertEqual(changed['storage'][-1]['count'],99)
+
+    def test_primitive_copies_preserve_json_type_and_source(self):
+        schema=obj({'a':{'type':'array','items':{'type':['string','number','boolean','null']},'uniqueItems':True},
+                    'b':{'type':'array','items':{'type':['string','number','boolean','null']},'uniqueItems':True}})
+        for value in (42,'42',False,None,'a/b'):
+            with self.subTest(value=value):
+                state={'a':[value], 'b':[]}
+                after=apply(state,[{'op':'copy','from':'/a/'+json.dumps(value),'path':'/b'}],'value_patch',schema)
+                self.assertEqual(after,{'a':[value],'b':[value]})
+                self.assertIs(type(after['b'][0]),type(value))
+                self.assertEqual(state,{'a':[value],'b':[]})
+
+    def test_invalid_copy_targets_sources_and_duplicate_ids_fail_atomically(self):
+        for item in ({'op':'copy','path':'/storage'},
+                     {'op':'copy','from':17,'path':'/storage'},
+                     {'op':'copy','from':'/items/"missing"','path':'/storage'},
+                     {'op':'copy','from':'/items/"item-2"/count','path':'/values'},
+                     {'op':'copy','from':'/items/"item-2"','path':'/storage/-'},
+                     {'op':'copy','from':'/items/"item-2"','path':'/storage/0'},
+                     {'op':'copy','from':'/items/"item-2"','path':'/items'}):
+            original=copy.deepcopy(self.state)
+            with self.subTest(item=item),self.assertRaises(ValueError):self.run_patch([item])
+            self.assertEqual(self.state,original)
+        self.state['storage']=[{'key':'item-2','count':5}]
+        with self.assertRaises(ValueError):self.run_patch([{'op':'copy','from':'/items/"item-2"','path':'/storage'}])
+        self.state['storage']=[]
+        self.schema['properties']['storage']['items']['properties']['count']['type']='string'
+        with self.assertRaises(ValidationError):self.run_patch([{'op':'copy','from':'/items/"item-2"','path':'/storage'}])
+
+    def test_copy_cannot_append_into_a_collection_inside_its_source_element(self):
+        schema=obj({'groups':{'type':'array','x-id-field':'key','items':obj({
+            'key':{'type':'string'}, 'children':records()})}})
+        state={'groups':[{'key':'group-a','children':[]}]}
+        with self.assertRaisesRegex(ValueError,'outside its source element'):
+            apply(state,[{'op':'copy','from':'/groups/"group-a"','path':'/groups/"group-a"/children'}],'value_patch',schema)
 
     def test_primitive_move_and_root_collection_append(self):
         schema=obj({'a':{'type':'array','items':{'type':'string'},'uniqueItems':True},

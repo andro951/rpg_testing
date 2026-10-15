@@ -52,20 +52,30 @@ def render(candidate, values):
     return [{'role': role, 'content': substitute(candidate[role], values)} for role in ('system', 'user')]
 
 
-def full_paths(value, path='$'):
+def _legacy_full_paths(value, path='$'):
+    """Reconstruct archived positional experiments only, never database-v3 prompts."""
     if isinstance(value, dict) and value:
-        return '\n'.join(full_paths(item, path + '.' + key) for key, item in value.items())
+        return '\n'.join(_legacy_full_paths(item, path + '.' + key) for key, item in value.items())
     if isinstance(value, list) and value:
-        return '\n'.join(full_paths(item, path + '[' + str(index) + ']') for index, item in enumerate(value))
+        return '\n'.join(_legacy_full_paths(item, path + '[' + str(index) + ']') for index, item in enumerate(value))
     return path + ' = ' + json.dumps(value, ensure_ascii=False)
 
 
 def bindings(case, prior=None):
     test, variant = case['test'], case['variant']
+    if test.get('prompt_builder', {}).get('version') == 'database-v3':
+        final = next(s for s in steps(variant['steps']) if s['id'] == variant['result']['step'])
+        prefix, task = final['prompt'].split('\n\nTask:\n', 1)
+        guidance, state_text = prefix.split('\n\nCurrent data:\n', 1)
+        note = ''
+        if '\n\nInput presentation:\n' in guidance:
+            guidance, note = guidance.split('\n\nInput presentation:\n', 1)
+        return {'current_state': state_text, 'new_information': task, 'task_requirements': guidance,
+                'presentation_notes': note, 'prior_outputs': json.dumps(prior or {}, ensure_ascii=False)}
     state = test['source']['initial_state']
     presentation = case['presentation']
     if presentation == 'Full paths':
-        state_text = full_paths(state)
+        state_text = _legacy_full_paths(state)
         note = 'Paths show original state locations; arrays remain arrays. Output paths must be RFC 6901 JSON Pointers, not dotted input paths.'
     else:
         indexed = presentation == 'Indexed arrays'
@@ -76,14 +86,6 @@ def bindings(case, prior=None):
     if test.get('prompt_builder'):
         final = next(s for s in steps(variant['steps']) if s['id'] == variant['result']['step'])
         prefix, task = final['prompt'].split('\n\nTask:\n', 1)
-        if test['prompt_builder'].get('version') == 'database-v3':
-            guidance, state_text = prefix.split('\n\nCurrent data:\n', 1)
-            if '\n\nInput presentation:\n' in guidance:
-                guidance, note = guidance.split('\n\nInput presentation:\n', 1)
-            else:
-                note = ''
-            return {'current_state': state_text, 'new_information': task, 'task_requirements': guidance,
-                    'presentation_notes': note, 'prior_outputs': json.dumps(prior or {}, ensure_ascii=False)}
         note, state_text = prefix.split('State:\n', 1)
         note = note.strip()
         event = task.split('\nReturn only a JSON Patch array', 1)[0]

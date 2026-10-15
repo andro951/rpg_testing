@@ -120,29 +120,31 @@ def validate(state, schema):
 def lower_operation(state, item, schema):
     """Resolve ONE operation against the current state, never all paths up front."""
     from .scoring import apply as standard_apply, at
-    if not isinstance(item, dict) or item.get('op') not in ('replace', 'add', 'remove', 'move'):
-        raise ValueError('Allowed operations are replace, add, remove and move')
+    if not isinstance(item, dict) or item.get('op') not in ('replace', 'add', 'remove', 'move', 'copy'):
+        raise ValueError('Allowed operations are replace, add, remove, move and copy')
     op = item['op']
     if not isinstance(item.get('path'), str) or (op in ('replace', 'add') and 'value' not in item):
         raise ValueError('Operation requires a string path and its value/from fields')
     context = state
     out = {'op': op}
-    if op == 'move':
+    if op in ('move', 'copy'):
+        label = op.capitalize()
         if not isinstance(item.get('from'), str):
-            raise ValueError('Move requires a string from path')
+            raise ValueError(label + ' requires a string from path')
         _, _, source = resolve(state, schema, item['from'])
         if not source or not isinstance(at(state, source[:-1]), list):
-            raise ValueError('Move source must select a collection element')
+            raise ValueError(label + ' source must select a collection element')
         # Resolve before removal as well to reject descendants and the same collection.
         _, _, target = resolve(state, schema, item['path'])
         if target == source[:-1] or target[:len(source)] == source:
-            raise ValueError('Move requires a different collection outside its source element')
+            raise ValueError(label + ' requires a different collection outside its source element')
         out['from'] = pointer(source)
-        context = standard_apply(state, [{'op':'remove', 'path':out['from']}], 'json_patch')
+        if op == 'move':
+            context = standard_apply(state, [{'op':'remove', 'path':out['from']}], 'json_patch')
     value, _, parts = resolve(context, schema, item['path'])
-    if op in ('add', 'move'):
+    if op in ('add', 'move', 'copy'):
         if not isinstance(value, list):
-            raise ValueError('Append/Move path must select the destination collection itself')
+            raise ValueError('Append/Move/Copy path must select the destination collection itself')
         out['path'] = pointer(parts) + '/-'
     elif op == 'remove':
         if not parts or not isinstance(at(context, parts[:-1]), list):

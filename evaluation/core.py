@@ -157,7 +157,7 @@ def patch_checks(report, test, variant, raw):
         from jsonschema import Draft202012Validator
         errors = sorted(e.message for e in Draft202012Validator(variant['result']['response_schema']).iter_errors(patch))
         report.add('patch.method_contract', FAIL if errors else PASS,
-                   'Operations must update existing fields, append to collections, remove collection elements or move between different collections.' +
+                   "Operations must follow this test's allowed operation types, required fields and path rules." +
                    (' ' + '; '.join(errors) if errors else ''))
     required_ops = variant['result'].get('required_ops')
     if required_ops is not None:
@@ -259,14 +259,14 @@ def value_patch_checks(report, test, patch):
     doc, schema, blocked = copy.deepcopy(test['source']['initial_state']), test.get('state_schema'), None
     for number, item in enumerate(patch):
         meta = {'operation': number, 'scope': 'operation'}
-        structure = isinstance(item, dict) and item.get('op') in ('replace','add','remove','move') and isinstance(item.get('path'), str)
+        structure = isinstance(item, dict) and item.get('op') in ('replace','add','remove','move','copy') and isinstance(item.get('path'), str)
         if structure:
-            structure = ('value' in item if item['op'] in ('replace','add') else isinstance(item.get('from'),str) if item['op']=='move' else True)
+            structure = ('value' in item if item['op'] in ('replace','add') else isinstance(item.get('from'),str) if item['op'] in ('move','copy') else True)
         report.add('patch.structure', PASS if structure else FAIL,
-                   'Expected replace/add with value, remove, or move with from; paths must be strings.', actual=item, **meta)
+                   'Expected replace/add with value, remove, or move/copy with from; paths must be strings.', actual=item, **meta)
         syntax = structure
         if structure:
-            for field in ('path','from') if item['op']=='move' else ('path',):
+            for field in ('path','from') if item['op'] in ('move','copy') else ('path',):
                 try:
                     tokens(item[field])
                     report.add('pointer.syntax', PASS, f'{field}: valid value-path syntax.', actual=item[field], **meta)
