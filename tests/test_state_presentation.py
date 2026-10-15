@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import json
 import unittest
 from pathlib import Path
@@ -16,7 +17,7 @@ class StatePresentationTests(unittest.TestCase):
         self.assertEqual(shown['real_numeric_object'],{'0':'keep','1':'object'})
 
     def test_raw_and_indexed_variants_show_same_source_with_different_array_shape(self):
-        test=read_json(ROOT/'test_specs/array_patch_replace_004.json')
+        test=read_json(LEGACY_ROOT / 'test_specs/array_patch_replace_004.json')
         raw=messages(test,test['variants'][0]['steps'][0],{},test['variants'][0])
         indexed=messages(test,test['variants'][1]['steps'][0],{},test['variants'][1])
         def state(msg):
@@ -29,7 +30,7 @@ class StatePresentationTests(unittest.TestCase):
         self.assertNotIn('expected_state',raw[1]['content']);self.assertNotIn('expected_state',indexed[1]['content'])
 
     def test_time_only_direct_prompt_is_conversational_pretty_and_minimal(self):
-        test=read_json(ROOT/'test_specs/time_only.json');variant=test['variants'][0]
+        test=read_json(LEGACY_ROOT / 'test_specs/time_only.json');variant=test['variants'][0]
         prompt=messages(test,variant['steps'][0],{},variant)
         self.assertEqual(prompt[0],{'role':'system','content':'You help update an existing JSON state when new information is provided.'})
         self.assertEqual(len(prompt),2);user=prompt[1]['content']
@@ -39,11 +40,11 @@ class StatePresentationTests(unittest.TestCase):
         self.assertNotIn('SOURCE',user);self.assertNotIn('Nobody moves',user);self.assertNotIn('Nothing else in the tracked state changes',user)
         self.assertNotIn('"new_information"',user)
     def test_time_only_uses_normal_raw_json(self):
-        test=read_json(ROOT/'test_specs/time_only.json')
+        test=read_json(LEGACY_ROOT / 'test_specs/time_only.json')
         self.assertEqual(presentation_mode(test,{}),'raw_json')
 
     def test_prompt_calibration_v1_and_v2_preserve_historical_difference(self):
-        test=read_json(ROOT/'test_specs/prompt_calibration_001_time.json')
+        test=read_json(LEGACY_ROOT / 'test_specs/prompt_calibration_001_time.json')
         v1,v1raw,v2=test['variants'][:3]
         old=messages(test,v1['steps'][0],{},v1)
         raw_control=messages(test,v1raw['steps'][0],{},v1raw)
@@ -59,14 +60,14 @@ class StatePresentationTests(unittest.TestCase):
         self.assertIn('New Information:\nExactly five minutes pass.',current[1]['content'])
         self.assertNotIn('SOURCE',current[1]['content'])
     def test_prompt_calibration_modifiers_are_distinct(self):
-        test=read_json(ROOT/'test_specs/prompt_calibration_001_time.json')
+        test=read_json(LEGACY_ROOT / 'test_specs/prompt_calibration_001_time.json')
         rendered={v['id']:messages(test,v['steps'][0],{},v)[-1]['content'] for v in test['variants'][2:]}
         self.assertIn('Only include fields that actually changed.',rendered['v3_only_changed'])
         self.assertIn('Make the smallest JSON Patch needed',rendered['v4_smallest_patch'])
         self.assertIn('only when the value in the updated state should be different',rendered['v5_change_rule'])
         self.assertIn('Example:\nCurrent State:',rendered['v6_one_example'])
     def test_dialogue_test_uses_direct_prompt_only(self):
-        test=read_json(ROOT/'test_specs/dialogue_test.json');variant=test['variants'][0]
+        test=read_json(LEGACY_ROOT / 'test_specs/dialogue_test.json');variant=test['variants'][0]
         prompt=messages(test,variant['steps'][0],{},variant)
         self.assertEqual(prompt,[{'role':'system','content':"Follow the user's prompt."},
                                  {'role':'user','content':variant['steps'][0]['prompt']}])
@@ -89,15 +90,15 @@ class StatePresentationTests(unittest.TestCase):
         self.assertTrue(wrong['state_exact_match']);self.assertFalse(wrong['patch_ops_match']);self.assertFalse(wrong['exact_match'])
 
     def test_validation_rejects_unknown_presentation_and_patch_operation(self):
-        test=read_json(ROOT/'test_specs/array_patch_replace_004.json')
+        test=read_json(LEGACY_ROOT / 'test_specs/array_patch_replace_004.json')
         test['variants'][0]['state_presentation']='mystery'
         with self.assertRaises(ValueError):validate_test(test)
-        test=read_json(ROOT/'test_specs/array_patch_replace_004.json')
+        test=read_json(LEGACY_ROOT / 'test_specs/array_patch_replace_004.json')
         test['variants'][0]['result']['required_ops']=['increment']
         with self.assertRaises(ValueError):validate_test(test)
 
     def test_every_enabled_fixture_demo_path_is_exact(self):
-        for test in load_workflow_specs(ROOT/'test_specs'):
+        for test in load_workflow_specs(LEGACY_ROOT / 'test_specs'):
             for variant in test['variants']:
                 if not variant.get('enabled',True):continue
                 with self.subTest(test=test['id'],variant=variant['id']):

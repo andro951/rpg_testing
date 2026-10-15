@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 """A reviewed loading-only update must not reopen existing benchmark results."""
 import json
 import tempfile
@@ -25,7 +26,7 @@ class OperationalSourceIdentityTests(unittest.TestCase):
 
     def test_existing_completed_result_keeps_same_id_and_stays_complete(self):
         model = {'id': 'local-fixture', 'files': ['fixture.gguf'], 'required_vram_gb': 8}
-        test = domain.read_json(ROOT / 'test_specs/time_only.json')
+        test = domain.read_json(LEGACY_ROOT / 'test_specs/time_only.json')
         variant = test['variants'][0]
         target = {'vram_gb': 8}
         with patch.object(domain, 'code_fingerprint', return_value=self.original):

@@ -292,7 +292,7 @@ class Controller(ModelManager):
             if kind=='optimization':
                 from optimization.engine import settings
                 from optimization.storage import Store
-                if not isinstance(payload,dict) or set(payload)-{'mode','session_id','generator_id','origin_model_id','settings'}:raise ValueError('Unknown optimizer option')
+                if not isinstance(payload,dict) or set(payload)-{'mode','session_id','generator_id','origin_model_id','settings','prompt_writer'}:raise ValueError('Unknown optimizer option')
                 if payload.get('mode','optimize') not in ('optimize','evaluate_remaining'):raise ValueError('Unknown optimizer mode')
                 if payload.get('session_id'):Store(self.root).load(payload['session_id'])
                 else:settings(payload.get('settings',{}))

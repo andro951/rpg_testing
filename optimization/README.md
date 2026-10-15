@@ -1,12 +1,27 @@
 # Prompt Optimization tab
 
+## Codex or Local model (October 14)
+
+The tab defaults to Codex, with separate GPT model and effort selectors read
+from the worker's installed Codex. Local model mode keeps the existing
+temperature and reasoning controls. Each Codex session creates one persistent
+thread and resumes it across attempts, pauses and Workbench restarts; it uses
+the worker's Codex sign-in. Writer selections apply to new sessions. Continue
+keeps the saved writer. See [setup, evidence and validation](../docs/prompt-optimization/codex-writer.txt).
+
+Codex receives the same LPIL user prompt and returns the same text candidate
+artifact. Its thread setup adds prompt-writing-only instructions, which are
+saved separately. Generation has no elapsed deadline; Stop preserves partial
+output. Candidate tests, repetitions, reasoning-off policy and rankings are
+unchanged. Pending or archived tests remain blocked by the review gate.
+
 ## LPIL prompt writer (October 9)
 
 New sessions use one user message and no system message for the prompt-writing
 request. The source files from Isaac's LPIL ZIP are preserved under
 `docs/prompt-optimization/lpil/`. `prompt_builder.py` combines the language
-description, outer template, Array move task, results and writer-output rules.
-The Array move task is a separate free-form document with one task-level
+description, outer template, selected task definition, results and writer-output rules.
+The task definition is a separate free-form document with one task-level
 REQUIRED_OUTPUT block. That block describes the benchmark answer, while the
 writer's own output rules describe its system/user candidate pair.
 
@@ -17,7 +32,7 @@ call. Literal references are normalized separately, and external evidence and
 inserted data are never reparsed as LPIL. Empty candidate system messages are
 supported. The reusable builder/validator also accepts optional source/new
 replacement lists and custom writer-output rules; the Workbench executor still
-runs the Array move system/user-message pilot, not arbitrary custom artifacts.
+runs the collection-transfer system/user-message pilot, not arbitrary custom artifacts.
 
 Identical captured requests are shown once with IDs used by the trial results.
 Responses remain separate observations even when their text matches. Feedback
@@ -46,7 +61,7 @@ preserves API roles, and the metadata records the baseline, request digest and
 automatic allocation estimate. Native tokenizer verification still happens before
 actual generation. See the [implementation review](../docs/prompt-optimization/lpil-implementation-review.md).
 
-The executable pilot is `definitions/array_move_patch.json`. Opening the Workbench Prompt Optimization tab automatically scans runnable host models and populates both dropdowns. It rescans on each visit, preserving available selections; Refresh host models also remains available. Select the generator and starting model, then Start new session. Maximum attempts defaults to 20, temperature bounds to 0.5–0.9, and generator reasoning to off. A pass at the full origin repetition count opens all three Array move JSON Patch presentation variants across all host models. Benchmark reasoning stays off; unsupported Perchance controls remain unverified and its provider runs last only on 8 GB hosts.
+The executable pilot is `definitions/array_move_patch.json`. Opening the Workbench Prompt Optimization tab automatically scans runnable host models and populates both dropdowns. It rescans on each visit, preserving available selections; Refresh host models also remains available. Select the generator and starting model, then Start new session. Maximum attempts defaults to 20, temperature bounds to 0.5–0.9, and generator reasoning to off. A pass at the full origin repetition count opens all matching reviewed collection-transfer cases and presentations across all host models. Benchmark reasoning stays off; unsupported Perchance controls remain unverified and its provider runs last only on 8 GB hosts.
 
 `templates.py` implements per-experiment literal labels and immutable bindings, `engine.py` controls sessions/coverage/rankings/context, `runtime.py` isolates generator and benchmark processes, and `storage.py` preserves checksummed evidence under `optimization_results/`. Continue preserves terminal answers and attempt counts. Evaluate remaining creates the current host cohort without generating new prompts. Export/import transfers sessions between machines; candidate export does not change test definitions.
 
@@ -54,7 +69,7 @@ The component catalog below remains a separate reviewed compatibility resource. 
 
 # Prompt-sharing metadata
 
-`sharing.json` is the executable sidecar catalog for prompt compatibility. It covers all 61 test/example definitions and 179 variants without adding fields to execution specs or changing existing benchmark identities. All 159 active objective variants have component locations and expansion scopes; dialogue and inactive examples are registered with explicit exclusions.
+`sharing.json` is the executable sidecar catalog for prompt compatibility. It covers the current database definitions and presentations; pending drafts have explicit exclusions and become eligible only after joint review. The original suite is preserved in the archive. No draft becomes runnable merely because its metadata exists.
 
 Each variant records its reviewed definition digest, source file, existing report groups, task family, output contract, immutable requirements, repetition/model policies and compatible components. Each component has exact instruction locations and an ordered list of explicit scope memberships. `expansion_levels` describes the scope sequence; repeated member sets are omitted. These are structural compatibility groups, not evidence of improved model performance or permission to run rejected tests.
 

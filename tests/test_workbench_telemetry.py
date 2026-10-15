@@ -7,6 +7,7 @@ from workbench.telemetry import GpuMonitor, NvmlProvider, Memory, Utilization, T
 from workbench.backends import DemoBackend
 from workbench.domain import read_json
 from pathlib import Path
+from tests.suite_fixtures import LEGACY_ROOT
 
 class Provider:
     def __init__(self,uuid): self.i=0;self.closed=False
@@ -62,7 +63,7 @@ class TelemetryTests(unittest.TestCase):
     def test_partial_workflow_records_telemetry_on_cancel(self):
         from workbench.workflows import Cancelled
         m=GpuMonitor('demo',simulated=True);m.start();cancel=threading.Event();cancel.set()
-        test=read_json(Path(__file__).resolve().parents[1]/'test_specs/time_only.json')
+        test=read_json(LEGACY_ROOT/'test_specs/time_only.json')
         with self.assertRaises(Cancelled) as cm:monitored_execute(test,test['variants'][0],DemoBackend(),cancel,monitor=m)
         self.assertIn('gpu_memory',cm.exception.partial);m.close()
     def test_nvml_uuid_guard(self):

@@ -73,6 +73,20 @@ def bindings(case, prior=None):
         note = ('Numeric object keys display the real zero-based indexes of original arrays. The authoritative state still contains arrays; use RFC 6902 array semantics.'
                 if indexed else 'The state is ordinary JSON; arrays retain their real zero-based positions.')
     event = variant.get('new_information_override', test['source'].get('new_information', ''))
+    if test.get('prompt_builder'):
+        final = next(s for s in steps(variant['steps']) if s['id'] == variant['result']['step'])
+        prefix, task = final['prompt'].split('\n\nTask:\n', 1)
+        if test['prompt_builder'].get('version') == 'database-v3':
+            guidance, state_text = prefix.split('\n\nCurrent data:\n', 1)
+            if '\n\nInput presentation:\n' in guidance:
+                guidance, note = guidance.split('\n\nInput presentation:\n', 1)
+            else:
+                note = ''
+            return {'current_state': state_text, 'new_information': task, 'task_requirements': guidance,
+                    'presentation_notes': note, 'prior_outputs': json.dumps(prior or {}, ensure_ascii=False)}
+        note, state_text = prefix.split('State:\n', 1)
+        note = note.strip()
+        event = task.split('\nReturn only a JSON Patch array', 1)[0]
     required = variant.get('result', {}).get('required_ops')
     requirement = 'Return only an RFC 6902 JSON Patch array, with RFC 6901 JSON Pointer paths. Apply only established events, preserve unrelated values, and do not add explanations.'
     if required is not None:
@@ -85,9 +99,16 @@ def bindings(case, prior=None):
 def freeze(root):
     """Freeze only reviewed, active, non-rejected members; no solution in bindings."""
     data = catalog()
-    anchor = data['variants']['array_patch_move_007/indexed_object_json_patch']
+    origin = 'array_patch_move_007/indexed_object_json_patch'
+    if origin not in data['variants']:
+        origin = next((key for key, entry in data['variants'].items()
+                       if entry['objective_optimization_eligible']
+                       and entry['constraints'].get('required_ops') == ['move']), None)
+    if origin is None or not data['variants'][origin]['objective_optimization_eligible']:
+        raise ValueError('No reviewed, enabled move test is available. Review the new patch-suite prompts before starting optimization.')
+    anchor = data['variants'][origin]
     test = read_json(root / anchor['source_file'])
-    variant = next(v for v in test['variants'] if v['id'] == 'indexed_object_json_patch')
+    variant = next(v for v in test['variants'] if test['id'] + '/' + v['id'] == origin)
     registration(test, variant, data)
     # October 8 revision: one origin gate, then the complete matching task type.
     scopes = [{'id': 'task_type', 'members': [key for key, entry in data['variants'].items()
@@ -105,7 +126,7 @@ def freeze(root):
             registration(t, v, data)
             if not t.get('enabled', True) or not v.get('enabled', True) or rejected.get(definition_id(t, v), {}).get('blocked'):
                 continue
-            if v['result']['representation'] != 'json_patch':
+            if v['result']['representation'] not in ('json_patch','value_patch'):
                 raise ValueError('Full-message binding requires a JSON Patch contract: ' + key)
             # Final-call replacement is supported; earlier calls are preserved.
             cases[key] = {'id': key, 'test': copy.deepcopy(t), 'variant': copy.deepcopy(v),
@@ -113,7 +134,6 @@ def freeze(root):
                           'definition_id': definition_id(t, v)}
             members.append(key)
         layers.append({'id': scope['id'] if 'id' in scope else digest(scope), 'members': members})
-    origin = 'array_patch_move_007/indexed_object_json_patch'
     if origin not in cases:
         raise ValueError('The origin test is disabled or rejected.')
     layers.insert(0, {'id': 'origin', 'members': [origin]})
@@ -122,7 +142,7 @@ def freeze(root):
     for layer in layers:
         if not unique or set(layer['members']) != set(unique[-1]['members']):
             unique.append(layer)
-    return {'cases': cases, 'layers': unique, 'workflow_fingerprint': data['workflow_fingerprint']}
+    return {'cases': cases, 'layers': unique, 'task_type': anchor['task_family'], 'workflow_fingerprint': data['workflow_fingerprint']}
 
 
 def projection(case, candidate, remote=False):

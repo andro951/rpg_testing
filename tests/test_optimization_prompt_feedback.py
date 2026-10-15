@@ -1,8 +1,12 @@
+from unittest.mock import patch
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
+import io
 import json
 import shutil
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from optimization import engine, prompt_builder
 from optimization.engine import create, Engine
@@ -20,7 +24,10 @@ class PromptFeedbackTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         for folder in ('test_specs', 'docs/prompt-optimization', 'optimization/definitions'):
-            shutil.copytree(ROOT / folder, self.root / folder)
+            shutil.copytree(fixture_path(folder), self.root / folder)
+        catalog_patch = patch('optimization.templates.catalog', side_effect=legacy_sharing)
+        catalog_patch.start()
+        self.addCleanup(catalog_patch.stop)
         self.app = Controller(self.root, demo=True)
         self.cohort = {'models': [native()], 'gpu': {'name': 'Mock GPU', 'total_gib': 8}, 'simulated': True}
         self.session = create(self.app, {'generator_id': 'local-a'}, self.cohort)
@@ -172,14 +179,18 @@ class PromptFeedbackTests(unittest.TestCase):
         self.assertEqual(len(holder[0].requests[0]['messages']), 1)
 
     def test_export_matches_next_request_without_mutating_session_or_evidence(self):
-        before = self.store.export(self.session['id'])
+        def contents(data):
+            # ZIP creation timestamps can differ even when saved evidence is unchanged.
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                return {name: archive.read(name) for name in archive.namelist()}
+        before = contents(self.store.export(self.session['id']))
         destination = self.root / 'export/first.txt'
         metadata = export(self.root, self.session['id'], destination)
         expected = engine.packet_messages(self.session, self.packet([]))
         self.assertEqual(destination.read_bytes(), expected[0]['content'].encode('utf-8'))
         self.assertEqual(json.loads(destination.with_suffix('.messages.json').read_text()), expected)
         self.assertEqual(metadata['message_digest'], digest(expected))
-        self.assertEqual(self.store.export(self.session['id']), before)
+        self.assertEqual(contents(self.store.export(self.session['id'])), before)
         self.assertFalse(metadata['inference_started'])
 
     def test_existing_source_counts_and_custom_output_builder(self):

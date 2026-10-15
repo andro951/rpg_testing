@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import json
 import tempfile
@@ -14,7 +15,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 class ExtraTests(unittest.TestCase):
     def test_example_specs_all_valid(self):
-        tests=load_workflow_specs(ROOT/'examples/test_specs')
+        tests=load_workflow_specs(LEGACY_ROOT / 'examples/test_specs')
         self.assertEqual(len(tests),3)
         for test in tests:
             for v in test['variants']:
@@ -24,17 +25,17 @@ class ExtraTests(unittest.TestCase):
         class Missing(DemoBackend):
             def generate(self,*args):
                 r=super().generate(*args);r['cached_tokens']=None;return r
-        t=read_json(ROOT/'examples/test_specs/cached_questions.json')
+        t=read_json(LEGACY_ROOT / 'examples/test_specs/cached_questions.json')
         self.assertFalse(execute(t,t['variants'][0],Missing())['measurement_valid'])
     def test_unverified_cache_backend_rejected(self):
         b=DemoBackend();b.supports_cache=False
-        t=read_json(ROOT/'examples/test_specs/cached_questions.json')
+        t=read_json(LEGACY_ROOT / 'examples/test_specs/cached_questions.json')
         with self.assertRaises(Unsupported):execute(t,t['variants'][0],b)
     def test_unknown_step_parameters_rejected(self):
-        t=read_json(ROOT/'test_specs/time_only.json');t['variants'][0]['steps'][0]['shell']='echo unsafe'
+        t=read_json(LEGACY_ROOT / 'test_specs/time_only.json');t['variants'][0]['steps'][0]['shell']='echo unsafe'
         with self.assertRaises(ValueError):validate_test(t)
     def test_ground_truth_not_sent(self):
-        t=read_json(ROOT/'test_specs/time_only.json');t['expected_state']['SECRET']='do not send'
+        t=read_json(LEGACY_ROOT / 'test_specs/time_only.json');t['expected_state']['SECRET']='do not send'
         m=messages(t,t['variants'][0]['steps'][0],{})
         self.assertNotIn('SECRET',json.dumps(m));self.assertNotIn('expected_state',json.dumps(m))
     def test_lock_refuses_second_owner_and_releases(self):

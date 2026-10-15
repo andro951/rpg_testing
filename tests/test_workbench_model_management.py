@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 """Folder consent, browser-action contracts, verified downloads and cache-free storage."""
 import copy
 import hashlib
@@ -161,7 +162,7 @@ class ModelManagementTests(unittest.TestCase):
 
     def test_preflight_prunes_deleted_models_before_planning(self):
         (self.root/'test_specs').mkdir()
-        shutil.copy(ROOT/'test_specs/time_only.json',self.root/'test_specs/time_only.json')
+        shutil.copy(LEGACY_ROOT / 'test_specs/time_only.json',self.root/'test_specs/time_only.json')
         path=self.models/'Gone-Q4_K_M.gguf';path.write_bytes(DATA)
         self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
         mid=self.app.last_models[0]['id'];self.app.assign_model(mid,8);self.app.identify_artifact(self.app.last_models[0])

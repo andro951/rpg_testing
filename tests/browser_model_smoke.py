@@ -16,6 +16,8 @@ import urllib.error
 import urllib.request
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
+
 from workbench.controller import Controller
 from workbench.domain import write_json
 from workbench.downloads import download_model
@@ -36,7 +38,7 @@ def main():
         assert 'llama.cpp is required' in dialog.message,dialog.message
     with tempfile.TemporaryDirectory() as temp:
         project=Path(temp)/'repository';project.mkdir();models=Path(temp)/'chosen-models';models.mkdir()
-        shutil.copytree(root/'test_specs',project/'test_specs');shutil.copytree(root/'examples',project/'examples')
+        shutil.copytree(LEGACY_ROOT / 'test_specs',project/'test_specs');shutil.copytree(LEGACY_ROOT / 'examples',project/'examples')
         write_json(project/'models.json',[])
         app=Controller(project);app.selftest=lambda:None;app.configure({'sync_source':False})
         real_scan=app.scan_folder

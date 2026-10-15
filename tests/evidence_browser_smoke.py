@@ -7,9 +7,29 @@ import tempfile
 import threading
 from playwright.sync_api import sync_playwright, expect
 from reporting.report import build_report
-from reporting.server import ReviewServer
+from reporting.server import ReviewServer, ReviewHandler
 from tests.test_result_feedback import record
-from workbench.domain import digest, write_json
+from tests.suite_fixtures import LEGACY_ROOT
+from workbench.domain import digest, read_json, write_json
+
+
+class ExistingViewerHandler(ReviewHandler):
+    def do_GET(self):
+        if self.path == '/result/':
+            self.reply(404, {'error': 'Not found'})
+        else:
+            super().do_GET()
+
+
+class ExistingViewerServer(ReviewServer):
+    """Pre-update route/payload contract, serving today's JavaScript from disk."""
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.RequestHandlerClass = ExistingViewerHandler
+
+    def rendered(self, evidence_view=False):
+        html = super().rendered(evidence_view)
+        return html.replace(b'"result_tab_url":"/result/",', b'')
 
 
 def main():
@@ -31,8 +51,16 @@ def main():
     partial = '[{"op":"move","value":"unfinished'
     interrupted['calls'] = [{'messages': [{'role': 'user', 'content': 'Return the patch'}],
                              'text': partial, 'incomplete': True, 'finish_reason': None}]
-    records = [value, interrupted]
-    report = build_report(records, [value['test_definition']])
+    answer_test = read_json(LEGACY_ROOT / 'test_specs/array_index_replace_010.json')
+    answer_variant = answer_test['variants'][0]
+    answer_variant['expected_answers'] = {'index': '62'}
+    answer = {'case_id': digest('plain-answer-tab'), 'model_id': 'mock', 'status': 'completed',
+              'test_id': answer_test['id'], 'variant_id': answer_variant['id'], 'test_definition': answer_test,
+              'variant_definition': answer_variant, 'outputs': {'index': '62'}, 'score': {'exact_match': True},
+              'calls': [{'step': 'index', 'messages': [{'role': 'user', 'content': 'Choose the index.'}],
+                         'text': '62', 'finish_reason': 'stop'}]}
+    records = [value, interrupted, answer]
+    report = build_report(records, [value['test_definition'], answer_test])
     report['evidence'] = {}
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -58,6 +86,7 @@ def main():
                         page.locator('tr[data-kind=case] td[data-outcome=fail] button').first.click()
                     evidence = opened.value
                     expect(evidence.get_by_role('heading', level=1)).to_have_text('FAIL')
+                    assert '/result/#results=' in evidence.url
                     assert evidence.evaluate('window.opener') is None
                     assert page.evaluate('scrollY') == before_scroll
                     blocks = evidence.locator('main > section')
@@ -75,7 +104,7 @@ def main():
                     displayed = output.locator('pre').nth(1).text_content()
                     assert json.loads(displayed) == json.loads(result)
                     assert '\n' in displayed
-                    assert 'expected_state' in blocks.nth(2).inner_text()
+                    assert json.loads(blocks.nth(2).locator('pre').text_content()) == value['test_definition']['expected_state']
                     assert blocks.nth(3).inner_text().strip() != 'Failure reason'
                     assert report['matrix']['records'][value['case_id']]['evaluation']['reason'] in blocks.nth(3).inner_text()
                     assert 'Evaluator INCONCLUSIVE' in blocks.nth(4).inner_text()
@@ -97,10 +126,19 @@ def main():
                         page.evaluate('(ids) => ResultsMatrix.Inspect(ids)', [item['case_id'] for item in records])
                     selected = opened.value
                     expect(selected.get_by_role('heading', level=1)).to_have_text('Selected test results')
-                    assert selected.locator('main li a').count() == 2
+                    assert selected.locator('main li a').count() == len(records)
                     selected.locator('main li a').first.click()
                     expect(selected.get_by_role('heading', level=1)).to_have_text('FAIL')
                     selected.close()
+                    with page.expect_popup() as opened:
+                        page.evaluate('(id) => StatisticsReport.Inspect(id)', answer['case_id'])
+                    answer_page = opened.value
+                    expect(answer_page.locator('[data-evidence-block="Expected result"] pre')).to_have_text('62')
+                    assert answer_page.locator('[data-evidence-block="Expected result"] h3').count() == 0
+                    answer_page.reload()
+                    expect(answer_page.locator('[data-evidence-block="Expected result"] pre')).to_have_text('62')
+                    assert 'expected_answers' in answer_page.locator('main > section').last.text_content()
+                    answer_page.close()
                     context.route('**/evidence/*', lambda route: route.fulfill(status=404, body='{}'))
                     with page.expect_popup() as opened:
                         page.evaluate('(id) => StatisticsReport.Inspect(id)', value['case_id'])
@@ -111,6 +149,39 @@ def main():
                     unknown = context.new_page()
                     unknown.goto(f'http://127.0.0.1:{server.server_port}/result/#results=' + '0' * 64)
                     expect(unknown.get_by_role('heading', level=1)).to_have_text('Result unavailable')
+                    with ExistingViewerServer(('127.0.0.1', 0), root, report) as existing:
+                        old_thread = threading.Thread(target=existing.serve_forever, daemon=True)
+                        old_thread.start()
+                        try:
+                            old_context = browser.new_context()
+                            old_page = old_context.new_page()
+                            old_page.on('pageerror', lambda error: errors.append(str(error)))
+                            old_page.goto(f'http://127.0.0.1:{existing.server_port}/')
+                            assert old_page.evaluate('StatisticsReport.Data.result_tab_url') is None
+                            assert old_context.request.get(f'http://127.0.0.1:{existing.server_port}/result/').status == 404
+                            square = old_page.locator('tr[data-kind=case] td[data-outcome=fail] button').first
+                            square.scroll_into_view_if_needed()
+                            old_scroll = old_page.evaluate('scrollY')
+                            with old_page.expect_popup() as opened:
+                                square.click()
+                            old_evidence = opened.value
+                            expect(old_evidence.get_by_role('heading', level=1)).to_have_text('FAIL')
+                            assert '/#results=' in old_evidence.url and '/result/' not in old_evidence.url
+                            assert old_page.evaluate('scrollY') == old_scroll
+                            assert old_evidence.locator('[data-evidence-block="Full text result"] pre').first.text_content() == value['calls'][0]['text']
+                            assert json.loads(old_evidence.locator('[data-evidence-block="Expected result"] pre').text_content()) == value['test_definition']['expected_state']
+                            old_evidence.reload()
+                            expect(old_evidence.get_by_role('heading', level=1)).to_have_text('FAIL')
+                            with old_page.expect_popup() as opened:
+                                old_page.evaluate('(ids) => ResultsMatrix.Inspect(ids)', [item['case_id'] for item in records])
+                            old_selection = opened.value
+                            expect(old_selection.get_by_role('heading', level=1)).to_have_text('Selected test results')
+                            old_selection.locator('main li a').first.click()
+                            expect(old_selection.get_by_role('heading', level=1)).to_have_text('FAIL')
+                            old_context.close()
+                        finally:
+                            existing.shutdown()
+                            old_thread.join(5)
                     assert not errors, errors
                     browser.close()
             finally:

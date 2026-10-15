@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
+
 from workbench.controller import Controller
 from workbench.domain import write_json
 from workbench.server import WorkbenchServer
@@ -24,7 +26,7 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         project=Path(temp)/'repository';project.mkdir()
         models=Path(temp)/'models';models.mkdir()
-        shutil.copytree(root/'test_specs',project/'test_specs');shutil.copytree(root/'examples',project/'examples')
+        shutil.copytree(LEGACY_ROOT / 'test_specs',project/'test_specs');shutil.copytree(LEGACY_ROOT / 'examples',project/'examples')
         write_json(project/'models.json',[])
         for name in ('Alpha-Q4_K_M.gguf','Beta-Q4_K_M.gguf','Gamma-Q4_K_M.gguf'):
             (models/name).write_bytes(DATA)

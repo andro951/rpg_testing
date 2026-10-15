@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import hashlib
 import json
@@ -29,7 +30,9 @@ class CoverageTests(unittest.TestCase):
     def test_every_current_definition_and_variant_registered(self):
         entries = catalog()['definitions']
         paths = {e['path'] for e in entries}
-        expected = {p.relative_to(ROOT).as_posix() for base in ['test_specs', 'examples/test_specs'] for p in (ROOT/base).glob('*.json')}
+        expected = {p.relative_to(ROOT).as_posix() for base in
+                    ['test_specs', 'examples/test_specs', 'archives/test-suite-2026-10-14/test_specs',
+                     'archives/test-suite-2026-10-14/examples/test_specs'] for p in (ROOT/base).glob('*.json')}
         self.assertEqual(paths, expected)
         objective = set()
         for entry in entries:
@@ -40,7 +43,7 @@ class CoverageTests(unittest.TestCase):
             if entry['family'] != 'dialogue':
                 objective.update((test['id'], v['id']) for v in test['variants'])
         self.assertEqual(objective, {(f['test_id'], f['variant_id']) for f, _, _ in contracts()})
-        self.assertEqual(len(objective), 163)
+        self.assertEqual(len(list(contracts())), len(objective), 'Every objective variant needs one unique synthetic fixture')
         with self.assertRaises(ValueError): registration('time_only', 'made_up')
 
     def test_registration_requires_explicit_current_contract(self):
@@ -83,28 +86,35 @@ class CoverageTests(unittest.TestCase):
             with self.subTest(test=test['id'], variant=variant['id']):
                 values = copy.deepcopy(fixture['outputs']); key = variant['result']['step']
                 patch = json.loads(values[key])
-                bad = copy.deepcopy(patch); del bad[0]['path']; values[key] = json.dumps(bad)
+                probe = patch or [{'op':'replace', 'path':'/unused', 'value':None}]
+                bad = copy.deepcopy(probe); del bad[0]['path']; values[key] = json.dumps(bad)
                 result = assess(test, variant, values)
                 self.assertIn('patch.structure', failed_codes(result))
                 self.assertEqual(next(c['status'] for c in result['checks'] if c['code'] == 'state.final'), 'not_evaluated')
-                bad = copy.deepcopy(patch); bad[0]['path'] = 'without-leading-slash'; values[key] = json.dumps(bad)
+                bad = copy.deepcopy(probe); bad[0]['path'] = 'without-leading-slash'; values[key] = json.dumps(bad)
                 self.assertIn('pointer.syntax', failed_codes(assess(test, variant, values)))
-                extra = {'op': 'set' if variant['result']['representation'] == 'semantic' else 'replace', 'path': '/queue_name' if 'queue_name' in test['source']['initial_state'] else '/location', 'value': 'Unrequested change'}
+                extra = {'op': 'set' if variant['result']['representation'] == 'semantic' else 'replace', 'path': '/title' if 'title' in test['source']['initial_state'] else '/queue_name' if 'queue_name' in test['source']['initial_state'] else '/location', 'value': 'Unrequested change'}
                 # Semantic set requires an existing field; all these states have location or queue_name except inventory/household.
-                if extra['path'] not in ('/queue_name',) and 'location' not in test['source']['initial_state']:
+                if extra['path'] not in ('/queue_name', '/title') and 'location' not in test['source']['initial_state']:
                     first = next(iter(test['source']['initial_state']))
                     extra['path'] = '/' + first.replace('~', '~0').replace('/', '~1')
+                if test.get('prompt_builder', {}).get('version') == 'database-v3':
+                    # These databases may contain only the collection being changed.
+                    # Replacing that collection would test the requested target again;
+                    # an extra root field is a separate, unrequested schema change.
+                    extra = {'op':'add', 'path':'/__unrequested_extra__', 'value':'Unrequested change'}
                 values[key] = json.dumps(patch + [extra])
                 result = assess(test, variant, values)
                 self.assertEqual(result['objective_outcome'], 'FAIL')
-                self.assertIn('state.preservation', failed_codes(result))
+                self.assertIn('patch.application_failed' if variant['result']['representation']=='value_patch' else 'state.preservation', failed_codes(result))
 
     def test_each_variant_wrong_task_value_or_target(self):
         for fixture, test, variant in contracts():
             if variant['result']['representation'] == 'answers': continue
             with self.subTest(test=test['id'], variant=variant['id']):
                 values = copy.deepcopy(fixture['outputs']); key = variant['result']['step']
-                patch = json.loads(values[key]); first = patch[0]
+                patch = json.loads(values[key]) or [{'op':'replace', 'path':'/missing_target', 'value':None}]
+                first = patch[0]
                 if 'value' in first: first['value'] = 'Deliberately wrong value and type'
                 elif 'from' in first: first['from'] = '/tickets/0'
                 else: first['path'] = '/tickets/0' if first['path'].startswith('/tickets/') else '/missing_target'
@@ -183,7 +193,7 @@ class DetailedTests(unittest.TestCase):
             self.assertEqual(next(c['status'] == 'passed' for c in result['checks'] if c['code'] == 'index.value'), numeric_good)
 
     def test_dialogue_unscored_and_supplementary_checks_preserved(self):
-        test = read_json(ROOT/'test_specs/dialogue_test.json')
+        test = read_json(LEGACY_ROOT / 'test_specs/dialogue_test.json')
         self.assertEqual(assess(test, test['variants'][0], {})['objective_outcome'], 'UNSCORED')
         fixture, test, variant = next((f, t, v) for f, t, v in contracts() if t['id'] == 'narrate_then_update')
         values = {**fixture['outputs'], 'story': 'No explicit clock phrase'}

@@ -63,7 +63,10 @@ def change(doc,parts,op,value=None):
     return doc
 
 
-def apply(initial,patch,representation):
+def apply(initial,patch,representation,schema=None):
+    if representation=='value_patch':
+        from .value_paths import apply as apply_values
+        return apply_values(initial,patch,schema)
     if not isinstance(patch,list):raise ValueError('Expected an array of patch operations')
     doc=copy.deepcopy(initial)
     for item in patch:
@@ -114,7 +117,7 @@ def score_state(test,value,representation):
     before=test['source']['initial_state'];expected=test['expected_state'];required=changes(before,expected)
     try:
         if isinstance(value,str):value=parse(value)
-        actual=value if representation=='state' else apply(before,value,representation)
+        actual=value if representation=='state' else (apply(before,value,representation,test.get('state_schema')) if representation=='value_patch' else apply(before,value,representation))
         if test.get('state_schema'):Draft202012Validator(test['state_schema']).validate(actual)
         predicted=changes(before,actual);shared=required.keys() & predicted.keys()
         correct=sum(equal(required[k],predicted[k]) for k in shared)

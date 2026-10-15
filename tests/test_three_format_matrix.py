@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import unittest
 from pathlib import Path
 
@@ -10,7 +11,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 class ThreeFormatMatrixTests(unittest.TestCase):
     def test_new_companions_do_not_change_context_recipe(self):
-        tests=load_workflow_specs(ROOT/'test_specs')
+        tests=load_workflow_specs(LEGACY_ROOT / 'test_specs')
         planned=_context_planning_tests(tests)
         self.assertEqual(
             automatic_context(planned,{'planning.context_length':2**63-1})['allocated_tokens'],
@@ -20,8 +21,8 @@ class ThreeFormatMatrixTests(unittest.TestCase):
     def test_array_patch_tests_have_raw_indexed_and_one_full_path_companion(self):
         for n in range(4,10):
             stem={4:'replace',5:'remove',6:'add',7:'move',8:'copy',9:'test'}[n]
-            base=read_json(ROOT/'test_specs'/f'array_patch_{stem}_{n:03d}.json')
-            companion=read_json(ROOT/'test_specs'/f'array_patch_{stem}_{n:03d}_full_paths.json')
+            base=read_json(LEGACY_ROOT / 'test_specs'/f'array_patch_{stem}_{n:03d}.json')
+            companion=read_json(LEGACY_ROOT / 'test_specs'/f'array_patch_{stem}_{n:03d}_full_paths.json')
             validate_test(base);validate_test(companion)
             self.assertEqual({v['state_presentation'] for v in base['variants']},{'raw_json','indexed_arrays'})
             self.assertEqual(len(companion['variants']),1)
@@ -37,7 +38,7 @@ class ThreeFormatMatrixTests(unittest.TestCase):
             'array_index_move_013.json','array_index_copy_014.json','array_index_test_015.json',
             'array_index_replace_minimal_016.json','array_index_replace_explicit_minimal_017.json',
         ]:
-            test=read_json(ROOT/'test_specs'/name);validate_test(test)
+            test=read_json(LEGACY_ROOT / 'test_specs'/name);validate_test(test)
             self.assertEqual(len(test['variants']),3,name)
             self.assertEqual(len({str(v['expected_answers']) for v in test['variants']}),1)
 
@@ -50,8 +51,8 @@ class ThreeFormatMatrixTests(unittest.TestCase):
             'time_only.json':['direct_json_patch','analyze_json_patch','direct_semantic','analyze_semantic'],
         }
         for name,bases in cases.items():
-            base=read_json(ROOT/'test_specs'/name);validate_test(base)
-            companion=read_json(ROOT/'test_specs'/(Path(name).stem+'_full_paths.json'));validate_test(companion)
+            base=read_json(LEGACY_ROOT / 'test_specs'/name);validate_test(base)
+            companion=read_json(LEGACY_ROOT / 'test_specs'/(Path(name).stem+'_full_paths.json'));validate_test(companion)
             ids={v['id'] for v in base['variants']}
             for logical in bases:
                 self.assertIn(logical,ids)
@@ -67,7 +68,7 @@ class ThreeFormatMatrixTests(unittest.TestCase):
             'prompt_calibration_001_time.json','prompt_calibration_002_boolean.json',
             'prompt_calibration_003_nested.json','prompt_calibration_004_array.json',
         ]:
-            base=read_json(ROOT/'test_specs'/name);validate_test(base)
+            base=read_json(LEGACY_ROOT / 'test_specs'/name);validate_test(base)
             original_ids=['v1_original_clinical','v1_raw_json_control','v2_conversational',
                           'v3_only_changed','v4_smallest_patch','v5_change_rule','v6_one_example']
             ids={v['id'] for v in base['variants']}
@@ -78,8 +79,8 @@ class ThreeFormatMatrixTests(unittest.TestCase):
                 expected=1 if is_time or not logical.startswith('v1_') else 0
                 self.assertEqual(len([x for x in ids if x.startswith(logical+'__')]),expected)
             stem=Path(name).stem
-            modern=read_json(ROOT/'test_specs'/(stem+'_full_paths.json'));validate_test(modern)
-            legacy=read_json(ROOT/'test_specs'/(stem+'_v1_full_paths.json'));validate_test(legacy)
+            modern=read_json(LEGACY_ROOT / 'test_specs'/(stem+'_full_paths.json'));validate_test(modern)
+            legacy=read_json(LEGACY_ROOT / 'test_specs'/(stem+'_v1_full_paths.json'));validate_test(legacy)
             full_ids={v['id'] for v in modern['variants']+legacy['variants']}
             expected_full={x+'__full_paths' for x in original_ids}
             if not is_time:expected_full.remove('v1_raw_json_control__full_paths')
@@ -90,7 +91,7 @@ class ThreeFormatMatrixTests(unittest.TestCase):
                 self.assertEqual(companion['repetitions'],base['repetitions'])
 
     def test_dialogue_only_tests_are_not_triplicated(self):
-        for path in (ROOT/'test_specs').glob('dialogue_test*.json'):
+        for path in (LEGACY_ROOT / 'test_specs').glob('dialogue_test*.json'):
             test=read_json(path);validate_test(test)
             self.assertEqual(test['source'],{'initial_state':{},'new_information':''})
             self.assertEqual(len(test['variants']),1)

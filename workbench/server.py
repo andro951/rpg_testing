@@ -93,6 +93,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,self.server.static_assets[path],kind)
             self.authorize()
             if path=='/api/state':return self.send(200,{**app.snapshot(),'control_access':'private_network'})
+            if path=='/api/optimization/codex-options':
+                from optimization.codex import discover
+                if app.operation.locked():raise RuntimeError('Wait until the current operation finishes before rescanning Codex models.')
+                return self.send(200,discover())
             if path=='/api/optimization/options':
                 from optimization.runtime import discover
                 if app.operation.locked():raise RuntimeError('Wait until the current operation finishes before rescanning host models.')

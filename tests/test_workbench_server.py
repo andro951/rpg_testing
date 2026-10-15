@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import io
 import json
 import shutil
@@ -22,8 +23,8 @@ def configured_case_count(folder):
 class ServerTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-        self.root=Path(self.tmp.name);shutil.copytree(ROOT/'test_specs',self.root/'test_specs')
-        shutil.copytree(ROOT/'examples',self.root/'examples')
+        self.root=Path(self.tmp.name);shutil.copytree(LEGACY_ROOT / 'test_specs',self.root/'test_specs')
+        shutil.copytree(LEGACY_ROOT / 'examples',self.root/'examples')
         self.app=Controller(self.root,True);self.app.selftest=lambda:None
         self.server=WorkbenchServer(('127.0.0.1',0),self.app)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()

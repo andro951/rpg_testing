@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import json
 import unittest
@@ -12,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def record():
-    test = read_json(ROOT / 'test_specs/array_patch_move_007.json')
+    test = read_json(LEGACY_ROOT / 'test_specs/array_patch_move_007.json')
     variant = test['variants'][0]
     patch = valid_move({'test': test})
     text = json.dumps(patch)

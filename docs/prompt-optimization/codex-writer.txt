@@ -1,0 +1,86 @@
+Codex prompt writer
+
+The Prompt Optimization tab defaults to Codex and retains Local model mode.
+It scans the worker computer's Codex model catalog independently of its GPU
+inventory. GPT model and effort are separate selectors. Both show amber,
+disabled Loading Models controls during discovery. If Codex is missing or
+signed out, its status explains the problem; Local model mode still works.
+Install/sign in to Codex on the computer hosting Workbench, not necessarily
+the laptop displaying its page. The client reads account status through RPC
+and never reads, copies, exports or displays authentication tokens.
+
+The integration starts the installed `codex app-server --stdio`. It creates
+one non-ephemeral thread when the session first generates a proposal, saves
+its ID before sending the first turn, and resumes that ID for later attempts.
+The connection can close during benchmark testing; the conversation survives.
+New sessions get new threads. Failed resume never falls back to a new thread.
+The thread is scoped to prompt writing in a dedicated .local/codex-opro folder,
+with read-only access, no approval prompts and instructions to return a prompt
+artifact rather than run tools or benchmarks. Setup instructions are saved.
+
+Each turn receives the current optimizer prompt: exact captured benchmark
+prompts and outputs, evaluator feedback, all session attempts and the fully
+tested current-machine top three. Captured prompts are deduplicated within
+that request. The complete current packet is sent again so saved request
+evidence is understandable without reconstructing prior Codex turns.
+Codex manages its conversation context, including automatic compaction.
+This is persistent conversation history, not a guarantee of unlimited memory
+or a new cross-session memory store. Context-limit/service errors remain
+visible and preserve evidence; the application does not retry proposals or
+change benchmark prompts to hide a failure.
+
+Codex mode applies only its selected model and supported effort. Temperature,
+seed and the local reasoning toggle are hidden and explicitly recorded as
+unsupported controls, rather than pretending Codex applied them. The normal
+text candidate format and LPIL validation remain unchanged. Prompt-writing
+generation has no elapsed deadline or socket timeout. A 30-second bound exists
+only for the read-only model-picker scan. Thread setup and generation wait for
+completion, a real error, or manual Stop. Stop interrupts the active turn and
+saves accumulated text and raw events, including available reasoning events.
+
+Writer/provider/model/effort are fixed when a session is created. Continue
+uses those saved choices; the UI explains that changing its selectors affects
+new sessions. Maximum attempts can still be edited while stopped. Local model
+sessions retain temperature 0.5–0.9 and reasoning off by default. Older sessions
+without a writer field keep their local writer.
+
+The worker runs each candidate through the existing evaluator, origin gate,
+all matching task-type tests, full repetitions and current-host ranking policy.
+Benchmark reasoning remains off. Native trials retain 120-second deadlines;
+Perchance retains 300 seconds. New suite review gates remain in force: pending,
+disabled or archived tests cannot run merely because Codex is available.
+
+Thread provenance and responses travel with exported sessions. Saved candidates
+can be evaluated on other workers. Further prompt writing for an existing Codex
+thread must resume on its original worker/Codex home; importing a session never
+silently substitutes a different conversation. Lost connections are recorded
+as errors, not hidden retries. If the process ends during proposal generation,
+that attempt remains consumed/interrupted under the existing recovery policy.
+
+Checks:
+  python -m unittest tests.test_codex_optimization -v
+  python tests/optimization_browser_smoke.py
+  python -m unittest discover -s tests -v
+
+The synthetic protocol tests cover catalog pagination, signed-out/missing
+dependencies, invalid effort, failed thread resume, transport/service errors,
+interactive requests, manual Stop/partial evidence, local-mode compatibility,
+origin failure then full successful validation, terminal resume and archive
+conflicts. The browser smoke uses simulated inference and covers both writers,
+independent selectors, loading states, unsupported control visibility, exact
+payloads, missing Codex recovery and the existing native end-to-end lifecycle.
+A live local Codex connectivity check on October 14, 2026 produced ACK, then
+remembered PAPAYA-314 after reconnecting to the same thread. It was not a scored
+benchmark; raw diagnostic evidence is .local/codex-opro-connection-probe.json.
+
+Release validation: the full unittest suite ran 653 tests in 622.154 seconds
+and passed, with four environment-dependent checks skipped. The final browser
+smoke passed for both Local model and Codex sessions through the real HTTP,
+controller and engine boundaries using synthetic inference, including selecting
+a second session and resuming without duplicate work. The 58-test targeted
+optimizer suite also passed. Benchmark fingerprint remains
+56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787.
+Logs: .local/codex-opro-full-tests.log, .local/codex-opro-targeted-tests.log,
+      .local/codex-opro-browser-smoke.log.
+
+Protocol reference: https://learn.chatgpt.com/docs/app-server

@@ -48,6 +48,7 @@ class ReviewServer(ThreadingHTTPServer):
             else:
                 report = copy.deepcopy(self.snapshot)
             report['judgement_api'] = {'url': '/api/judgements', 'token': self.token}
+            report['result_tab_url'] = '/result/'
             for cid, summary in report['matrix']['records'].items():
                 summary['source_uri'] = '/evidence/' + cid
             scripts = '\n'.join(Path(__file__).with_name(name).read_text(encoding='utf-8') for name in

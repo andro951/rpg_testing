@@ -11,6 +11,8 @@ import tempfile
 import threading
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
+
 from workbench.controller import Controller
 from workbench.domain import load_tests as read_tests
 from workbench.server import WorkbenchServer
@@ -22,8 +24,8 @@ def main():
     root = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory() as tmp:
         project = Path(tmp)
-        shutil.copytree(root / 'test_specs', project / 'test_specs')
-        shutil.copytree(root / 'examples', project / 'examples')
+        shutil.copytree(LEGACY_ROOT / 'test_specs', project / 'test_specs')
+        shutil.copytree(LEGACY_ROOT / 'examples', project / 'examples')
         app = Controller(project, True)
         models, inventory = configure_demo(app)
         def no_unit_tests(): raise AssertionError('Targeted model runs must not run harness unit tests')

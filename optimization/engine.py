@@ -45,22 +45,32 @@ def settings(value, allow_legacy=False):
 
 
 def create(app, payload, cohort=None):
-    if set(payload) - {'generator_id', 'origin_model_id', 'settings'}:
+    if set(payload) - {'generator_id', 'origin_model_id', 'settings', 'prompt_writer'}:
         raise ValueError('Unknown optimization session option')
     config = settings(payload.get('settings', {}))
     cohort = cohort or discover(app)
     if not cohort['models']:
         raise ValueError('No runnable models on this host.')
-    generator = next((m for m in cohort['models'] if m['id'] == payload.get('generator_id') and m['provider'] == 'native'), None)
-    if generator is None:
-        raise ValueError('Choose an installed runnable native optimizer model.')
+    writer = payload.get('prompt_writer', {'provider': 'local'})
+    if not isinstance(writer, dict) or writer.get('provider') not in ('local', 'codex'):
+        raise ValueError('Choose Local model or Codex for prompt writing.')
+    if writer['provider'] == 'codex':
+        from .codex import validate
+        writer = validate(writer)
+        generator = {'id': writer['model']}
+    else:
+        if set(writer) != {'provider'}:
+            raise ValueError('Unknown local prompt-writer option')
+        generator = next((m for m in cohort['models'] if m['id'] == payload.get('generator_id') and m['provider'] == 'native'), None)
+        if generator is None:
+            raise ValueError('Choose an installed runnable native optimizer model.')
     origin_model_id = payload.get('origin_model_id') or cohort['models'][0]['id']
     if not any(m['id'] == origin_model_id for m in cohort['models']):
         raise ValueError('Choose a runnable starting-case model.')
     scope = freeze(app.root)
     definition = read_json(app.root / 'optimization/definitions/array_move_patch.json')
     session = {'schema_version': 1, 'id': uuid.uuid4().hex, 'created': now(), 'status': 'ready',
-               'settings': config, 'generator_id': generator['id'], 'origin_model_id': origin_model_id, 'scope': scope, 'definition': definition,
+               'settings': config, 'prompt_writer': writer, 'generator_id': generator['id'], 'origin_model_id': origin_model_id, 'scope': scope, 'definition': definition,
                'cohort': cohort, 'cohort_history': [cohort], 'attempts': [], 'observations': [], 'message': '',
                'optimizer_system': (app.root / 'docs/prompt-optimization/optimizer-system.txt').read_text(encoding='utf-8'),
                'optimizer_user': (app.root / 'docs/prompt-optimization/optimizer-user-template.txt').read_text(encoding='utf-8')}
@@ -172,7 +182,7 @@ def generation_packet(session, models, records, store):
     packet = {'experiment': session['definition']['id'], 'immutable_contract': session['definition']['candidate_control'],
               'required_labels': session['definition']['required_labels'], 'evaluation_policy': 'Unchanged objective oracles; benchmark reasoning off; full repetitions. Origin pass then complete task type on all current host models.',
               'current_machine_models': [{'id': m['id'], 'name': m.get('name', m['id']), 'identity': m['identity'], 'provider': m['provider']} for m in models],
-              'scope': {'type': 'Array move', 'cases': list(session['scope']['cases']), 'origin_model_id': session['origin_model_id']},
+              'scope': {'type': session['scope'].get('task_type', 'Array move'), 'cases': list(session['scope']['cases']), 'origin_model_id': session['origin_model_id']},
               'baseline_summary': score(session, None, models, records),
               'reference_evidence': baseline, 'top_three': top, 'history': history,
               'prompts': evidence_packet.prompts,
@@ -341,7 +351,9 @@ class Engine:
 
     def generate(self, models):
         self.boundary()
-        generator = next((m for m in models if m['id'] == self.session['generator_id'] and m['provider'] == 'native'), None)
+        codex = self.session.get('prompt_writer', {}).get('provider') == 'codex'
+        generator = ({'identity': digest(self.session['prompt_writer'])} if codex else
+                     next((m for m in models if m['id'] == self.session['generator_id'] and m['provider'] == 'native'), None))
         if generator is None:
             raise ValueError('The selected generator is unavailable on this host. Saved candidates can still be evaluated here.')
         config = settings(self.session['settings'], allow_legacy=True)
@@ -349,7 +361,19 @@ class Engine:
         responses = [self.store.get_evidence(self.session['id'], attempt['response_evidence'])
                      for attempt in self.session['attempts'] if attempt.get('response_evidence')]
         try:
-            backend, messages, context = prepare_generation(self.session, packet, generator, config, self.runtime, responses)
+            if codex:
+                from .codex import Generator
+                self.runtime.close()
+                self.app.set_progress('optimization', 'Connecting to Codex', 0, None,
+                                      'Resuming the session thread' if self.session.get('codex_thread') else 'Creating the session thread')
+                backend = Generator(self.app, self.session, self.save)
+                self.runtime.backend = backend
+                self.app.backend = backend
+                messages = packet_messages(self.session, packet)
+                context = {'output_tokens_available': None, 'policy': 'Codex manages its context and compaction; exact feedback is saved',
+                           'thread_id': self.session['codex_thread']['id']}
+            else:
+                backend, messages, context = prepare_generation(self.session, packet, generator, config, self.runtime, responses)
         except Exception as exc:
             key = self.store.evidence(self.session['id'], {'kind': 'generation_preparation_error', 'at': now(),
                 'error': str(exc), 'evidence': getattr(exc, 'evidence', {}),
@@ -358,16 +382,23 @@ class Engine:
             self.save()
             raise
         random = secrets.SystemRandom()
-        sampling = {'temperature': random.uniform(config['temperature_min'], config['temperature_max']),
-                    'seed': random.randrange(2**32), 'top_p': 1, 'top_k': 0, 'min_p': 0}
+        sampling = {} if codex else {'temperature': random.uniform(config['temperature_min'], config['temperature_max']),
+                                    'seed': random.randrange(2**32), 'top_p': 1, 'top_k': 0, 'min_p': 0}
         request = {'kind': 'generation_request', 'messages': messages, 'sampling': sampling, 'context': context,
-                   'reasoning': config['reasoning'], 'generator_identity': generator['identity'], 'started': now(),
+                   'reasoning': self.session['prompt_writer']['effort'] if codex else config['reasoning'], 'generator_identity': generator['identity'], 'started': now(),
                    'timeout_seconds': None, 'timeout_policy': 'completion_or_manual_stop',
                    'load_metadata': copy.deepcopy(getattr(backend, 'load_metadata', {}))}
+        if codex:
+            request.update(prompt_writer=self.session['prompt_writer'], thread_id=self.session['codex_thread']['id'],
+                           unsupported_controls=['temperature', 'seed', 'local_reasoning_toggle'],
+                           applied_controls={'model': self.session['prompt_writer']['model'], 'effort': self.session['prompt_writer']['effort']})
         attempt = {'number': len(self.session['attempts']) + 1, 'status': 'generating', 'layer': -1,
                    'request_evidence': self.store.evidence(self.session['id'], request)}
         self.session['attempts'].append(attempt)
         self.save('running', 'Generating candidate ' + str(attempt['number']))
+        if codex:
+            self.app.set_progress('optimization', 'Codex is writing a prompt', 0, None,
+                                  self.session['prompt_writer']['model'] + ' · ' + self.session['prompt_writer']['effort'])
         try:
             response = backend.propose(messages, sampling, context['output_tokens_available'], self.app.cancel_event)
             attempt['response_evidence'] = self.store.evidence(self.session['id'], {'kind': 'generation_response', **response})
@@ -399,6 +430,15 @@ class Engine:
         with review_lock(self.app.root):
             if code_fingerprint() != self.session['scope']['workflow_fingerprint']:
                 raise ValueError('Workflow changed since this session was frozen; create a new reviewed session.')
+            available = {}
+            for path in (self.app.root / 'test_specs').glob('*.json'):
+                test = read_json(path)
+                if test.get('enabled', True):
+                    available[test['id']] = {v['id'] for v in test['variants'] if v.get('enabled', True)}
+            for member, case in self.session['scope']['cases'].items():
+                if case['variant']['id'] not in available.get(case['test']['id'], set()):
+                    raise ValueError('This optimization session uses an archived or disabled test and cannot run: ' + member +
+                                     '. Saved evidence is preserved. Start a new session after reviewing the current suite.')
             if mode == 'optimize' and not self.session.get('prompt_builder') and not self.session['attempts']:
                 # A preparation failure consumed no candidate. Adopt the corrected
                 # writer for the next request without changing frozen tests or
@@ -516,5 +556,5 @@ def dispatch(app, payload):
         raise ValueError('Unknown optimizer operation')
     session_id = payload.get('session_id')
     if session_id is None:
-        session_id = create(app, {k: v for k, v in payload.items() if k in ('generator_id', 'origin_model_id', 'settings')})['id']
+        session_id = create(app, {k: v for k, v in payload.items() if k in ('generator_id', 'origin_model_id', 'settings', 'prompt_writer')})['id']
     Engine(app, session_id).run(mode)

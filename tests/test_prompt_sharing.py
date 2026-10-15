@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import unittest
 from collections import Counter
@@ -9,17 +10,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def definition(filename, variant_index=0):
-    test = read_json(ROOT / 'test_specs' / (filename + '.json'))
+    test = read_json(LEGACY_ROOT / 'test_specs' / (filename + '.json'))
     return test, test['variants'][variant_index]
 
 
 class PromptSharingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.data = catalog()
+        cls.data = legacy_sharing()
 
     def test_complete_coverage_and_every_reviewed_span(self):
-        result = validate(data=self.data)
+        result = validate(root=LEGACY_ROOT, data=self.data)
         self.assertEqual((result['definitions'], result['variants']), (61, 179))
         eligible = [e for e in self.data['variants'].values() if e['objective_optimization_eligible']]
         self.assertEqual(len(eligible), 159)
@@ -115,7 +116,7 @@ class PromptSharingTests(unittest.TestCase):
         self.assertEqual(registration(test, variant, self.data)['exclusion'], 'dialogue_quality_rubric_required')
         with self.assertRaisesRegex(ValueError, 'outside'):
             expansion(test, variant, 'task_instructions', self.data)
-        test = read_json(ROOT / 'examples/test_specs/verify_repair.json')
+        test = read_json(LEGACY_ROOT / 'examples/test_specs/verify_repair.json')
         with self.assertRaisesRegex(ValueError, 'outside'):
             expansion(test, test['variants'][0], 'task_instructions', self.data)
 
@@ -125,7 +126,7 @@ class PromptSharingTests(unittest.TestCase):
         scope = expansion(test, variant, 'json_patch_formatting', changed)[-1]
         scope['members'].append('array_index_move_013/raw_array_index')
         with self.assertRaisesRegex(ValueError, 'Incompatible'):
-            validate(data=changed)
+            validate(root=LEGACY_ROOT, data=changed)
 
     def test_tampered_span_is_rejected(self):
         test, variant = definition('array_patch_move_007')

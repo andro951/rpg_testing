@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 """Timing policies use original observations without changing scores or identity."""
 import copy
 import math
@@ -22,7 +23,7 @@ class TimingTests(unittest.TestCase):
 
     def test_static_expectations_cover_every_current_objective_definition(self):
         catalog = expectations(); budgets = set(); count = 0
-        for path in (Path(__file__).resolve().parents[1] / 'test_specs').glob('*.json'):
+        for path in (LEGACY_ROOT / 'test_specs').glob('*.json'):
             test = read_json(path)
             for variant in test['variants']:
                 if not has_objective_oracle(test, variant): continue

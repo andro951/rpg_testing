@@ -153,11 +153,20 @@ def patch_checks(report, test, variant, raw):
         report.add('state.final', NOT_EVALUATED, 'Response was not a patch array.', dependencies=['patch.array'])
         return
     report.add('patch.array', PASS, 'Response is an array of operations.')
+    if 'response_schema' in variant['result']:
+        from jsonschema import Draft202012Validator
+        errors = sorted(e.message for e in Draft202012Validator(variant['result']['response_schema']).iter_errors(patch))
+        report.add('patch.method_contract', FAIL if errors else PASS,
+                   'Operations must update existing fields, append to collections, remove collection elements or move between different collections.' +
+                   (' ' + '; '.join(errors) if errors else ''))
     required_ops = variant['result'].get('required_ops')
     if required_ops is not None:
         names = [x.get('op') if isinstance(x, dict) else None for x in patch]
         report.compare('patch.required_operations', required_ops, names,
                        'This contract requires these operation names in this exact order, including any test precondition.')
+    if representation == 'value_patch':
+        value_patch_checks(report, test, patch)
+        return
     doc = copy.deepcopy(test['source']['initial_state'])
     blocked = None
     allowed = {'set', 'list_add', 'list_remove'} if representation == 'semantic' else {'add', 'remove', 'replace', 'move', 'copy', 'test'}
@@ -243,6 +252,53 @@ def patch_checks(report, test, variant, raw):
     else:
         report.add('state.final', NOT_EVALUATED, f'Operation {blocked} prevented complete application; final state was not checked.',
                    scope='final_state', dependencies=[f'operation:{blocked}'])
+
+
+def value_patch_checks(report, test, patch):
+    from workbench.value_paths import tokens, lower_operation
+    doc, schema, blocked = copy.deepcopy(test['source']['initial_state']), test.get('state_schema'), None
+    for number, item in enumerate(patch):
+        meta = {'operation': number, 'scope': 'operation'}
+        structure = isinstance(item, dict) and item.get('op') in ('replace','add','remove','move') and isinstance(item.get('path'), str)
+        if structure:
+            structure = ('value' in item if item['op'] in ('replace','add') else isinstance(item.get('from'),str) if item['op']=='move' else True)
+        report.add('patch.structure', PASS if structure else FAIL,
+                   'Expected replace/add with value, remove, or move with from; paths must be strings.', actual=item, **meta)
+        syntax = structure
+        if structure:
+            for field in ('path','from') if item['op']=='move' else ('path',):
+                try:
+                    tokens(item[field])
+                    report.add('pointer.syntax', PASS, f'{field}: valid value-path syntax.', actual=item[field], **meta)
+                except ValueError as exc:
+                    syntax = False
+                    report.add('pointer.syntax', FAIL, f'{field}: {exc}', actual=item[field], **meta)
+        if blocked is not None:
+            report.add('patch.application', NOT_EVALUATED, f'Operation {blocked} blocked sequential application.', **meta)
+            continue
+        if not syntax:
+            blocked = number
+            report.add('patch.application', NOT_EVALUATED, 'Invalid structure or path prevents application.', **meta)
+            continue
+        try:
+            lower_operation(doc, item, schema)
+            report.add('pointer.target', PASS, 'Paths resolve by field names and unique typed identities; no array positions are used.', **meta)
+            doc = apply(doc, [item], 'value_patch', schema)
+            report.add('patch.application', PASS, 'Operation applied and database schema/unique identities validated.', **meta)
+        except (ValueError, KeyError, TypeError, IndexError) as exc:
+            blocked = number
+            report.add('patch.application_failed', FAIL, str(exc), actual=item, **meta)
+        except Exception as exc:
+            # JSON Schema errors also need a useful deterministic explanation.
+            from jsonschema.exceptions import ValidationError
+            if not isinstance(exc, ValidationError):
+                raise
+            blocked = number
+            report.add('state.schema', FAIL, str(exc), actual=item, **meta)
+    if blocked is None:
+        state_checks(report, test, doc)
+    else:
+        report.add('state.final', NOT_EVALUATED, f'Operation {blocked} prevented complete application; final state was not checked.', scope='final_state')
 
 
 def answer_checks(report, variant, values):

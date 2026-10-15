@@ -9,6 +9,7 @@ from workbench.domain import code_fingerprint, digest, experiment_spec, read_jso
 COMPONENTS = {
     'established_facts': 'Output-neutral established-facts and preservation instructions',
     'json_patch_formatting': 'RFC 6902 output and JSON Pointer formatting guidance',
+    'value_patch_formatting': 'Value-based operation output and typed collection identity paths',
     'semantic_formatting': 'Semantic operation output guidance',
     'index_location': 'Locate requested array entries without changing answer arity',
     'single_index_formatting': 'One exact index answer',
@@ -18,11 +19,11 @@ COMPONENTS = {
 }
 
 
-def build():
-    labels = read_json(ROOT / 'reporting/grouping_metadata.json')
+def build(root=ROOT):
+    labels = read_json(root / 'reporting/grouping_metadata.json')
     variants = {}
     for folder in ('test_specs', 'examples/test_specs'):
-        for path in sorted((ROOT / folder).glob('*.json')):
+        for path in sorted((root / folder).glob('*.json')):
             test = read_json(path)
             for variant in test['variants']:
                 key = test['id'] + '/' + variant['id']
@@ -35,7 +36,7 @@ def build():
                 final = next((s for s in flat if s['id'] == variant.get('result', {}).get('step')), flat[-1])
                 task = group['task_type'] if group else test['id']
                 domain = 'array' if task.startswith(('Array ', 'Clothing ', 'Locate ')) else 'scalar'
-                entry = {'source_file': path.relative_to(ROOT).as_posix(),
+                entry = {'source_file': path.relative_to(root).as_posix(),
                          'reviewed_definition': digest(experiment_spec(test, variant)),
                          'objective_optimization_eligible': eligible,
                          'exclusion': None if eligible else 'dialogue_quality_rubric_required' if test['id'].startswith('dialogue') else 'inactive_example',
@@ -66,7 +67,7 @@ def build():
                 def append(component):
                     text = rendered(test, variant, final)[-1]['content']
                     entry['components'][component] = {'slots': [slot(final, 'last_user', len(text), len(text), 'insert_instruction')], 'expansion_scopes': []}
-                if rep in ('json_patch', 'semantic'):
+                if rep in ('json_patch', 'value_patch', 'semantic'):
                     # Add reusable guidance after the final instruction without
                     # replacing embedded inputs or required-operation clauses.
                     append(rep + '_formatting')
@@ -121,7 +122,7 @@ def build():
             'workflow_fingerprint': code_fingerprint(), 'components': COMPONENTS,
             'eligibility_guard': 'Registration checks compatibility, not permission to run. Apply current rejected-test and provider-capability policies.',
             'variants': variants, 'scopes': scopes}
-    validate(ROOT, data)
+    validate(root, data)
     return data
 
 

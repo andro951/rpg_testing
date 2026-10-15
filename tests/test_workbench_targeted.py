@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 """Targeted scheduling uses real controller/planner/persistence and simulated inference only."""
 import copy
 import io
@@ -36,7 +37,7 @@ class TargetedTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        shutil.copytree(ROOT / 'test_specs', self.root / 'test_specs')
+        shutil.copytree(LEGACY_ROOT / 'test_specs', self.root / 'test_specs')
         self.app = Controller(self.root, True)
         self.models, self.inventory = configure_demo(self.app)
         self.tests = read_tests(self.root / 'test_specs')

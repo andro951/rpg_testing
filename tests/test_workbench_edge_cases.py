@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import shutil
 import tempfile
@@ -15,7 +16,7 @@ ROOT=Path(__file__).resolve().parents[1]
 class EdgeTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-        self.root=Path(self.tmp.name);shutil.copytree(ROOT/'test_specs',self.root/'test_specs')
+        self.root=Path(self.tmp.name);shutil.copytree(LEGACY_ROOT / 'test_specs',self.root/'test_specs')
         self.app=Controller(self.root,True);self.app.selftest=lambda:None
     def test_corrupt_result_manual_fix(self):
         self.app.run();record=self.app.store.all()[0];path=self.app.store.path(record['model_id'],record['case_id'])

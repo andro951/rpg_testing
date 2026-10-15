@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import json
 from pathlib import Path
@@ -12,14 +13,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ReportGroupingTests(unittest.TestCase):
     def spec(self, name):
-        return json.loads((ROOT / 'test_specs' / (name + '.json')).read_text(encoding='utf-8'))
+        return json.loads((LEGACY_ROOT / 'test_specs' / (name + '.json')).read_text(encoding='utf-8'))
 
     def grouping(self, test, variant):
         return row_grouping(test, variant, test['id'], variant['id'])
 
     def test_catalog_covers_every_current_objective_variant(self):
         count = 0
-        for path in (ROOT / 'test_specs').glob('*.json'):
+        for path in (LEGACY_ROOT / 'test_specs').glob('*.json'):
             test = json.loads(path.read_text(encoding='utf-8'))
             for variant in test['variants']:
                 if has_objective_oracle(test, variant):

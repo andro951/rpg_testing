@@ -46,3 +46,6 @@ Timeout is an execution watchdog, excluded from case identity, experiment compar
 ### Detailed evaluator feedback
 
 Regenerate the table with `Open_Results_Table.bat`. Cell tooltips include the evaluator verdict and a concise reason; clicking evidence shows individual pass/fail checks, including pointer/format/type defects and expected/actual values. The table retains original saved scores. Disagreements between detailed evaluation and saved scores are called out explicitly. Missing captured contracts show Unavailable; interrupted/infrastructure evidence shows Inconclusive rather than inventing a semantic verdict. These diagnostics do not change manual accepted/needs-review/rejected test judgements, and do not alter raw result files.
+
+
+Result-tab compatibility: updated servers advertise their dedicated /result/ page. A viewer already running from an earlier version serves the updated JavaScript on refresh but lacks that route; the table therefore opens its existing page with a result hash instead and fetches complete evidence from the original endpoint. Refreshing the table after updating the code is sufficient. Browser smoke coverage includes this running-old-viewer case, click-through, totals navigation, full text and reloads.

@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import io
 import json
@@ -124,9 +125,12 @@ class OptimizationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        shutil.copytree(ROOT / 'test_specs', self.root / 'test_specs')
+        shutil.copytree(LEGACY_ROOT / 'test_specs', self.root / 'test_specs')
         shutil.copytree(ROOT / 'docs/prompt-optimization', self.root / 'docs/prompt-optimization')
         shutil.copytree(ROOT / 'optimization/definitions', self.root / 'optimization/definitions')
+        catalog_patch = patch('optimization.templates.catalog', side_effect=legacy_sharing)
+        catalog_patch.start()
+        self.addCleanup(catalog_patch.stop)
         self.app = Controller(self.root, demo=True)
         self.cohort = {'models': [native()], 'gpu': {'name': 'Mock GPU', 'total_gib': 8}, 'simulated': True}
         self.session = create(self.app, {'generator_id': 'local-a', 'settings': {'max_attempts': 2}}, self.cohort)
@@ -150,6 +154,22 @@ class OptimizationTests(unittest.TestCase):
         parsed = parse_candidate(proposal().replace('\n', '\r\n'))
         self.assertTrue(parsed['user'].startswith('Current State:'))
         self.assertEqual(parse_candidate(proposal())['system'], 'good\n${task_requirements}\n${presentation_notes}')
+
+    def test_archived_session_cannot_resume_or_load_a_model(self):
+        source = self.root / 'test_specs/array_patch_move_007.json'
+        archived = self.root / 'archive/array_patch_move_007.json'
+        self.assertTrue(source.resolve().is_relative_to(self.root.resolve()))
+        self.assertTrue(archived.resolve().is_relative_to(self.root.resolve()))
+        archived.parent.mkdir()
+        original = source.read_bytes()
+        source.rename(archived)
+        runner, runtimes = self.runner()
+        for mode in ('optimize', 'evaluate_remaining'):
+            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, 'archived or disabled'):
+                runner.run(mode=mode, cohort=self.cohort)
+        self.assertEqual(runtimes, [])
+        self.assertEqual(archived.read_bytes(), original)
+        self.assertEqual(self.store.observations(self.store.load(self.session['id'])), [])
 
     def test_labels_are_per_experiment_not_a_global_whitelist(self):
         self.assertEqual(parse_candidate('SYSTEM_MESSAGE:\n\nUSER_MESSAGE:\n${other}', ['other']), {'system': '', 'user': '${other}'})

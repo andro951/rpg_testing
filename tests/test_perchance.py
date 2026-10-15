@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import io
 import json
@@ -327,14 +328,14 @@ class PerchanceTests(unittest.TestCase):
 
     def test_full_active_suite_keeps_repetitions_but_collapses_unavailable_settings(self):
         from workbench.judgements import load_tests
-        tests = load_tests(Path(__file__).resolve().parents[1] / 'test_specs')
+        tests = load_tests(LEGACY_ROOT / 'test_specs')
         plan = provider.plan(tests, self.app.settings, self.target, self.app.store, self.selection)
         self.assertEqual((plan['requested_cases'], plan['independent_observations'], plan['collapsed_cases']), (357, 312, 45))
         self.assertTrue(all({a['repetition'] for a in g['aliases']} == {g['repetition']} for g in plan['groups']))
 
     def test_full_suite_160_compatible_baselines_leave_152_fresh_trials(self):
         from workbench.judgements import load_tests
-        tests = load_tests(Path(__file__).resolve().parents[1] / 'test_specs')
+        tests = load_tests(LEGACY_ROOT / 'test_specs')
         original = provider.plan(tests, self.app.settings, self.target, self.app.store, self.selection)
         policy = copy.deepcopy(original['provider'])
         policy.update(policy=provider.LEGACY_POLICY, adapter_hash=provider.LEGACY_ADAPTER_HASH)

@@ -137,6 +137,16 @@ def evaluate(test,variant,values):
             result_score['actual_patch_ops']=actual_ops
             result_score['patch_ops_match']=match
             result_score['exact_match']=bool(state_exact and match)
+        if 'response_schema' in result:
+            from jsonschema import Draft202012Validator
+            try:
+                response=values.get(result.get('step'))
+                if isinstance(response,str):response=parse(response)
+                problems=sorted(e.message for e in Draft202012Validator(result['response_schema']).iter_errors(response))
+            except Exception as exc:problems=[str(exc)]
+            result_score['response_schema_valid']=not problems
+            result_score['response_schema_errors']=problems
+            result_score['exact_match']=bool(result_score.get('exact_match') and not problems)
     else:
         result_score={'valid':True,'exact_match':None,'note':'No fixed final-state oracle for this narrative; objective checks are separate.'}
     objectives=[]

@@ -52,3 +52,19 @@ Uncommitted changes are the seven files listed above plus this pause note. Prese
 - All four browser smoke checks and actual-record visual review from before the pause remain applicable. The generated results table is ready at .local/reports/statistics.html.
 - User should close an older results-viewer console and run Open_Results_Table.bat again to start the updated server.
 - Changes remain local and uncommitted. No benchmark inference, result deletion, commit or push was performed. No work remains for this results-tab request.
+
+
+## Compatibility follow-up
+
+Isaac reported Not found after clicking a square, then confirmed he had the old viewer open and that the current table works. Independently reproduced the same HTTP 404 using the actual reporting/server.py code from commit 14fb8c4 serving the updated JavaScript. The launcher reuses that older process, whose routes do not include /result/.
+
+New viewers now advertise result_tab_url in their rendered payload. The browser uses the dedicated compact page only when advertised; older viewers open their existing page with the result hash and load complete evidence through the existing endpoint. No process termination, extra port or inference retries are involved. Refresh after updating the code.
+
+Added browser coverage for the legacy route/payload contract, including actual square clicks, full responses, unchanged table position, refresh and totals selection navigation. Also verified the fixed behavior against the actual older server implementation. All four browser smoke checks passed; the required full unit suite passed: 630 tests, OK, 712.691 seconds. Log: .local/result-tabs-compatibility-tests.log. Changes are local and uncommitted; saved benchmark evidence is unchanged.
+
+
+## Expected-answer display correction
+
+Isaac requested the expected answer itself, such as 62, instead of the internal expected_answers/index JSON wrapper. The result tab now unwraps answer values, expected patches and expected final states while preserving genuine JSON payloads. Multiple expected answers get step labels; a single answer has no extra label. Complete records and parseable limited previews both use this display. Original definitions and raw storage wrappers remain under Additional information. Scoring and raw result files are unchanged.
+
+Browser coverage now clicks through a synthetic index case and checks the expected block equals 62 before and after reload, checks a state oracle equals the unwrapped complete state, verifies raw metadata is still available, and exercises the legacy viewer path. All four browser smoke checks passed. Full unit suite passed: 630 tests, OK, 613.706 seconds; log .local/expected-answer-display-tests.log. Refreshed .local/reports/statistics.html using the existing report data and current scripts. Changes remain local and uncommitted.

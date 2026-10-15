@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import json
 import shutil
@@ -16,7 +17,7 @@ class ReproducibilityTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        shutil.copytree(ROOT/'test_specs', self.root/'test_specs')
+        shutil.copytree(LEGACY_ROOT / 'test_specs', self.root/'test_specs')
         self.app = Controller(self.root, True); self.app.selftest = lambda: None
         self.test = read_json(self.root/'test_specs/time_only.json')
         self.model = self.app.catalog()[0]

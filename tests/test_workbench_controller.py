@@ -1,3 +1,4 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
 import copy
 import io
 import json
@@ -22,7 +23,7 @@ def configured_case_count(folder):
 class ControllerTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.root=Path(self.temp.name);shutil.copytree(ROOT/'test_specs',self.root/'test_specs')
+        self.root=Path(self.temp.name);shutil.copytree(LEGACY_ROOT / 'test_specs',self.root/'test_specs')
         self.app=Controller(self.root,demo=True);self.app.selftest=lambda:None
     def test_progress_snapshot_reports_completed_preflight_and_run(self):
         self.app.check()

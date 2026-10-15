@@ -146,7 +146,7 @@ def main():
                 page.locator('#results-matrix tbody tr[data-kind=case] td[data-outcome=pass] button').first.click()
             evidence = opened.value
             evidence.get_by_role('heading', name='Expected result', exact=True).wait_for()
-            assert 'expected_answers' in evidence.locator('[data-evidence-block="Expected result"]').inner_text()
+            assert evidence.locator('[data-evidence-block="Expected result"] pre').text_content() == '73'
             assert page.locator('#drilldown').count() == 0
             assert page.evaluate('scrollY') == before_scroll
             evidence.close()

@@ -133,6 +133,24 @@ const StatisticsReport = {
 
         return text;
     },
+    ExpectedText: (parent, variant = {}, test = {}) => {
+        const values = Object.entries(variant.expected_answers || {});
+        if (Object.hasOwn(variant, `expected_patch`))
+            values.push([`Expected patch`, variant.expected_patch]);
+
+        if (Object.hasOwn(test, `expected_state`))
+            values.push([`Expected final state`, test.expected_state]);
+
+        if (!values.length)
+            StatisticsReport.Element(`p`, parent, `No expected answer or final state was captured in this record.`);
+
+        for (const [label, value] of values) {
+            if (values.length > 1)
+                StatisticsReport.Element(`h3`, parent, label);
+
+            StatisticsReport.EvidenceText(parent, value);
+        }
+    },
     ShowEvidence: (id, record, complete) => {
         const parent = StatisticsReport.Content;
         parent.replaceChildren();
@@ -170,26 +188,20 @@ const StatisticsReport = {
             if (!calls.length)
                 StatisticsReport.EvidenceText(output, record.outputs ?? {});
 
-            const oracle = {};
-            for (const key of [`expected_answers`, `expected_patch`]) {
-                if (Object.hasOwn(record.variant_definition || {}, key))
-                    oracle[key] = record.variant_definition[key];
-            }
-
-            if (Object.hasOwn(record.test_definition || {}, `expected_state`))
-                oracle.expected_state = record.test_definition.expected_state;
-
-            if (Object.keys(oracle).length)
-                StatisticsReport.EvidenceText(expected, oracle);
-            else
-                StatisticsReport.Element(`p`, expected, `No expected answer or final state was captured in this record.`);
+            StatisticsReport.ExpectedText(expected, record.variant_definition || {}, record.test_definition || {});
         }
         else {
             StatisticsReport.Element(`p`, prompt, `Complete prompt unavailable in this snapshot. Open the table through Open_Results_Table.bat to load the saved record.`);
             StatisticsReport.Element(`p`, output, `Limited output preview (up to 4,000 characters).`);
             StatisticsReport.EvidenceText(output, summary.output_preview);
             StatisticsReport.Element(`p`, expected, `Limited expected-result preview (up to 4,000 characters).`);
-            StatisticsReport.EvidenceText(expected, summary.oracle_preview);
+            try {
+                StatisticsReport.ExpectedText(expected, JSON.parse(summary.oracle_preview));
+            }
+            catch (error) {
+                //A truncated preview cannot be unpacked; never invent its missing answer.
+                StatisticsReport.EvidenceText(expected, summary.oracle_preview, false);
+            }
         }
 
         const evaluation = summary.evaluation;
@@ -256,7 +268,8 @@ const StatisticsReport = {
     },
     EvidenceUrl: ids => {
         const url = new URL(location.href);
-        if (StatisticsReport.Data.judgement_api)
+        //Older running viewers reload this script but do not have the new endpoint.
+        if (StatisticsReport.Data.result_tab_url === `/result/`)
             url.pathname = `/result/`;
 
         url.hash = `results=${ids.join(`,`)}`;

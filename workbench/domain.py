@@ -89,7 +89,7 @@ def implementation_fingerprint():
     """Exact source provenance, including operational loading code."""
     base=Path(__file__).parent
     return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
-                   for name in ('domain.py','workflows.py','scoring.py','backends.py','inventory.py','presentation.py','seedcheck.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
+                   for name in ('domain.py','workflows.py','scoring.py','value_paths.py','backends.py','inventory.py','presentation.py','seedcheck.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
 
 
 def code_fingerprint():
@@ -280,13 +280,18 @@ def validate_test(test: dict) -> None:
         result = variant.get('result', {})
         if result.get('step') and result['step'] not in known:
             raise ValueError('Result references missing step')
-        if result.get('representation', 'json_patch') not in ('json_patch', 'semantic', 'state', 'answers'):
+        if result.get('representation', 'json_patch') not in ('json_patch', 'value_patch', 'semantic', 'state', 'answers'):
             raise ValueError('Unknown result representation')
+        if result.get('representation')=='value_patch' and not test.get('state_schema'):
+            raise ValueError('Value-based paths require a predefined state_schema')
         required_ops=result.get('required_ops')
+        if 'response_schema' in result:
+            local_schema(result['response_schema'])
+            Draft202012Validator.check_schema(result['response_schema'])
         if required_ops is not None:
             allowed={'add','remove','replace','move','copy','test'}
-            if result.get('representation','json_patch')!='json_patch' or not isinstance(required_ops,list) or not required_ops or any(op not in allowed for op in required_ops):
-                raise ValueError('required_ops must be a nonempty list of RFC 6902 operations for json_patch results')
+            if result.get('representation','json_patch') not in ('json_patch','value_patch') or not isinstance(required_ops,list) or any(op not in allowed for op in required_ops):
+                raise ValueError('required_ops must be a list of operation names for patch results; an empty list requires no operations')
         for check in variant.get('checks', []):
             if check.get('step') not in known or check.get('operator') not in ('equals', 'contains', 'not_contains'):
                 raise ValueError('Invalid objective check')

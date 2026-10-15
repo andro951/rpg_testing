@@ -11,9 +11,12 @@ VERSION = 'lpil-opro-v1'
 def snapshot(root, definition):
     folder = root / 'docs/prompt-optimization/lpil'
     read = lambda name: (folder / name).read_text(encoding='utf-8-sig')
+    task_file = definition.get('prompt_files', {}).get('task_definition', 'array-move-task.txt')
+    if task_file not in ('array-move-task.txt', 'collection-move-task.txt'):
+        raise ValueError('Unknown reviewed optimizer task definition')
     return {'version': VERSION, 'description': read('LPIL_general_description.txt'),
             'outer': read('LPIL_OPRO_outer_template.txt'),
-            'task_definition': read('array-move-task.txt'),
+            'task_definition': read(task_file),
             'use_standard_opro_output': True, 'output_rules': read('LPIL_OPRO_standard_output.txt'),
             'existing_replacements': [],
             'new_replacements': [{'name': name, 'description': entry['description'], 'count': entry.get('count', 1)}

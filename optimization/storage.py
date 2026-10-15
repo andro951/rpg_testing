@@ -108,6 +108,13 @@ class Store:
                 fixed = ('scope', 'definition', 'settings', 'generator_id', 'origin_model_id', 'optimizer_system', 'optimizer_user')
                 if any(existing[k] != session[k] for k in fixed):
                     raise ValueError('Session contracts conflict; nothing was overwritten.')
+                if existing.get('prompt_writer', {'provider': 'local'}) != session.get('prompt_writer', {'provider': 'local'}):
+                    raise ValueError('Session prompt-writer contracts conflict; nothing was overwritten.')
+                if existing.get('codex_thread') and session.get('codex_thread') and any(
+                        existing['codex_thread'][k] != session['codex_thread'][k] for k in ('id', 'host_identity')):
+                    raise ValueError('Session Codex threads conflict; nothing was overwritten.')
+                if not existing.get('codex_thread') and session.get('codex_thread'):
+                    existing['codex_thread'] = session['codex_thread']
                 if existing.get('prompt_builder') and session.get('prompt_builder') and existing['prompt_builder'] != session['prompt_builder']:
                     raise ValueError('Session prompt-builder contracts conflict; nothing was overwritten.')
                 attempts = {a['number']: a for a in existing['attempts']}

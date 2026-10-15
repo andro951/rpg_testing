@@ -169,6 +169,7 @@ class ReviewServerTests(unittest.TestCase):
             html = response.read().decode('utf-8')
         payload = json.loads(html.split('<script type="application/json" id="evidence-data">', 1)[1].split('</script>', 1)[0])
         self.assertEqual(payload['evidence'], {})
+        self.assertEqual(payload['result_tab_url'], '/result/')
         self.assertNotIn('cohorts', payload)
         self.assertEqual(set(payload['matrix']['records']), set(self.report['matrix']['records']))
         for cid, summary in payload['matrix']['records'].items():
