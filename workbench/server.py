@@ -22,6 +22,7 @@ class WorkbenchServer(ThreadingHTTPServer):
         if not host.is_loopback and host not in ipaddress.ip_network('100.64.0.0/10'):
             raise ValueError('Control server must bind to loopback or a Tailscale IPv4 address')
         self.app=app;self.remote_server=None;self.exit_requested=False;self.owner=self;self.update_coordinator=None
+        self.report_snapshot=None
         webroot=Path(__file__).parent/'web'
         self.static_assets={
             '/':(webroot/'index.html').read_bytes(),
@@ -29,6 +30,8 @@ class WorkbenchServer(ThreadingHTTPServer):
             '/optimization.js':(webroot/'optimization.js').read_bytes(),
             '/style.css':(webroot/'style.css').read_bytes(),
         }
+        for name in ('groupings.js','judgements.js','matrix.js','report.js'):
+            self.static_assets['/report-'+name]=(webroot.parent.parent/'reporting'/name).read_bytes()
         super().__init__(address,Handler)
     def enable_remote(self):
         if self.owner is not self:return self.owner.enable_remote()
@@ -92,6 +95,37 @@ class Handler(BaseHTTPRequestHandler):
                 kind='text/html; charset=utf-8' if path=='/' else 'text/css; charset=utf-8' if path=='/style.css' else 'application/javascript; charset=utf-8'
                 return self.send(200,self.server.static_assets[path],kind)
             self.authorize()
+            if path=='/api/optimization/identity':
+                return self.send(200,{'application':'rpg-workbench','root':str(app.root.resolve())})
+            if path in ('/results/','/result/'):
+                if app.operation.locked():raise RuntimeError('Finish or stop the current operation before opening results.')
+                from reporting.report import build_report
+                from reporting.server import render_page
+                if path=='/results/' or self.server.report_snapshot is None:
+                    specs=[read_json(p) for p in sorted((app.root/'test_specs').glob('*.json'))]
+                    self.server.report_snapshot=build_report(app.result_records(),specs)
+                return self.send(200,render_page(app.root,self.server.report_snapshot,path=='/result/',
+                    {'url':'/api/judgements'}, {'target_url':'/api/optimization/from-result','base_url':'/'},True),'text/html; charset=utf-8')
+            if path=='/api/result':
+                if app.operation.locked():raise RuntimeError('Finish or stop the active operation before reading evidence.')
+                from .domain import ResultStore
+                store=ResultStore(app.root/'results')
+                source=store.path(safe_id(q['model_id'][0]),safe_id(q['case_id'][0]))
+                if not source.exists():return self.send(404,{'error':'Unknown result'})
+                return self.send(200,store.read(source))
+            if path=='/api/optimization/targets':
+                from optimization.selection import targets
+                from optimization.templates import freeze
+                if app.operation.locked():raise RuntimeError('Finish or stop the current operation before selecting a test.')
+                available=targets(app.root)
+                try:default=freeze(app.root)['target'] if available else None
+                except ValueError:default=None
+                return self.send(200,{'targets':available,'default_target':default})
+            if path=='/api/optimization/from-result':
+                from optimization.selection import from_result
+                if app.operation.locked():raise RuntimeError('Finish or stop the current operation before opening optimization.')
+                selection,_=from_result(app.root,q['model_id'][0],q['case_id'][0])
+                return self.send(200,selection)
             if path=='/api/state':return self.send(200,{**app.snapshot(),'control_access':'private_network'})
             if path=='/api/optimization/codex-options':
                 from optimization.codex import discover
@@ -150,6 +184,10 @@ class Handler(BaseHTTPRequestHandler):
             from .scoring import parse
             data=parse(raw.decode()) if size else {}
             if not isinstance(data,dict):raise ValueError('Request body must be an object')
+            if path=='/api/judgements':
+                from .judgements import JudgementStore
+                if app.operation.locked():raise RuntimeError('Finish or stop the active operation before changing test judgements.')
+                return self.send(200,{'entries':JudgementStore(app.root).update(**data)['entries']})
             if path=='/api/picker/models':
                 if not ipaddress.ip_address(self.client_address[0]).is_loopback:
                     raise ValueError('The native folder picker opens on the GPU host. Open the workbench on that computer, or type the host path in Worker setup.')

@@ -156,7 +156,10 @@ const StatisticsReport = {
         parent.replaceChildren();
         const summary = StatisticsReport.Data.matrix.records[id];
         document.title = `${summary.outcome.toUpperCase()} · ${summary.metadata.test_id} · RPG test result`;
-        StatisticsReport.Element(`h1`, parent, summary.outcome.toUpperCase());
+        const header = StatisticsReport.Element(`header`, parent);
+        Object.assign(header.style, {display: `flex`, alignItems: `center`, gap: `20px`, flexWrap: `wrap`});
+        StatisticsReport.Element(`h1`, header, summary.outcome.toUpperCase());
+        StatisticsReport.OptimizationAction(header, id, summary);
         const prompt = StatisticsReport.EvidenceBlock(parent, `Full prompt sent to the AI`);
         const output = StatisticsReport.EvidenceBlock(parent, `Full text result`);
         const expected = StatisticsReport.EvidenceBlock(parent, `Expected result`);
@@ -239,6 +242,64 @@ const StatisticsReport = {
         StatisticsReport.Element(`summary`, raw, `Complete raw record (JSON)`);
         StatisticsReport.EvidenceText(raw, record);
     },
+    //#region Optimization handoff
+    OptimizationAction: (parent, id, summary) => {
+        const api = StatisticsReport.Data.optimization_api;
+        const button = StatisticsReport.Element(`button`, parent, `Checking optimization availability…`);
+        button.type = `button`;
+        button.disabled = true;
+        Object.assign(button.style, {padding: `10px 16px`, fontSize: `15px`, cursor: `pointer`});
+        const message = StatisticsReport.Element(`small`, parent);
+        message.setAttribute(`role`, `status`);
+        if (!api) {
+            button.textContent = `Optimize this prompt (OPRO)`;
+            message.textContent = `Open the table through Workbench’s Results page or Open_Results_Table.bat to select this test for optimization.`;
+            return;
+        }
+
+        const query = new URLSearchParams({model_id: summary.metadata.model_id, case_id: id});
+        fetch(`${api.target_url}?${query}`).then(async response => {
+            const selection = await response.json();
+            if (!response.ok)
+                throw new Error(selection.error || `Unable to select this result (${response.status}).`);
+
+            button.textContent = `Optimize this prompt (OPRO)`;
+            button.disabled = false;
+            button.title = `Open ${selection.target.name} · ${selection.target.presentation} in Prompt Optimization. No inference starts automatically.`;
+            message.textContent = api.local_worker ? `Opens Workbench on this computer. For a remote worker, open the table from that Workbench’s Results page.` : `Select settings before starting; opening the tab does not run a model.`;
+            button.addEventListener(`click`, async () => {
+                button.disabled = true;
+                button.textContent = `Opening Prompt Optimization…`;
+                message.textContent = ``;
+                const navigate = url => location.assign(url);
+                if (api.open_url) {
+                    fetch(api.open_url, {method: `POST`, headers: {"Content-Type": `application/json`, "X-Judgement-Token": api.token}, body: JSON.stringify({model_id: summary.metadata.model_id, case_id: id})})
+                        .then(async result => {
+                            const data = await result.json();
+                            if (!result.ok)
+                                throw new Error(data.error || `Workbench could not open.`);
+
+                            navigate(data.url);
+                        }).catch(error => {
+                            button.disabled = false;
+                            button.textContent = `Optimize this prompt (OPRO)`;
+                            message.textContent = error.message;
+                        });
+                }
+                else {
+                    const url = new URL(api.base_url, location.href);
+                    url.hash = new URLSearchParams({page: `optimization`, test_id: selection.target.test_id, variant_id: selection.target.variant_id,
+                        definition_id: selection.target.definition_id, origin_model_id: selection.origin_model_id, source_result_id: id}).toString();
+                    navigate(url.href);
+                }
+            });
+        }).catch(error => {
+            button.textContent = `OPRO unavailable for this result`;
+            button.title = error.message;
+            message.textContent = error.message;
+        });
+    },
+    //#endregion
     EvaluationFeedback: (parent, summary) => {
         const evaluation = summary.evaluation;
         if (!evaluation) {

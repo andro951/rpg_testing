@@ -7,12 +7,31 @@ from pathlib import Path
 import secrets
 import threading
 from urllib.request import urlopen
+from urllib.parse import urlsplit,parse_qs
 import webbrowser
 from workbench.domain import canonical, ResultStore
 from workbench.judgements import JudgementStore, annotate
 from .report import write_report
 
 MARKER = '<script type="application/json" id="evidence-data">'
+
+
+def render_page(root, snapshot, evidence_view=False, judgement_api=None, optimization_api=None, external_scripts=False):
+    report=({'matrix':{'records':copy.deepcopy(snapshot['matrix']['records'])},'evidence':{}}
+            if evidence_view else copy.deepcopy(snapshot))
+    annotate(report['matrix'],JudgementStore(root).read()) if not evidence_view else None
+    if judgement_api:report['judgement_api']=judgement_api
+    if optimization_api:report['optimization_api']=optimization_api
+    report['result_tab_url']='/result/'
+    from urllib.parse import urlencode
+    for cid,summary in report['matrix']['records'].items():
+        summary['source_uri']=('/api/result?'+urlencode({'model_id':summary['metadata']['model_id'],'case_id':cid})
+                               if external_scripts else '/evidence/'+cid)
+    scripts='\n'.join(Path(__file__).with_name(name).read_text(encoding='utf-8') for name in ('groupings.js','judgements.js','matrix.js','report.js'))
+    data=canonical(report).replace('<','\\u003c').replace('\u2028','\\u2028').replace('\u2029','\\u2029')
+    code=(''.join('<script src="/report-'+name+'"></script>' for name in ('groupings.js','judgements.js','matrix.js','report.js'))
+          if external_scripts else '<script>'+scripts+'</script>')
+    return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RPG testing results</title><body>'+MARKER+data+'</script>'+code+'</body></html>').encode('utf-8')
 
 
 class ReviewServer(ThreadingHTTPServer):
@@ -42,20 +61,8 @@ class ReviewServer(ThreadingHTTPServer):
         with self.lock:
             self.refresh()
             annotate(self.snapshot['matrix'], JudgementStore(self.root).read())
-            if evidence_view:
-                # Result tabs need summaries, not another copy of all raw streams.
-                report = {'matrix': {'records': copy.deepcopy(self.snapshot['matrix']['records'])}, 'evidence': {}}
-            else:
-                report = copy.deepcopy(self.snapshot)
-            report['judgement_api'] = {'url': '/api/judgements', 'token': self.token}
-            report['result_tab_url'] = '/result/'
-            for cid, summary in report['matrix']['records'].items():
-                summary['source_uri'] = '/evidence/' + cid
-            scripts = '\n'.join(Path(__file__).with_name(name).read_text(encoding='utf-8') for name in
-                                ('groupings.js', 'judgements.js', 'matrix.js', 'report.js'))
-            data = canonical(report).replace('<', '\\u003c').replace('\u2028', '\\u2028').replace('\u2029', '\\u2029')
-            return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RPG testing results</title><body>' +
-                    MARKER + data + '</script><script>' + scripts + '</script></body></html>').encode('utf-8')
+            return render_page(self.root,self.snapshot,evidence_view,{'url':'/api/judgements','token':self.token},
+                {'target_url':'/api/optimization/target','open_url':'/api/optimization/open','token':self.token,'local_worker':True})
 
 
 class ReviewHandler(BaseHTTPRequestHandler):
@@ -82,6 +89,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self.reply(403, {'error': 'Invalid local host'})
             return
         try:
+            url=urlsplit(self.path)
+            if url.path=='/api/optimization/target':
+                from optimization.selection import from_result
+                query=parse_qs(url.query)
+                selection,_=from_result(self.server.root,query['model_id'][0],query['case_id'][0])
+                self.reply(200,selection)
+                return
             if self.path == '/':
                 self.reply(200, self.server.rendered(), 'text/html; charset=utf-8')
             elif self.path == '/result/':
@@ -99,8 +113,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 self.reply(200, path.read_bytes())
             else:
                 self.reply(404, {'error': 'Not found'})
-        except (ValueError, OSError) as exc:
-            self.reply(500, {'error': str(exc)})
+        except (ValueError,KeyError, OSError) as exc:
+            self.reply(409, {'error': str(exc)})
 
     def do_POST(self):
         origin = self.headers.get('Origin')
@@ -108,7 +122,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if not self.valid_host() or self.headers.get('X-Judgement-Token') != self.server.token or (origin and origin != expected):
             self.reply(403, {'error': 'Invalid review authorization'})
             return
-        if self.path != '/api/judgements':
+        if self.path not in ('/api/judgements','/api/optimization/open'):
             self.reply(404, {'error': 'Not found'})
             return
         try:
@@ -116,6 +130,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
             if not 0 < length <= 100000:
                 raise ValueError('Invalid request size')
             payload = json.loads(self.rfile.read(length))
+            if self.path=='/api/optimization/open':
+                from optimization.selection import from_result
+                from optimization.handoff import open_local
+                if not isinstance(payload,dict) or set(payload)!={'model_id','case_id'}:raise ValueError('Invalid starting result')
+                selection,_=from_result(self.server.root,payload['model_id'],payload['case_id'])
+                self.reply(200,{'url':open_local(self.server.root,selection)})
+                return
             if not isinstance(payload, dict) or set(payload) != {'ids', 'status', 'reason', 'reviewer', 'note'}:
                 raise ValueError('Invalid judgement request')
             with self.server.lock:

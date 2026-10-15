@@ -292,10 +292,21 @@ class Controller(ModelManager):
             if kind=='optimization':
                 from optimization.engine import settings
                 from optimization.storage import Store
-                if not isinstance(payload,dict) or set(payload)-{'mode','session_id','generator_id','origin_model_id','settings','prompt_writer'}:raise ValueError('Unknown optimizer option')
+                if not isinstance(payload,dict) or set(payload)-{'mode','session_id','generator_id','origin_model_id','settings','prompt_writer','target','source_result'}:raise ValueError('Unknown optimizer option')
                 if payload.get('mode','optimize') not in ('optimize','evaluate_remaining'):raise ValueError('Unknown optimizer mode')
                 if payload.get('session_id'):Store(self.root).load(payload['session_id'])
-                else:settings(payload.get('settings',{}))
+                else:
+                    settings(payload.get('settings',{}))
+                    if 'target' in payload:
+                        from optimization.selection import validate_target
+                        validate_target(self.root,payload['target'])
+                    if 'source_result' in payload:
+                        from optimization.selection import from_result
+                        source=payload['source_result']
+                        if not isinstance(source,dict) or set(source)!={'model_id','case_id'}:raise ValueError('Invalid starting result selection')
+                        selected,_=from_result(self.root,source['model_id'],source['case_id'])
+                        if 'target' not in payload or any(selected['target'][key]!=payload['target'].get(key) for key in ('test_id','variant_id','definition_id')):
+                            raise ValueError('The starting result does not match the selected test.')
             repair_selection=copy.deepcopy((self.report or {}).get('selection')) if kind=='fix' else None
         except Exception:
             self.operation.release();raise

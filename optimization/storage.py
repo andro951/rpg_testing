@@ -96,7 +96,7 @@ class Store:
         if not session or session.get('schema_version') != 1:
             raise ValueError('Missing or unsupported session manifest')
         directory = self.directory(session['id'])
-        for key in session.get('observations', []) + session.get('configuration_history', []) + session.get('preparation_errors', []) + [a[field] for a in session.get('attempts', [])
+        for key in session.get('observations', []) + session.get('configuration_history', []) + session.get('preparation_errors', []) + ([session['source_result_evidence']] if session.get('source_result_evidence') else []) + [a[field] for a in session.get('attempts', [])
                                                      for field in ('request_evidence', 'response_evidence', 'error_evidence') if field in a]:
             if 'evidence/' + key + '.json' not in files:
                 raise ValueError('Archive is missing referenced evidence')
@@ -110,6 +110,8 @@ class Store:
                     raise ValueError('Session contracts conflict; nothing was overwritten.')
                 if existing.get('prompt_writer', {'provider': 'local'}) != session.get('prompt_writer', {'provider': 'local'}):
                     raise ValueError('Session prompt-writer contracts conflict; nothing was overwritten.')
+                if any(existing.get(k)!=session.get(k) for k in ('source_result','source_result_evidence')):
+                    raise ValueError('Session starting-result contracts conflict; nothing was overwritten.')
                 if existing.get('codex_thread') and session.get('codex_thread') and any(
                         existing['codex_thread'][k] != session['codex_thread'][k] for k in ('id', 'host_identity')):
                     raise ValueError('Session Codex threads conflict; nothing was overwritten.')

@@ -12,7 +12,7 @@ def snapshot(root, definition):
     folder = root / 'docs/prompt-optimization/lpil'
     read = lambda name: (folder / name).read_text(encoding='utf-8-sig')
     task_file = definition.get('prompt_files', {}).get('task_definition', 'array-move-task.txt')
-    if task_file not in ('array-move-task.txt', 'collection-move-task.txt'):
+    if task_file not in ('array-move-task.txt', 'collection-move-task.txt', 'database-task.txt'):
         raise ValueError('Unknown reviewed optimizer task definition')
     return {'version': VERSION, 'description': read('LPIL_general_description.txt'),
             'outer': read('LPIL_OPRO_outer_template.txt'),
@@ -93,6 +93,9 @@ def _history(packet):
 
     line('\nBaseline trials:')
     trials(packet.get('reference_evidence', []))
+    if packet.get('starting_result'):
+        line('\nSaved result selected by the user (reference evidence, not an additional scored trial):')
+        trials([packet['starting_result']])
     for item in packet.get('top_three', []):
         line('\nTop candidate:\n' + _json(item))
     if not packet.get('top_three'):

@@ -146,12 +146,16 @@ def main():
                     page.get_by_role('button', name='Prompt Optimization', exact=True).click()
                 expect(page.locator('#optimization-generator')).to_have_value('local-b')
                 expect(page.locator('#optimization-origin-model')).to_have_value('local-b')
-                # A disappeared selection falls back to an available model.
+                # A disappeared starting-case model requires an explicit replacement.
                 cohort['models'].pop()
                 page.locator('nav button[data-page="overview"]').click()
                 page.get_by_role('button', name='Prompt Optimization', exact=True).click()
                 expect(page.locator('#optimization-generator')).to_have_value('local-a')
-                expect(page.locator('#optimization-origin-model')).to_have_value('local-a')
+                expect(page.locator('#optimization-origin-model')).to_have_value('local-b')
+                expect(page.locator('#optimization-target-details')).to_contain_text('unavailable on this worker')
+                expect(page.locator('#optimization-start')).to_be_disabled()
+                page.locator('#optimization-origin-model').select_option('local-a')
+                expect(page.locator('#optimization-start')).to_be_enabled()
                 # A failed scan reports why; entering again retries normally.
                 page.route('**/api/optimization/options', lambda route: route.fulfill(
                     status=409, content_type='application/json', body='{"error":"Fixture model scan unavailable"}'))

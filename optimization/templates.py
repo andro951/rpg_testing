@@ -98,16 +98,27 @@ def bindings(case, prior=None):
             'prior_outputs': json.dumps(prior or {}, ensure_ascii=False)}
 
 
-def freeze(root):
+def freeze(root, target=None):
     """Freeze only reviewed, active, non-rejected members; no solution in bindings."""
     data = catalog()
-    origin = 'array_patch_move_007/indexed_object_json_patch'
-    if origin not in data['variants']:
-        origin = next((key for key, entry in data['variants'].items()
-                       if entry['objective_optimization_eligible']
-                       and entry['constraints'].get('required_ops') == ['move']), None)
+    if target is not None:
+        from .selection import validate_target
+        selected=validate_target(root,target)
+        origin=selected['test_id']+'/'+selected['variant_id']
+    else:
+        # Compatibility for existing API clients and the archived pilot fixtures.
+        path=root/'optimization/definitions/array_move_patch.json'
+        configured=read_json(path).get('target',{}) if path.exists() else {}
+        origin=configured.get('test_id','')+'/'+configured.get('variant_id','')
+        if origin not in data['variants']:
+            legacy_path=root/'optimization/definitions/array_move_patch.draft.json'
+            legacy=read_json(legacy_path).get('target',{}) if legacy_path.exists() else {}
+            origin=legacy.get('test_id','')+'/'+legacy.get('variant_id','')
+            if origin not in data['variants']:
+                origin=next((key for key,entry in data['variants'].items() if entry['objective_optimization_eligible']
+                             and entry['constraints'].get('required_ops')==['move']),None)
     if origin is None or not data['variants'][origin]['objective_optimization_eligible']:
-        raise ValueError('No reviewed, enabled move test is available. Review the new patch-suite prompts before starting optimization.')
+        raise ValueError('No reviewed starting test is available. Select an enabled test before starting optimization.')
     anchor = data['variants'][origin]
     test = read_json(root / anchor['source_file'])
     variant = next(v for v in test['variants'] if test['id'] + '/' + v['id'] == origin)
@@ -144,7 +155,8 @@ def freeze(root):
     for layer in layers:
         if not unique or set(layer['members']) != set(unique[-1]['members']):
             unique.append(layer)
-    return {'cases': cases, 'layers': unique, 'task_type': anchor['task_family'], 'workflow_fingerprint': data['workflow_fingerprint']}
+    return {'cases': cases, 'layers': unique, 'task_type': anchor['task_family'], 'workflow_fingerprint': data['workflow_fingerprint'],
+            'target':{'test_id':test['id'],'variant_id':variant['id'],'definition_id':definition_id(test,variant)}}
 
 
 def projection(case, candidate, remote=False):

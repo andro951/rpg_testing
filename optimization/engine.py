@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from workbench.domain import code_fingerprint, digest, read_json
-from workbench.judgements import JudgementStore, review_lock
+from workbench.judgements import JudgementStore, review_lock, definition_id
 from workbench.workflows import Cancelled
 from evaluation.core import assess_record
 from .storage import Store
@@ -45,7 +45,7 @@ def settings(value, allow_legacy=False):
 
 
 def create(app, payload, cohort=None):
-    if set(payload) - {'generator_id', 'origin_model_id', 'settings', 'prompt_writer'}:
+    if set(payload) - {'generator_id', 'origin_model_id', 'settings', 'prompt_writer', 'target', 'source_result'}:
         raise ValueError('Unknown optimization session option')
     config = settings(payload.get('settings', {}))
     cohort = cohort or discover(app)
@@ -67,14 +67,31 @@ def create(app, payload, cohort=None):
     origin_model_id = payload.get('origin_model_id') or cohort['models'][0]['id']
     if not any(m['id'] == origin_model_id for m in cohort['models']):
         raise ValueError('Choose a runnable starting-case model.')
-    scope = freeze(app.root)
+    scope = freeze(app.root,payload.get('target'))
     definition = read_json(app.root / 'optimization/definitions/array_move_patch.json')
+    origin=scope['cases'][scope['layers'][0]['members'][0]]
+    if origin['test'].get('prompt_builder',{}).get('version')=='database-v3':
+        definition['id']='database_prompt_optimization'
+        definition['target']={**scope['target'],'step_id':origin['variant']['result']['step']}
+        definition['scope_plan']['task_type']=scope['task_type']
+        definition['required_labels']['task_requirements']['binding']='Reviewed per-test database rules, operation contract and structure; preserve the exact required operations.'
+        definition['prompt_files']['task_definition']='database-task.txt'
     session = {'schema_version': 1, 'id': uuid.uuid4().hex, 'created': now(), 'status': 'ready',
                'settings': config, 'prompt_writer': writer, 'generator_id': generator['id'], 'origin_model_id': origin_model_id, 'scope': scope, 'definition': definition,
                'cohort': cohort, 'cohort_history': [cohort], 'attempts': [], 'observations': [], 'message': '',
                'optimizer_system': (app.root / 'docs/prompt-optimization/optimizer-system.txt').read_text(encoding='utf-8'),
                'optimizer_user': (app.root / 'docs/prompt-optimization/optimizer-user-template.txt').read_text(encoding='utf-8')}
     session['prompt_builder'] = prompt_builder.snapshot(app.root, definition)
+    if payload.get('source_result') is not None:
+        from .selection import from_result
+        source=payload['source_result']
+        if not isinstance(source,dict) or set(source)!={'model_id','case_id'}:
+            raise ValueError('Invalid saved starting result.')
+        selected,record=from_result(app.root,source['model_id'],source['case_id'])
+        if selected['target']['definition_id']!=scope['target']['definition_id']:
+            raise ValueError('The saved result does not match the selected starting case.')
+        session['source_result']=source
+        session['source_result_evidence']=Store(app.root).evidence(session['id'],record)
     Store(app.root).save(session)
     return session
 
@@ -187,6 +204,11 @@ def generation_packet(session, models, records, store):
               'reference_evidence': baseline, 'top_three': top, 'history': history,
               'prompts': evidence_packet.prompts,
               'pruned_attempts': [], 'attempt_limit': session['settings']['max_attempts']}
+    if session.get('source_result_evidence') and session['source_result']['model_id'] in ids:
+        source=copy.deepcopy(store.get_evidence(session['id'],session['source_result_evidence']))
+        source['evaluation']=assess_record(source)
+        source['pass']=source['evaluation']['objective_outcome']=='PASS'
+        packet['starting_result']=evidence_packet.trial(source)
     # Protected top-three exact templates and model/case summaries survive all pruning.
     return packet
 
@@ -434,11 +456,14 @@ class Engine:
             for path in (self.app.root / 'test_specs').glob('*.json'):
                 test = read_json(path)
                 if test.get('enabled', True):
-                    available[test['id']] = {v['id'] for v in test['variants'] if v.get('enabled', True)}
+                    available[test['id']] = {v['id']:definition_id(test,v) for v in test['variants'] if v.get('enabled', True)}
             for member, case in self.session['scope']['cases'].items():
                 if case['variant']['id'] not in available.get(case['test']['id'], set()):
                     raise ValueError('This optimization session uses an archived or disabled test and cannot run: ' + member +
                                      '. Saved evidence is preserved. Start a new session after reviewing the current suite.')
+                if available[case['test']['id']][case['variant']['id']]!=case['definition_id']:
+                    raise ValueError('This optimization session uses a test definition that has changed: '+member+
+                                     '. Saved evidence is preserved. Start a new session for the current test.')
             if mode == 'optimize' and not self.session.get('prompt_builder') and not self.session['attempts']:
                 # A preparation failure consumed no candidate. Adopt the corrected
                 # writer for the next request without changing frozen tests or
@@ -556,5 +581,5 @@ def dispatch(app, payload):
         raise ValueError('Unknown optimizer operation')
     session_id = payload.get('session_id')
     if session_id is None:
-        session_id = create(app, {k: v for k, v in payload.items() if k in ('generator_id', 'origin_model_id', 'settings', 'prompt_writer')})['id']
+        session_id = create(app, {k: v for k, v in payload.items() if k in ('generator_id', 'origin_model_id', 'settings', 'prompt_writer','target','source_result')})['id']
     Engine(app, session_id).run(mode)

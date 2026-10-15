@@ -10,20 +10,70 @@ const PromptOptimization = {
  CodexRequest: null,
  CodexOptions: [],
  HostReady: false,
+ HostModels: [],
+ TargetOptions: [],
+ TargetRequest: null,
+ TargetLoading: false,
+ RequestedTarget: null,
+ RequestedModel: null,
+ SourceResult: null,
+ TargetError: ``,
+ NewTarget: false,
+ Starting: false,
  Inputs: {},
  Initialize: () => {
   titles.optimization = `Prompt Optimization`;
   const navigation = button(`Prompt Optimization`, () => {
    setPage(`optimization`);
-   return Promise.all([PromptOptimization.Scan(), PromptOptimization.Refresh()]);
+   return Promise.all([PromptOptimization.Scan(), PromptOptimization.Targets(), PromptOptimization.Refresh()]);
   });
   navigation.dataset.page = `optimization`;
   document.querySelector(`nav`).append(navigation);
   const section = el(`section`, undefined, `page hidden`);
   section.id = `page-optimization`;
   $(`page-overview`).parentElement.append(section);
-  section.append(el(`h2`, `Collection move prompt optimization`), el(`p`, `Pass the starting case, then test the candidate on every matching collection-transfer test and every runnable model on this host. Rankings use full repetitions and only this host’s models. Benchmark reasoning stays off.`, `muted`));
+  section.append(el(`h2`, `Prompt optimization`), el(`p`, `Choose a starting test and presentation. A candidate that passes every starting-case repetition is tested on all compatible tests of the same task type and all runnable models on this host. Opening this page does not start inference.`, `muted`));
   const controls = el(`section`);
+  for (const [id, text] of [[`optimization-test`, `Starting test`], [`optimization-presentation`, `Input presentation`]]) {
+   const label = el(`label`, `${text} `);
+   const select = el(`select`);
+   select.id = id;
+   select.setAttribute(`aria-label`, text);
+   select.disabled = true;
+   select.style.width = `100%`;
+   select.addEventListener(`change`, () => {
+    PromptOptimization.RequestedTarget = null;
+    PromptOptimization.SourceResult = null;
+    PromptOptimization.TargetError = ``;
+    PromptOptimization.NewTarget = true;
+    PromptOptimization.Selected = null;
+    PromptOptimization.Current = null;
+    if (id === `optimization-test`)
+     PromptOptimization.Presentations();
+
+    PromptOptimization.TargetDetails();
+   });
+   label.append(select);
+   controls.append(label);
+  }
+
+  const targetDetails = el(`p`, `Loading available tests…`);
+  targetDetails.id = `optimization-target-details`;
+  targetDetails.setAttribute(`role`, `status`);
+  targetDetails.setAttribute(`aria-live`, `polite`);
+  controls.append(targetDetails);
+  const useCurrent = button(`Use current test version`, () => {
+   PromptOptimization.RequestedTarget = null;
+   PromptOptimization.SourceResult = null;
+   PromptOptimization.TargetError = ``;
+   PromptOptimization.NewTarget = true;
+   PromptOptimization.Selected = null;
+   PromptOptimization.Current = null;
+   PromptOptimization.TargetDetails();
+  });
+  useCurrent.id = `optimization-use-current`;
+  useCurrent.hidden = true;
+  controls.append(useCurrent);
   const providerLabel = el(`label`, `Prompt writer `);
   const provider = el(`select`);
   provider.id = `optimization-provider`;
@@ -61,6 +111,7 @@ const PromptOptimization = {
   controls.append(generatorLabel);
   const originLabel = el(`label`, `Starting-case model `);
   originLabel.append(PromptOptimization.ModelSelect(`optimization-origin-model`));
+  originLabel.querySelector(`select`).addEventListener(`change`, PromptOptimization.TargetDetails);
   controls.append(el(`br`), originLabel);
   const definitions = [
    [`max_attempts`, `Maximum attempts`, `number`, 20],
@@ -112,13 +163,16 @@ const PromptOptimization = {
    await PromptOptimization.Refresh();
   }));
   controls.append(scope, actions);
-  controls.append(el(`p`, `Writer, GPT model and effort selections apply to new sessions. Continue uses the saved session’s writer and thread.`, `muted`));
+  actions.lastElementChild.dataset.savedSessionAction = `true`;
+  actions.lastElementChild.disabled = true;
+  controls.append(el(`p`, `Starting test, presentation and writer selections apply to new sessions. Continue uses the saved session’s test scope, writer and thread.`, `muted`));
   section.append(controls, el(`h2`, `Saved sessions`));
   const sessions = el(`select`);
   sessions.id = `optimization-sessions`;
   sessions.setAttribute(`aria-label`, `Optimization session`);
   sessions.addEventListener(`change`, async () => {
    PromptOptimization.PendingSessionIds = null;
+   PromptOptimization.NewTarget = false;
    PromptOptimization.Selected = sessions.value || null;
    await PromptOptimization.Refresh();
   });
@@ -135,6 +189,10 @@ const PromptOptimization = {
 
     location.href = `/api/optimization/export?id=${encodeURIComponent(PromptOptimization.Selected)}`;
    }));
+  for (const control of [...sessionActions.children].slice(0, 2)) {
+   control.dataset.savedSessionAction = `true`;
+   control.disabled = true;
+  }
   section.append(sessionActions);
   const importLabel = el(`label`, `Import a session from another machine `);
   const file = el(`input`);
@@ -157,11 +215,131 @@ const PromptOptimization = {
   content.id = `optimization-evidence-content`;
   evidence.append(content);
   document.body.append(evidence);
+  window.addEventListener(`hashchange`, PromptOptimization.OpenFromLocation);
+  PromptOptimization.OpenFromLocation();
   setInterval(() => {
    if (page === `optimization`)
     PromptOptimization.Refresh().catch(error => { $(`optimization-status`).textContent = error.message; });
   }, 2000);
  },
+ //#region Starting case
+ OpenFromLocation: () => {
+  const query = new URLSearchParams(location.hash.slice(1));
+  if (query.get(`page`) !== `optimization`)
+   return;
+
+  PromptOptimization.RequestedTarget = {test_id: query.get(`test_id`), variant_id: query.get(`variant_id`), definition_id: query.get(`definition_id`)};
+  PromptOptimization.RequestedModel = query.get(`origin_model_id`);
+  PromptOptimization.SourceResult = query.get(`source_result_id`) && query.get(`origin_model_id`)
+   ? {model_id: query.get(`origin_model_id`), case_id: query.get(`source_result_id`)} : null;
+  PromptOptimization.NewTarget = true;
+  PromptOptimization.Selected = null;
+  PromptOptimization.Current = null;
+  setPage(`optimization`);
+  Promise.all([PromptOptimization.Targets(), PromptOptimization.Scan(), PromptOptimization.Refresh()]).catch(error => {
+   PromptOptimization.TargetError = error.message;
+   PromptOptimization.TargetDetails();
+  });
+ },
+ Target: () => PromptOptimization.TargetOptions.find(item => item.test_id === $(`optimization-test`).value && item.variant_id === $(`optimization-presentation`).value),
+ Targets: () => {
+  if (PromptOptimization.TargetRequest)
+   return PromptOptimization.TargetRequest;
+
+  const previous = PromptOptimization.RequestedTarget || PromptOptimization.Target();
+  PromptOptimization.TargetLoading = true;
+  for (const id of [`optimization-test`, `optimization-presentation`]) {
+   const select = $(id);
+   select.disabled = true;
+   select.setAttribute(`aria-busy`, `true`);
+   select.replaceChildren(el(`option`, `Loading tests…`));
+   select.style.backgroundColor = `#483924`;
+   select.style.color = `#ffc36f`;
+  }
+
+  PromptOptimization.StartState();
+  PromptOptimization.TargetRequest = api(`/api/optimization/targets`).then(response => {
+   PromptOptimization.TargetOptions = response.targets;
+   const select = $(`optimization-test`);
+   select.replaceChildren(el(`option`, response.targets.length ? `Select a starting test` : `No reviewed tests available`));
+   select.firstChild.value = ``;
+   const groups = new Map();
+   const seen = new Set();
+   for (const item of response.targets) {
+    if (seen.has(item.test_id))
+     continue;
+
+    seen.add(item.test_id);
+    if (!groups.has(item.task_type)) {
+     const group = el(`optgroup`);
+     group.label = item.task_type;
+     groups.set(item.task_type, group);
+     select.append(group);
+    }
+
+    const option = el(`option`, item.name);
+    option.value = item.test_id;
+    groups.get(item.task_type).append(option);
+   }
+
+   const requested = previous || response.default_target;
+   const chosen = response.targets.find(item => item.test_id === requested?.test_id && item.variant_id === requested?.variant_id);
+   const stale = chosen && requested?.definition_id && requested.definition_id !== chosen.definition_id;
+   PromptOptimization.TargetError = requested && (!chosen || stale)
+    ? `This saved result’s test is archived, rejected, disabled or has changed. Select a current starting test explicitly.` : ``;
+   select.value = chosen ? chosen.test_id : ``;
+   select.disabled = !response.targets.length;
+   PromptOptimization.Presentations(chosen?.variant_id);
+  }, error => {
+   PromptOptimization.TargetOptions = [];
+   PromptOptimization.TargetError = `Unable to load tests: ${error.message}. Reopen Prompt Optimization to retry.`;
+   for (const id of [`optimization-test`, `optimization-presentation`]) {
+    $(id).replaceChildren(el(`option`, `Unable to load tests`));
+    $(id).firstChild.value = ``;
+    $(id).disabled = true;
+   }
+  }).finally(() => {
+   PromptOptimization.TargetLoading = false;
+   PromptOptimization.TargetRequest = null;
+   for (const id of [`optimization-test`, `optimization-presentation`]) {
+    $(id).setAttribute(`aria-busy`, `false`);
+    $(id).style.backgroundColor = ``;
+    $(id).style.color = ``;
+   }
+
+   PromptOptimization.TargetDetails();
+  });
+  return PromptOptimization.TargetRequest;
+ },
+ Presentations: preferred => {
+  const select = $(`optimization-presentation`);
+  const previous = preferred || select.value;
+  select.replaceChildren();
+  for (const item of PromptOptimization.TargetOptions.filter(value => value.test_id === $(`optimization-test`).value)) {
+   const option = el(`option`, item.presentation);
+   option.value = item.variant_id;
+   select.append(option);
+  }
+
+  select.disabled = !select.options.length;
+  if ([...select.options].some(option => option.value === previous))
+   select.value = previous;
+ },
+ TargetDetails: () => {
+  const target = PromptOptimization.Target();
+  const unavailable = PromptOptimization.HostReady && !PromptOptimization.HostModels.some(model => model.id === $(`optimization-origin-model`).value);
+  const text = $(`optimization-target-details`);
+  text.textContent = PromptOptimization.TargetError || (target
+   ? `${target.name} · ${target.presentation} · ${target.repetitions} starting-case repetitions. Expands to ${PromptOptimization.TargetOptions.filter(item => item.task_type === target.task_type).length} compatible test/presentation cases (${target.task_type}).${PromptOptimization.SourceResult ? ` The selected saved result is kept as reference evidence, not an additional scored trial.` : ``}`
+   : `Select an enabled, reviewed starting test and presentation.`);
+  if (unavailable)
+   text.textContent += ` The recorded model is unavailable on this worker. Choose another starting-case model explicitly.`;
+
+  text.style.color = PromptOptimization.TargetError || unavailable ? `#ffc36f` : ``;
+  $(`optimization-use-current`).hidden = !PromptOptimization.TargetError || !target;
+  PromptOptimization.StartState();
+ },
+ //#endregion
  ModelSelect: id => {
   const control = el(`span`);
   control.style.position = `relative`;
@@ -228,7 +406,10 @@ const PromptOptimization = {
   const writerReady = $(`optimization-provider`).value === `codex`
    ? !$(`optimization-codex-model`).disabled && !!$(`optimization-codex-model`).value && !!$(`optimization-codex-effort`).value
    : !$(`optimization-generator`).disabled && !!$(`optimization-generator`).value;
-  $(`optimization-start`).disabled = !PromptOptimization.HostReady || !writerReady;
+  $(`optimization-start`).disabled = PromptOptimization.Starting || !!state?.busy || !PromptOptimization.HostReady || !writerReady || PromptOptimization.TargetLoading || !PromptOptimization.Target() || !!PromptOptimization.TargetError || !PromptOptimization.HostModels.some(model => model.id === $(`optimization-origin-model`).value);
+  for (const control of document.querySelectorAll(`[data-saved-session-action]`)) {
+   control.disabled = PromptOptimization.Starting || !!state?.busy || !PromptOptimization.Selected;
+  }
  },
  Efforts: () => {
   const select = $(`optimization-codex-effort`);
@@ -297,7 +478,7 @@ const PromptOptimization = {
   const select = $(`optimization-generator`);
   const previous = select.value;
   const origin = $(`optimization-origin-model`);
-  const previousOrigin = origin.value;
+  const previousOrigin = PromptOptimization.RequestedModel || origin.value;
   PromptOptimization.HostReady = false;
   PromptOptimization.ModelLoading(true);
   PromptOptimization.ModelRequest = api(`/api/optimization/options`).then(options => {
@@ -311,27 +492,42 @@ const PromptOptimization = {
    }
 
    origin.replaceChildren();
+   PromptOptimization.HostModels = options.models;
    for (const model of options.models) {
     const item = el(`option`, model.name || model.id);
     item.value = model.id;
     origin.append(item);
    }
 
-   if (!options.models.length)
+   if (!options.models.length) {
     origin.append(el(`option`, `No models available`));
+    origin.firstChild.value = ``;
+   }
 
    if (options.models.some(model => model.id === previousOrigin))
     origin.value = previousOrigin;
+   else if (previousOrigin) {
+    const missing = el(`option`, `Unavailable on this worker: ${previousOrigin}`);
+    missing.value = previousOrigin;
+    missing.disabled = true;
+    origin.prepend(missing);
+    origin.value = previousOrigin;
+   }
+
+   PromptOptimization.RequestedModel = null;
 
    select.value = nativeModels.some(model => model.id === previous) ? previous : options.default_generator || ``;
    select.disabled = !nativeModels.length;
    origin.disabled = !options.models.length;
    $(`optimization-scope`).textContent = `${options.simulated ? `SIMULATED · ` : ``}Host models: ${options.models.map(model => model.name || model.id).join(`, `) || `none`}. ${options.excluded.map(model => `${model.id}: ${model.reason}`).join(`; `)}`;
    PromptOptimization.HostReady = !options.simulated && !!options.models.length;
-   PromptOptimization.StartState();
+   PromptOptimization.TargetDetails();
   }, error => {
+   PromptOptimization.RequestedModel = previousOrigin;
    select.replaceChildren(el(`option`, `Unable to load models`));
    origin.replaceChildren(el(`option`, `Unable to load models`));
+   select.firstChild.value = ``;
+   origin.firstChild.value = ``;
    $(`optimization-scope`).textContent = `Unable to load models: ${error.message}. Click Refresh host models to try again.`;
    throw error;
   }).finally(() => {
@@ -342,6 +538,9 @@ const PromptOptimization = {
   return PromptOptimization.ModelRequest;
  },
  Run: async (id, mode = `optimize`) => {
+  if (PromptOptimization.Starting)
+   return;
+
   if (state?.busy)
    throw new Error(`Finish or stop the current operation first.`);
 
@@ -352,7 +551,14 @@ const PromptOptimization = {
    if (mode === `evaluate_remaining`)
     throw new Error(`Select a saved session first.`);
 
-   payload = {generator_id: $(`optimization-generator`).value, origin_model_id: $(`optimization-origin-model`).value, settings: PromptOptimization.Settings()};
+   const target = PromptOptimization.Target();
+   if (!target || PromptOptimization.TargetError || PromptOptimization.TargetLoading)
+    throw new Error(`Select a current starting test and presentation first.`);
+
+   payload = {generator_id: $(`optimization-generator`).value, origin_model_id: $(`optimization-origin-model`).value, settings: PromptOptimization.Settings(),
+    target: {test_id: target.test_id, variant_id: target.variant_id, definition_id: target.definition_id}};
+   if (PromptOptimization.SourceResult)
+    payload.source_result = PromptOptimization.SourceResult;
    if ($(`optimization-provider`).value === `codex`) {
     delete payload.generator_id;
     payload.prompt_writer = {provider: `codex`, model: $(`optimization-codex-model`).value, effort: $(`optimization-codex-effort`).value};
@@ -360,23 +566,30 @@ const PromptOptimization = {
   }
 
   const previousSelection = PromptOptimization.Selected;
-  if (!id) {
-   const existing = await api(`/api/optimization/sessions`);
-   PromptOptimization.PendingSessionIds = new Set(existing.sessions.map(session => session.id));
-   PromptOptimization.Selected = null;
-   PromptOptimization.Current = null;
-  }
-
+  const previousNewTarget = PromptOptimization.NewTarget;
+  PromptOptimization.Starting = true;
+  PromptOptimization.StartState();
   try {
+   if (!id) {
+    const existing = await api(`/api/optimization/sessions`);
+    PromptOptimization.PendingSessionIds = new Set(existing.sessions.map(session => session.id));
+    PromptOptimization.Selected = null;
+    PromptOptimization.Current = null;
+    PromptOptimization.NewTarget = false;
+   }
+
    await api(`/api/optimization/run`, payload);
+   await poll();
+   await PromptOptimization.Refresh();
   } catch (error) {
    PromptOptimization.PendingSessionIds = null;
    PromptOptimization.Selected = previousSelection;
+   PromptOptimization.NewTarget = previousNewTarget;
    throw error;
+  } finally {
+   PromptOptimization.Starting = false;
+   PromptOptimization.StartState();
   }
-
-  await poll();
-  await PromptOptimization.Refresh();
  },
  Settings: (provider = $(`optimization-provider`).value) => {
   const settings = {};
@@ -434,7 +647,8 @@ const PromptOptimization = {
   try {
    const response = await api(`/api/optimization/sessions`);
    const sessions = $(`optimization-sessions`);
-   sessions.replaceChildren();
+   sessions.replaceChildren(el(`option`, `Select a saved session`));
+   sessions.firstChild.value = ``;
    for (const session of response.sessions.reverse()) {
     const option = el(`option`, `${session.created} · ${session.status} · ${session.generator_id}`);
     option.value = session.id;
@@ -453,6 +667,14 @@ const PromptOptimization = {
 
     PromptOptimization.Selected = created.id;
     PromptOptimization.PendingSessionIds = null;
+   }
+
+   if (PromptOptimization.NewTarget && !PromptOptimization.Selected) {
+    sessions.value = ``;
+    $(`optimization-status`).textContent = `New starting case selected. Review the settings, then Start new session. Saved sessions keep their original test scope.`;
+    $(`optimization-ranking`).replaceChildren();
+    $(`optimization-history`).replaceChildren();
+    return;
    }
 
    if (!response.sessions.some(session => session.id === PromptOptimization.Selected))
@@ -476,6 +698,9 @@ const PromptOptimization = {
 
    PromptOptimization.Current = session;
    $(`optimization-status`).textContent = `${session.status}: ${session.message} · ${session.attempts.length}/${session.settings.max_attempts} generation attempts · ${session.scope.layers.at(-1).members.length} task-type tests · ${session.cohort.models.map(model => model.id).join(`, `)}. Original baseline: ${PromptOptimization.Percentage(session.baseline)}.`;
+   const originKey = session.scope.layers[0].members[0];
+   const originCase = session.scope.cases[originKey];
+   $(`optimization-status`).textContent += ` Starting case: ${originCase.test.name || originCase.test.id} · ${originCase.presentation}.`;
    if (session.prompt_writer?.provider === `codex`)
     $(`optimization-status`).textContent += ` Writer: Codex ${session.prompt_writer.model} · ${session.prompt_writer.effort}. Thread: ${session.codex_thread?.id || `created when generation begins`}.`;
    const ranking = $(`optimization-ranking`);
@@ -515,6 +740,7 @@ const PromptOptimization = {
    history.append(trials);
   } finally {
    PromptOptimization.Loading = false;
+   PromptOptimization.StartState();
   }
  },
  Percentage: score => score?.percentage == null ? `pending` : `${score.percentage.toFixed(1)}%${score.complete ? `` : ` (incomplete)`}`,

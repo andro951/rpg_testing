@@ -461,4 +461,11 @@ const LogsPage = {
 LogsPage.Initialize();
 //#endregion
 const optimizationScript=el(`script`);optimizationScript.src=`/optimization.js`;document.body.append(optimizationScript);
+const resultsTableLink=el(`a`,`Open results table`);
+resultsTableLink.href=`/results/`;
+resultsTableLink.target=`_blank`;
+resultsTableLink.rel=`noopener`;
+resultsTableLink.style.display=`inline-block`;
+resultsTableLink.style.marginBottom=`12px`;
+$(`page-results`).prepend(resultsTableLink);
 poll();setInterval(poll,1200);

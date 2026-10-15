@@ -143,7 +143,7 @@ def main():
                     with page.expect_popup() as opened:
                         page.evaluate('(id) => StatisticsReport.Inspect(id)', value['case_id'])
                     evidence = opened.value
-                    expect(evidence.get_by_role('status')).to_contain_text('Could not load complete evidence')
+                    expect(evidence.get_by_role('status').filter(has_text='Could not load complete evidence')).to_be_visible()
                     expect(evidence.locator('[data-evidence-block="Full prompt sent to the AI"]')).to_contain_text('Complete prompt unavailable')
                     evidence.close()
                     unknown = context.new_page()
