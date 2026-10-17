@@ -1,0 +1,1 @@
+"""Read-only offline evidence reporting, independent of inference implementation."""

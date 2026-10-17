@@ -1,0 +1,134 @@
+import copy
+import tempfile
+import unittest
+from pathlib import Path
+from workbench.domain import ResultStore, code_fingerprint, eligibility
+from workbench.planning import pending_plan, stable_backend_version, validate_catalog, requirements, public_plan
+
+
+def model():
+    return {'id':'demo-2b','files':['test.gguf'],'required_vram_gb':8,'sha256':{'test.gguf':'a'*64}}
+
+def fixture():
+    return {'schema_version':2,'id':'t1','workflow':'steps','timeout_seconds':60,'source':{'initial_state':{'time':'14:15'},'new_information':'Exactly five minutes pass.'},'expected_state':{'time':'14:20'},'variants':[{'id':'direct','steps':[{'id':'patch','type':'generate','prompt':'Return JSON patch.','output':{'type':'text'},'sampling':{'temperature':0,'seed':42}}],'result':{'step':'patch','representation':'json_patch'}}]}
+
+class PlanningTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.store=ResultStore(Path(self.tmp.name));self.target={'gpu_name':'test','vram_gb':8,'backend':'demo'}
+    def plan(self,m=None,t=None):return pending_plan(m or [model()],t or [fixture()],self.target,self.store)
+    def test_pending_before_artifacts(self):self.assertEqual(self.plan()['pending'],1)
+    def test_completed_model_needs_no_files(self):
+        p=self.plan();j=p['groups'][0]['jobs'][0]
+        self.store.save({'status':'completed','model_id':'demo-2b','case_id':j['case_id'],'score':{'exact_match':False}})
+        self.assertEqual(self.plan()['pending'],0)
+        self.assertEqual(self.plan()['model_loads'],0)
+    def save_fixture_result(self,test,timed_out=False):
+        plan=self.plan(t=[test]);job=plan['groups'][0]['jobs'][0]
+        self.store.save({
+            'status':'completed','model_id':'demo-2b','case_id':job['case_id'],
+            'test_id':test['id'],'variant_id':test['variants'][0]['id'],'repetition':0,
+            'target':copy.deepcopy(self.target),'test_definition':copy.deepcopy(test),
+            'variant_definition':copy.deepcopy(test['variants'][0]),
+            'artifact_hashes':copy.deepcopy(model()['sha256']),'execution_class':'full_gpu',
+            'provenance':{'workflow_code':code_fingerprint()},
+            'timeout_seconds':test['timeout_seconds'],'timed_out':timed_out,
+            'reason':'case_timeout' if timed_out else None,
+        })
+        return job['case_id']
+    def test_timeout_bump_keeps_non_timeout_completion(self):
+        old=fixture();old_cid=self.save_fixture_result(old)
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        new_cid=self.plan(t=[bumped])['groups'][0]['jobs'][0]['case_id'] if self.plan(t=[bumped])['pending'] else None
+        self.assertNotEqual(old_cid,new_cid)
+        self.assertEqual(self.plan(t=[bumped])['pending'],0)
+    def test_timeout_bump_keeps_timed_out_completion(self):
+        old=fixture();old_cid=self.save_fixture_result(old,True)
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        plan=self.plan(t=[bumped])
+        self.assertEqual(plan['pending'],0)
+        from workbench.domain import case_id
+        self.assertEqual(old_cid,case_id(model(),bumped,bumped['variants'][0],0,self.target))
+    def test_timeout_bump_does_not_hide_semantic_change(self):
+        old=fixture();self.save_fixture_result(old)
+        changed=copy.deepcopy(old);changed['timeout_seconds']=120;changed['source']['new_information']='Ten minutes pass.'
+        self.assertEqual(self.plan(t=[changed])['pending'],1)
+    def test_timeout_bump_does_not_reuse_different_artifact(self):
+        old=fixture();self.save_fixture_result(old)
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        changed_model=model();changed_model['sha256']['test.gguf']='b'*64
+        self.assertEqual(self.plan(m=[changed_model],t=[bumped])['pending'],1)
+    def test_timeout_bump_requires_matching_workflow_provenance(self):
+        old=fixture();self.save_fixture_result(old)
+        path=next((self.store.root/'demo-2b').glob('*.json'))
+        record=self.store.read(path);record.pop('sha256',None)
+        record['provenance']['workflow_code']='0'*64
+        path.unlink();self.store.save(record)
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        self.assertEqual(self.plan(t=[bumped])['pending'],1)
+    def test_backend_version_normalization_strips_log_clock(self):
+        raw='0.00.004.323 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
+        self.assertEqual(stable_backend_version(raw),'version: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64')
+    def test_timeout_history_survives_backend_log_timestamp_change(self):
+        old=fixture()
+        self.target['backend_version']='0.00.004.323 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
+        self.save_fixture_result(old)
+        self.target['backend_version']='version: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        self.assertEqual(self.plan(t=[bumped])['pending'],0)
+    def test_timed_out_history_stays_complete_after_backend_log_timestamp_change(self):
+        old=fixture()
+        self.target['backend_version']='0.00.004.323 I srv  llama_server: initializing ...\nversion: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
+        self.save_fixture_result(old,True)
+        self.target['backend_version']='version: 0.4.1-dev (build 11094, commit ff0dbb975)\nbuilt with Clang 20.1.8 for Windows x86_64'
+        bumped=copy.deepcopy(old);bumped['timeout_seconds']=120
+        self.assertEqual(self.plan(t=[bumped])['pending'],0)
+    def test_delete_is_rerun(self):
+        j=self.plan()['groups'][0]['jobs'][0]
+        path=self.store.save({'status':'completed','model_id':'demo-2b','case_id':j['case_id']})
+        path.unlink();self.assertEqual(self.plan()['pending'],1)
+    def test_abort_pending(self):
+        j=self.plan()['groups'][0]['jobs'][0]
+        self.store.save({'status':'aborted','model_id':'demo-2b','case_id':j['case_id']})
+        self.assertEqual(self.plan()['pending'],1)
+    def test_corrupt_not_completed(self):
+        j=self.plan()['groups'][0]['jobs'][0];path=self.store.path('demo-2b',j['case_id']);path.parent.mkdir()
+        path.write_text('{"status":"completed"}')
+        with self.assertRaises(ValueError):self.plan()
+    def test_tier_neighbors_only(self):
+        for capacity in [8,11,12]:self.assertIsNotNone(eligibility(8,capacity))
+        for capacity in [16,24,80]:self.assertIsNone(eligibility(8,capacity))
+        self.assertIsNone(eligibility(12,11));self.assertIsNotNone(eligibility(12,16))
+    def test_larger_gpu_not_universal(self):
+        self.target['vram_gb']=80;self.assertEqual(self.plan()['pending'],0)
+    def test_unassigned(self):
+        m=model();m['required_vram_gb']=None;self.assertEqual(self.plan([m])['unassigned'],['demo-2b'])
+    def test_repetitions(self):
+        t=fixture();t['repetitions']=3;self.assertEqual(self.plan(t=[t])['pending'],3)
+    def test_changed_test_identity(self):
+        before=self.plan()['groups'][0]['jobs'][0]['case_id'];t=fixture();t['source']['new_information']='Ten minutes pass.'
+        self.assertNotEqual(before,self.plan(t=[t])['groups'][0]['jobs'][0]['case_id'])
+    def test_changed_model_identity(self):
+        a=self.plan()['groups'][0]['jobs'][0]['case_id'];m=model();m['sha256']['test.gguf']='b'*64
+        self.assertNotEqual(a,self.plan([m])['groups'][0]['jobs'][0]['case_id'])
+    def test_report_does_not_expose_ground_truth(self):self.assertNotIn('expected_state',str(public_plan(self.plan())))
+    def test_disabled_variant(self):
+        t=fixture();t['variants'][0]['enabled']=False;self.assertEqual(self.plan(t=[t])['pending'],0)
+    def test_nested_capability_requirements(self):
+        t=fixture();v=t['variants'][0];v['cache']='on';v['steps']=[{'type':'loop','steps':[{'type':'generate','output':{'type':'boolean'}}]}]
+        self.assertEqual(requirements(self.plan(t=[t])['groups'][0]),{'cache':True,'schema':True})
+    def test_bad_catalogs(self):
+        for key,value in [('required_vram_gb',11),('files',['../oops.gguf']),('sha256',{'test.gguf':'x'})]:
+            m=model();m[key]=value
+            with self.assertRaises(ValueError):validate_catalog([m])
+        with self.assertRaises(ValueError):validate_catalog([model(),model()])
+
+    def test_pending_timeout_update_only_changes_watchdog(self):
+        old=fixture(); before=self.plan(t=[old])
+        changed=copy.deepcopy(old); changed['timeout_seconds']=120
+        after=self.plan(t=[changed])
+        self.assertEqual(before['groups'][0]['jobs'][0]['case_id'], after['groups'][0]['jobs'][0]['case_id'])
+        self.assertEqual((before['pending'], after['pending']), (1,1))
+        self.assertEqual(after['groups'][0]['jobs'][0]['test']['timeout_seconds'],120)
+
+if __name__=='__main__':unittest.main()

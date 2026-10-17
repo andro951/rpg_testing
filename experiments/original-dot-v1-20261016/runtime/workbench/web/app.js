@@ -1,0 +1,471 @@
+'use strict';
+const $=id=>document.getElementById(id);
+if(new URLSearchParams(location.hash.slice(1)).has('key'))history.replaceState(null,'',location.pathname+location.search);
+let state=null,page='overview',records=[],testData=[],polling=false,setupDirty=false;const promptedRepairs=new Set();
+$('page-setup').addEventListener('input',()=>{setupDirty=true;});
+$('page-setup').addEventListener('change',()=>{setupDirty=true;});
+const titles={overview:'Overview',individual:'Run Individual Test','one-model':'Test One Model',models:'Models',tests:'Test definitions',results:'Results',find:'Find models',runtime:'Native runtime',analysis:'Comparison',logs:'Logs',setup:'Worker setup'};
+function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
+function showAlert(message,title='Notice'){ $('alert-title').textContent=title;$('alert-text').textContent=message;if(!$('alert').open)$('alert').showModal(); }
+function toast(text){$('toast').textContent=text;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),3500);}
+//#region Private network access
+$('enable-remote').parentElement.querySelector('p.muted').textContent=`The workbench opens directly on this computer or through Tailscale. Your Tailscale access rules grant remote control. The service binds only to loopback and your Tailscale address.`;
+//#endregion
+async function offerAutomaticRepair(report){
+ const issue=report?.issues?.find(i=>i.action?.type==='runtime_install'),rid=report?.report_id;
+ if(!issue||!rid||state?.busy)return;
+ const token=rid+':'+issue.id;if(promptedRepairs.has(token))return;promptedRepairs.add(token);
+ if(!confirm('llama.cpp is required to run the benchmarks but is not installed.\n\nInstall an official llama.cpp GPU runtime under this Workbench repository now? GPU drivers will not be installed or changed.'))return;
+ await api('/api/fix',{issue_id:issue.id});
+}
+const api=async(path,body)=>{
+    const options={headers:{}};
+    if(body!==undefined){
+        options.method='POST';options.headers['Content-Type']='application/json';options.body=JSON.stringify(body);
+    }
+
+    const response=await fetch(path,options);
+    if(!response.ok){
+        const data=await response.json();
+        throw Error(data.error||`Request failed (${response.status})`);
+    }
+
+    return response.headers.get('Content-Type')?.includes('application/json')?response.json():response.blob();
+};
+function on(id,fn){$(id).addEventListener('click',async()=>{try{await fn();}catch(e){showAlert(e.message);}});}
+function button(text,fn,cls){const b=el('button',text,cls);b.addEventListener('click',async()=>{try{await fn();}catch(e){showAlert(e.message);}});return b;}
+function setPage(name){page=name;document.querySelectorAll('.page').forEach(n=>n.classList.toggle('hidden',n.id!=='page-'+name));document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('selected',n.dataset.page===name));$('page-title').textContent=titles[name];if(name==='tests')loadTests().catch(e=>showAlert(e.message));if(name==='results')loadResults().catch(e=>showAlert(e.message));if(name==='analysis')loadAnalysis().catch(e=>showAlert(e.message));if(name==='individual'||name==='one-model')loadRunOptions().catch(e=>showAlert(e.message));}
+document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>setPage(b.dataset.page)));
+document.querySelectorAll('.close-dialog').forEach(b=>b.addEventListener('click',()=>b.closest('dialog').close()));
+function render(s){state=s;const p=s.report?.plan;const busy=s.busy;$('connection').textContent='● Connected to worker';$('state-badge').textContent=s.state.toUpperCase().replaceAll('_',' ');$('demo').classList.toggle('hidden',!s.demo);$('message').textContent=s.message;$('gpu').textContent=s.report?.gpu?.name||(s.demo?'SIMULATED GTX 1080':'Your GPU worker');$('pending').textContent=p?.pending??'—';$('complete').textContent=p?.complete??'—';$('session-complete').textContent=s.completed_now;$('loads').textContent=p?.model_loads??'—';
+const prog=s.progress||{};const taskPct=Math.max(0,Math.min(100,Number(prog.task_percent)||0));const overallPct=Math.max(0,Math.min(100,Number(prog.overall_percent)||0));
+$('current').textContent=prog.task|| (s.current?Object.entries(s.current).filter(([k,v])=>typeof v!=='object').map(([k,v])=>k+': '+v).join(' · '):s.message);$('progress-detail').textContent=prog.detail||'';$('task-progress').value=taskPct;$('task-percent').textContent=taskPct.toFixed(1)+'%';$('progress').value=overallPct;$('overall-percent').textContent=overallPct.toFixed(1)+'%';
+const place=s.current?.placement;$('placement').textContent=place?('Placement: '+place.status+' · GPU layers '+place.gpu_layers+'/'+place.total_layers+' · CPU layers '+place.cpu_layers):'';
+const mem=s.telemetry?.latest;$('gpu-memory').textContent=mem?('Whole-device VRAM: '+(mem.used_bytes/2**30).toFixed(2)+' / '+(mem.total_bytes/2**30).toFixed(2)+' GiB'+(s.current?'':' · Last sample')):('GPU memory: '+(s.telemetry?.error||'No sample yet'));
+['preflight','unit-tests','run','rescan','prepare','save-setup','new-test','import-example','refresh-results','export','enable-remote','disable-remote','hub-search','hub-download','runtime-list','runtime-install','select-recommended','refresh-analysis'].forEach(id=>$(id).disabled=busy);
+$('pause').disabled=s.state!=='running';$('resume').disabled=s.state!=='paused';$('stop-model').disabled=!['running','paused'].includes(s.state);$('stop').disabled=!busy;$('restart').classList.toggle('hidden',!s.restart_required);$('run').disabled=busy||s.restart_required;
+$('readiness').textContent=!s.report?'Not checked':s.report.preparation_only?(s.report.prepared?'Prepared (GPU not verified)':'Preparation blocked'):(s.report.ready?'Ready':'Needs attention');
+const issues=$('issues');issues.replaceChildren();if(s.report){if(!s.report.issues.length)issues.append(el('p',s.report.note,'muted'));for(const i of s.report.issues){const row=el('div',undefined,'issue '+i.level);row.append(el('span',i.level.toUpperCase(),'label'),el('p',i.message));if(i.action){const b=button(i.label,async()=>{if(i.action.type==='setup'||i.action.type==='choose_folder'){setPage('setup');return;}if(i.action.type==='models'){setPage('models');return;}if(i.action.type==='runtime'){setPage('runtime');return;}if(i.action.type==='runtime_install'){if(!confirm('Install an official llama.cpp GPU runtime under this Workbench repository? GPU drivers will not be installed or changed.'))return;await api('/api/fix',{issue_id:i.id});return;}if(!confirm(i.label+'?\n\nOnly this action will be performed. Downloads may use substantial disk space.'))return;await api('/api/fix',{issue_id:i.id});await poll();});b.disabled=busy;row.append(b);}issues.append(row);}}
+queueMicrotask(()=>offerAutomaticRepair(s.report).catch(e=>showAlert(e.message,'Automatic repair failed')));const plan=$('plan');plan.replaceChildren();for(const g of p?.groups||[]){const n=el('div',undefined,'plan-item');n.append(el('b',g.model_id),el('p',g.pending+' pending · '+g.complete+' complete · '+g.reason,'muted'));if(g.context)n.append(el('p','Automatic context allocation: '+g.context.allocated_tokens.toLocaleString()+' tokens','muted'));plan.append(n);}if(p&&!p.groups.length)plan.append(el('p','No models match this hardware tier.','muted'));
+$('folder-note').textContent=s.report?.folder?.path?('Active folder: '+s.report.folder.path+' · '+s.report.folder.source):'No active model folder detected yet.';
+renderModels();LogsPage.Render(s.logs);$('remote-url').textContent=s.remote?.url||'';
+if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=s.settings.publish_results; }
+renderHub();renderRuntimes();renderRunControls();PerchanceInstall.Render(s.perchance_setup_prompt);WorkerFailure.Render(s.failure);folderPrompts();
+const scope=s.report?.selection;let scopeTests='all enabled tests';if(scope?.test_id)scopeTests=scope.test_id;else if(scope?.test_ids)scopeTests=scope.test_ids.length+' selected test(s)';const scopeModel=scope?.all_models?'all eligible models':scope?.model_id;$('run-scope').textContent=scope?('Scope: '+scopeModel+' · '+scopeTests+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
+}
+let modelRenderSignature='',modelVramDrafts=new Map();
+async function saveModelVram(model,tier){
+ await api('/api/model/assign',{id:model.id,required_vram_gb:tier});
+ modelVramDrafts.delete(model.id);
+ render(await api('/api/state'));
+ toast(model.name+' assigned to '+tier+' GB. Run preflight when ready.');
+}
+function renderModels(){
+ const list=$('model-list');
+ const signature=JSON.stringify([state.models,state.busy,state.demo,[...modelVramDrafts.entries()]]);
+ if(signature===modelRenderSignature)return;
+ modelRenderSignature=signature;list.replaceChildren();
+ for(const m of state.models){
+  const assigned=m.required_vram_gb??null;
+  const card=el('article',undefined,'model-card');
+  const heading=el('div',undefined,'section-header');heading.append(el('h3',m.name),el('span',m.quantization,'badge'));
+  card.append(heading,el('p',(m.size_bytes/1e9).toFixed(2)+' GB download · '+(m.complete?'All shards found':'Missing shards')+' · '+(assigned===null?'VRAM: Unassigned':'VRAM: '+assigned+' GB assigned')));
+  const controls=el('div',undefined,'actions');
+  const select=el('select');select.setAttribute('aria-label','VRAM for '+m.id);select.append(new Option('Choose VRAM',''));
+  for(const t of [8,12,16,24,32,40,48,80])select.append(new Option(t+' GB',String(t)));
+  const draft=modelVramDrafts.has(m.id)?modelVramDrafts.get(m.id):assigned;
+  select.value=draft===null||draft===undefined?'':String(draft);
+  controls.append(select);
+  const save=button('Save VRAM',async()=>{if(!select.value)throw Error('Select a VRAM tier.');await saveModelVram(m,Number(select.value));});
+  const updateSave=()=>{save.disabled=state.busy||state.demo||!select.value||Number(select.value)===assigned;};
+  select.addEventListener('change',()=>{modelVramDrafts.set(m.id,select.value?Number(select.value):null);updateSave();});
+  updateSave();controls.append(save);
+  if(m.recommended_vram_gb){
+   const applied=assigned===m.recommended_vram_gb;
+   const accept=button(applied?'Recommended '+m.recommended_vram_gb+' GB applied':'Accept recommended '+m.recommended_vram_gb+' GB',async()=>{
+    modelVramDrafts.delete(m.id);await saveModelVram(m,m.recommended_vram_gb);
+   });
+   accept.disabled=state.busy||state.demo||applied;controls.append(accept);
+  }
+  card.append(controls);
+  if(m.errors.length)card.append(el('p',m.errors.join('; '),'error'));
+  const d=el('details');d.append(el('summary','Files and discovery details'),el('pre',JSON.stringify({paths:m.paths,missing_shards:m.missing_shards},null,2)));card.append(d);list.append(card);
+ }
+ if(!state.models.length)list.append(el('article',state.state==='scanning'?'Scanning the selected models folder…':'No discovered models yet. Choose or rescan the active folder.'));
+}
+async function poll(){if(polling)return;polling=true;try{render(await api('/api/state'));}catch(e){$('connection').textContent='● Worker disconnected';}finally{polling=false;}}
+async function loadTests(){if(state?.busy){$('test-list').replaceChildren(el('article','Test-file editing is available when the current operation has finished.'));return;}const data=await api('/api/tests');testData=data.tests;$('example-select').replaceChildren(...data.examples.map(x=>new Option(x,x)));const list=$('test-list');list.replaceChildren();for(const t of data.tests){const card=el('article');card.append(el('h3',t.name||t.id),el('p',t.id+' · '+t.variants.length+' workflow variants · '+(t.repetitions||1)+' repetition(s) · '+t.timeout_seconds+' s limit · '+(t.enabled===false?'Disabled':'Enabled')));card.append(button('View / edit JSON',()=>openEditor(t)),el('p',t.variants.map(v=>v.id+' ('+v.steps.length+' top-level steps)').join(' · '),'muted'));list.append(card);}}
+function openEditor(t){$('test-json').value=JSON.stringify(t,null,2);$('editor').showModal();}
+async function loadResults(){if(state?.busy){$('result-list').replaceChildren(el('article','Stop or finish the active run before loading results from disk. Live progress remains available in Overview.'));return;}records=await api('/api/results');renderResults();}
+function renderResults(){const search=$('result-filter').value.toLowerCase();const list=$('result-list');list.replaceChildren();for(const r of records.filter(r=>[r.model_id,r.test_id,r.variant_id].join(' ').toLowerCase().includes(search))){const card=el('article',undefined,'result-row');const title=el('div');title.append(el('b',r.model_id),el('p',r.test_id+' / '+r.variant_id,'muted'));const correct=r.score?.exact_match;let label=r.status!=='completed'?r.status:(correct===true?'PASS':correct===false?'FAIL':'NO EXACT ORACLE');if(r.timed_out)label+=' · TIMEOUT';if(r.measurement_valid===false&&r.status==='completed')label+=' · INVALID MEASUREMENT';label+=' · '+(r.execution_class||'legacy_unverified');card.append(title,el('span',label,correct===true?'success':'error'),el('span',typeof r.pipeline_seconds==='number'?r.pipeline_seconds.toFixed(3)+' s':'—'));const act=el('div',undefined,'actions');act.append(button('Inspect',()=>{$('result-json').textContent=JSON.stringify(r,null,2);$('inspect').showModal();}),button('Delete / rerun',async()=>{if(!confirm('Delete this result and make the case pending again? This action is recorded in the audit log.'))return;await api('/api/result/delete',{model_id:r.model_id,case_id:r.case_id});await loadResults();},'danger'));card.append(act);list.append(card);}if(!list.children.length)list.append(el('article','No matching result files.'));}
+async function download(path,name){const blob=await api(path);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+on('preflight',async()=>{await api('/api/preflight',{});await poll();});on('unit-tests',async()=>{await api('/api/unit-tests',{});await poll();});on('rescan',async()=>{await scanModelsInBackground();});on('run',async()=>{await api('/api/run',{});await poll();});
+for(const [id,action] of [['pause','pause'],['resume','resume'],['stop-model','stop_after_model'],['stop','stop']])on(id,()=>api('/api/control',{action}));
+on('prepare',()=>api('/api/preflight',{preparation:{gpu_name:$('target-name').value,vram_gb:Number($('target-tier').value)}}));
+on('export',()=>download('/api/export','rpg-testing-evidence.zip'));on('unity-script',()=>download('/api/unity-script?tier='+$('target-tier').value,'rpg-unity-job.sh'));
+on('refresh-tests',loadTests);on('refresh-results',loadResults);$('result-filter').addEventListener('input',renderResults);
+on('import-example',async()=>{await api('/api/test/import-example',{id:$('example-select').value});render(await api('/api/state'));await loadTests();toast('Example added to test files.');});
+on('new-test',()=>openEditor(testData[0]?{...testData[0],id:'new_test',name:'New test'}:{schema_version:2,id:'new_test',workflow:'steps',source:{},variants:[]}));
+on('save-test',async()=>{let test;try{test=JSON.parse($('test-json').value);}catch{throw Error('This is not valid JSON.');}await api('/api/test/save',{test});$('editor').close();await loadTests();toast('Test validated and saved.');});
+async function scanModelsInBackground(){await api('/api/models/scan',{});setPage('models');await poll();}
+async function chooseModelsFolder(){
+ folderChoosing=true;
+ try{
+  $('folder-onboarding').close();$('empty-folder').close();
+  const picked=await api('/api/picker/models',{initial:$('model-root').value.trim()});
+  if(picked.cancelled)return;
+  $('model-root').value=picked.path;setupDirty=false;
+  await api('/api/settings',{model_root:picked.path});
+  toast('Models folder saved. Scanning it now…');
+  await scanModelsInBackground();
+ }finally{folderChoosing=false;}
+}
+async function chooseLlamaServer(){
+ const picked=await api('/api/picker/llama',{initial:$('llama-path').value.trim()});
+ if(picked.cancelled)return;
+ $('llama-path').value=picked.path;setupDirty=false;
+ await api('/api/settings',{llama_path:picked.path});await poll();toast('llama-server selected.');
+}
+on('save-setup',async()=>{const previousRoot=state.settings.model_root;const values={model_root:$('model-root').value.trim(),llama_path:$('llama-path').value.trim(),sync_source:$('sync-source').checked,publish_results:$('publish-results').checked};if($('api-token').value)values.hf_token=$('api-token').value;if(values.publish_results&&!state.settings.publish_results&&!confirm('Publish only synthetic safe-for-work results to the public GitHub repository? Do not enable for private data.'))return;await api('/api/settings',values);setupDirty=false;$('api-token').value='';toast('Worker setup saved.');if(values.model_root&&values.model_root!==previousRoot){toast('Models folder saved. Scanning it now…');await scanModelsInBackground();}else{await poll();}});
+on('browse-models',chooseModelsFolder);on('browse-llama',chooseLlamaServer);
+on('enable-remote',async()=>{const r=await api('/api/remote/enable',{});$('remote-url').textContent=r.url;toast('Private controller enabled. Open the displayed address on your laptop through Tailscale.');});
+on('disable-remote',async()=>{if(confirm('Disable remote access? A laptop connection will disconnect, but the local workbench stays available.'))await api('/api/remote/disable',{});});
+on('close-worker',async()=>{if(confirm('Close the worker service? Remote controls will stop working until it is started again.'))await api('/api/shutdown',{});});
+on('restart',async()=>{await api('/api/restart',{});toast('Restarting with the latest code…');setTimeout(()=>location.reload(),2500);});
+
+
+// Discovery and setup are UI-approved operations, never part of the unattended run.
+let hubSignature='',runtimeSignature='',folderChoosing=false;
+for(const tier of [8,12,16,24,32,40,48,80])$('hub-tier').append(new Option(tier+' GiB',String(tier)));
+function folderPrompts(){
+ if(!state||state.demo||state.busy||state.failure||folderChoosing||state.settings.perchance_only)return;
+ const root=state.settings.model_root;
+ if(!root){if(!$('folder-onboarding').open)$('folder-onboarding').showModal();return;}
+ if($('folder-onboarding').open)$('folder-onboarding').close();
+ if(state.folder_scanned&&!state.models.length&&state.settings.confirmed_empty_folder!==root){
+  $('empty-folder-path').textContent=root;if(!$('empty-folder').open)$('empty-folder').showModal();
+ }
+}
+async function pickFirstFolder(){setPage('setup');await chooseModelsFolder();}
+on('onboarding-choose',pickFirstFolder);on('choose-different',pickFirstFolder);
+on('accept-empty',async()=>{await api('/api/settings',{confirmed_empty_folder:state.settings.model_root});$('empty-folder').close();setPage('find');await poll();});
+$('folder-onboarding').addEventListener('cancel',e=>{if(!state?.settings.model_root)e.preventDefault();});
+on('hub-search',()=>{const query=$('hub-query').value.trim();return api(query.includes('/')?'/api/hub/inspect':'/api/hub/search',query.includes('/')?{repo_id:query,target_gb:Number($('hub-tier').value)}:{query});});
+function renderHub(){
+ const signature=JSON.stringify([state.hub_results,state.hub_detail]);if(signature===hubSignature)return;hubSignature=signature;
+ const results=$('hub-results');results.replaceChildren();
+ for(const row of state.hub_results||[]){const card=el('article');card.append(el('h3',row.id),el('p',(row.downloads??'—')+' downloads · '+(row.likes??'—')+' likes · license: '+(row.license||'See model card'),'muted'),button('View quantizations',()=>api('/api/hub/inspect',{repo_id:row.id,target_gb:Number($('hub-tier').value)})));results.append(card);}
+ const detail=state.hub_detail;$('hub-variants-card').classList.toggle('hidden',!detail);if(!detail)return;
+ $('hub-title').textContent=detail.repo_id;$('hub-license').textContent='Revision '+detail.revision.slice(0,12)+' · '+(detail.license||'Check publisher license')+' · '+detail.note;
+ const list=$('hub-variants');list.replaceChildren();
+ for(const v of detail.variants){const row=el('div',undefined,'quant-row'),label=el('label',undefined,'check'),check=el('input');check.type='checkbox';check.value=v.id;check.disabled=!v.complete;check.dataset.recommended=String(v.recommended);check.setAttribute('aria-label','Select '+v.quantization);label.append(check,el('b',v.quantization));row.append(label,el('span',v.size_bytes?(v.size_bytes/1e9).toFixed(2)+' GB · '+(v.size_bytes/2**30).toFixed(2)+' GiB':'Size unavailable'),el('span',v.shards+' file(s)'),el('span',(v.recommended?'Recommended · ':'')+v.fit_note,v.recommended?'success':'muted'));list.append(row);}
+}
+on('select-recommended',()=>{document.querySelectorAll('#hub-variants input').forEach(c=>c.checked=c.dataset.recommended==='true'&&!c.disabled);});
+on('hub-download',async()=>{const ids=[...document.querySelectorAll('#hub-variants input:checked')].map(x=>x.value);if(!ids.length)throw Error('Select at least one quantization.');if(!state.settings.model_root)throw Error('Choose your models folder in Worker setup first.');if(!confirm('Download '+ids.length+' variant(s) into '+state.settings.model_root+'? No other model location will be used.'))return;await api('/api/hub/download',{ids,required_vram_gb:Number($('hub-tier').value)});});
+on('runtime-list',()=>api('/api/runtime/list',{}));
+function renderRuntimes(){
+ $('runtime-installed').textContent=state.settings.llama_path||'No native runtime selected.';
+ const signature=JSON.stringify(state.runtime_options);if(signature===runtimeSignature)return;runtimeSignature=signature;
+ $('runtime-select').replaceChildren(...(state.runtime_options||[]).map(r=>new Option(r.tag+' · '+r.name+' · '+(r.size_bytes/1e6).toFixed(0)+' MB',r.id)));
+ runtimeNote();
+}
+function runtimeNote(){const r=(state?.runtime_options||[]).find(r=>r.id===$('runtime-select').value);$('runtime-note').textContent=r?.note||'Refresh to browse compatible-platform releases. GPU compatibility is checked by preflight.';}
+$('runtime-select').addEventListener('change',runtimeNote);
+on('runtime-install',async()=>{const r=(state.runtime_options||[]).find(r=>r.id===$('runtime-select').value);if(!r)throw Error('Find and select a runtime release first.');if(confirm('Install '+r.name+' under this repository? This does not install or change GPU drivers.'))await api('/api/runtime/install',{id:r.id});});
+on('runtime-locate',async()=>{setPage('setup');await chooseLlamaServer();});
+async function loadAnalysis(){if(state?.busy){$('analysis-list').replaceChildren(el('article','Finish or stop the active operation before reading results.'));return;}const data=await api('/api/analysis');$('analysis-note').textContent=data.note;const list=$('analysis-list');list.replaceChildren();for(const g of data.groups){const card=el('article');card.append(el('h3',g.model_id+' · '+g.variant_id),el('span',(g.simulated?'SIMULATED · ':'')+g.execution_class,'badge'),el('p',g.test_id+' · '+g.scored+' scored · '+(g.exact_match_rate===null?'No exact score':(g.exact_match_rate*100).toFixed(1)+'% exact state matches')+' · median '+(g.median_pipeline_seconds===null?'—':g.median_pipeline_seconds.toFixed(3)+' s')),el('p',g.timeouts+' timeouts · '+g.skipped+' skipped · '+g.infrastructure_errors+' errors · '+g.invalid_measurements+' invalid measurements','muted'));list.append(card);}if(!list.children.length)list.append(el('article','No recorded comparison groups yet.'));}
+on('refresh-analysis',loadAnalysis);
+// Targeted runs filter the queue, never the saved experiment definitions.
+let runOptions=null,runOptionsLoading=false,runOptionsValid=false,targetSubmitting=false,oneModelSelectedTests=null;
+function fillRunSelect(id,items,placeholder,label){
+ const select=$(id),previous=select.value;
+ select.replaceChildren(new Option(placeholder,''),...items.map(item=>new Option(label(item),item.id)));
+ select.value=items.some(item=>item.id===previous)?previous:'';
+}
+function fillIndividualModelSelect(items,label){
+ const select=$('individual-model'),previous=select.value;
+ select.replaceChildren(new Option('Choose a model…',''),new Option('All','__all__'),...items.map(item=>new Option(label(item),item.id)));
+ select.value=previous==='__all__'||items.some(item=>item.id===previous)?previous:'';
+}
+function selectedRunTest(){return runOptions?.tests.find(t=>t.id===$('individual-test').value);}
+function selectedOneModelTests(){
+ const tests=runOptions?.tests||[];
+ return tests.filter(test=>oneModelSelectedTests?.has(test.id));
+}
+function renderRunVariants(){
+ const test=selectedRunTest();
+ fillRunSelect('individual-variant',test?.variants||[],'All enabled variants',v=>v.name);
+}
+function renderOneModelTests(){
+ const tests=runOptions?.tests||[],list=$('one-model-tests');list.replaceChildren();
+ for(const test of tests){
+  const row=el('div',undefined,'row one-model-test');
+  const label=el('label',undefined,'check'),box=document.createElement('input');box.type='checkbox';box.dataset.testId=test.id;
+  box.checked=!!oneModelSelectedTests?.has(test.id);
+  box.addEventListener('change',()=>{if(box.checked)oneModelSelectedTests.add(test.id);else oneModelSelectedTests.delete(test.id);renderRunControls();});
+  label.append(box,el('span',test.name));
+  row.append(label,el('p',test.variants.length+' variants × '+test.repetitions+' repetitions = '+test.variants.length*test.repetitions+' cases · '+test.timeout_seconds+' s limit','muted'));
+  list.append(row);
+ }
+ if(!tests.length)list.append(el('p','No enabled tests. Add or enable a test in Test definitions.','muted'));
+}
+async function loadRunOptions(){
+ if(runOptionsLoading)return;
+ if(state?.busy){renderRunControls();return;}
+ runOptionsLoading=true;runOptionsValid=false;renderRunControls();
+ try{
+  const previous=oneModelSelectedTests;
+  runOptions=await api('/api/run-options');
+  if(previous===null)oneModelSelectedTests=new Set(runOptions.tests.map(test=>test.id));
+  else oneModelSelectedTests=new Set([...previous].filter(id=>runOptions.tests.some(test=>test.id===id)));
+  const modelLabel=m=>m.name+' · '+m.quantization+' · '+(m.required_vram_gb===null?'VRAM unassigned':m.required_vram_gb+' GB');
+  fillIndividualModelSelect(runOptions.models,modelLabel);
+  fillRunSelect('one-model-model',runOptions.models,'Choose a model…',modelLabel);
+  fillRunSelect('individual-test',runOptions.tests,'Choose a test…',t=>t.name);
+  renderRunVariants();renderOneModelTests();runOptionsValid=true;
+ }finally{runOptionsLoading=false;renderRunControls();}
+}
+function renderRunControls(){
+ const busy=!!state?.busy||!!state?.restart_required||runOptionsLoading||targetSubmitting;
+ const models=runOptions?.models||[],tests=runOptions?.tests||[],test=selectedRunTest(),selectedTests=selectedOneModelTests();
+ const individualAll=$('individual-model').value==='__all__';
+ const individualModel=models.find(m=>m.id===$('individual-model').value),oneModel=models.find(m=>m.id===$('one-model-model').value);
+ const variantValid=!$('individual-variant').value||test?.variants.some(v=>v.id===$('individual-variant').value);
+ const individualReady=runOptionsValid&&(individualAll||individualModel)&&test&&variantValid;
+ const modelReady=runOptionsValid&&oneModel&&selectedTests.length>0;
+ for(const action of ['check','run']){$('individual-'+action).disabled=busy||!individualReady;$('one-model-'+action).disabled=busy||!modelReady;}
+ for(const id of ['individual-model','individual-test','individual-variant','one-model-model'])$(id).disabled=busy||!runOptionsValid;
+ for(const id of ['individual-refresh','one-model-refresh'])$(id).disabled=busy;
+ document.querySelectorAll('#one-model-tests input[type=checkbox]').forEach(box=>box.disabled=busy||!runOptionsValid);
+ $('one-model-toggle-tests').disabled=busy||!runOptionsValid||!tests.length;
+ $('one-model-toggle-tests').textContent=selectedTests.length?'Deselect all':'Select all';
+ let notice=runOptionsLoading?'Loading models and tests…':!runOptionsValid?'Refresh choices when the current operation is finished.':!models.length?'No enabled catalogued models. Rescan and assign VRAM in Installed models.':!tests.length?'No enabled test definitions. Add or enable a test in Test definitions.':null;
+ const count=test?test.repetitions*($('individual-variant').value?1:test.variants.length):0;
+ const individualTotal=count*(individualAll?models.filter(m=>m.id!=='perchance-text-generator').length:1),individualTarget=individualAll?'all local models':individualModel?.name;
+ $('individual-summary').textContent=notice|| (individualReady?individualTotal+' configured case(s) on '+individualTarget+' · '+test.timeout_seconds+' s limit each. Only pending cases will run.':'Choose a model and test to see the scope.');
+ const total=selectedTests.reduce((n,t)=>n+t.repetitions*t.variants.length,0);
+ $('one-model-summary').textContent=notice|| (modelReady?selectedTests.length+' selected test definition(s), '+total+' configured case(s) on '+oneModel.name+'. Only pending cases will run.':oneModel&&!selectedTests.length?'Select at least one test.':'Choose a model to see the scope.');
+ if(individualModel?.id==='perchance-text-generator')$('individual-summary').textContent+=' Remote service · fixed 8 GB worker. Repetitions run independently; unsupported setting variants collapse. Check preflight for counts.';
+ if(oneModel?.id==='perchance-text-generator')$('one-model-summary').textContent+=' Repetitions run independently; unsupported setting variants collapse. Check preflight for counts.';
+}
+async function startTargetedRun(mode,operation){
+ const individual=mode==='individual',chosenModel=$(individual?'individual-model':'one-model-model').value;
+ if(!chosenModel)throw Error('Choose a model.');
+ const selection=individual&&chosenModel==='__all__'?{all_models:true}:{model_id:chosenModel};
+ if(individual){selection.test_id=$('individual-test').value;if(!selection.test_id)throw Error('Choose a test.');if($('individual-variant').value)selection.variant_id=$('individual-variant').value;}
+ else{selection.test_ids=selectedOneModelTests().map(test=>test.id);if(!selection.test_ids.length)throw Error('Select at least one test.');}
+ targetSubmitting=true;renderRunControls();
+ try{await api('/api/'+operation,{selection});setPage('overview');await poll();}
+ finally{targetSubmitting=false;renderRunControls();}
+}
+for(const mode of ['individual','one-model']){
+ on(mode+'-refresh',loadRunOptions);
+ on(mode+'-check',()=>startTargetedRun(mode,'preflight'));
+ on(mode+'-run',()=>startTargetedRun(mode,'run'));
+}
+on('one-model-toggle-tests',()=>{
+ const tests=runOptions?.tests||[];
+ oneModelSelectedTests=oneModelSelectedTests?.size?new Set():new Set(tests.map(test=>test.id));
+ renderOneModelTests();renderRunControls();
+});
+for(const id of ['individual-model','one-model-model','individual-variant'])$(id).addEventListener('change',renderRunControls);
+$('individual-test').addEventListener('change',()=>{$('individual-variant').value='';renderRunVariants();renderRunControls();});
+
+//#region Perchance service setup
+const WorkerFailure = {
+ Initialize: () => {
+  const banner=el(`article`);banner.id=`worker-failure`;banner.hidden=true;banner.setAttribute(`role`,`alert`);
+  const heading=el(`h3`,`Operation stopped`),message=el(`p`);heading.id=`worker-failure-heading`;message.id=`worker-failure-message`;
+  banner.append(heading,message);$(`page-overview`).prepend(banner);
+  const dialog=el(`dialog`);dialog.id=`worker-failure-dialog`;dialog.setAttribute(`aria-labelledby`,`worker-failure-title`);
+  const title=el(`h2`,`Operation stopped`);title.id=`worker-failure-title`;
+  const reason=el(`p`);reason.id=`worker-failure-reason`;
+  const host=el(`p`,`Perchance's browser opens on the PC hosting the worker. Complete security verification on that PC's screen, or through your own remote desktop connection. The Tailscale control page does not display the PC's browser window.`);host.id=`worker-failure-host`;
+  const retry=el(`p`,`Saved results and failed-attempt evidence are retained. Connection verification does not generate an answer or automatically retry your tests.`);retry.id=`worker-failure-retry`;
+  const actions=el(`div`);actions.className=`actions`;
+  const verify=button(`Verify Perchance on host`,async()=>{
+   await api(`/api/perchance/connect`,{});dialog.close();setPage(`overview`);await poll();
+  },`primary`);verify.id=`worker-failure-verify`;
+  const logs=button(`View logs`,()=>{dialog.close();setPage(`logs`);});
+  const close=button(`Close`,()=>dialog.close());
+  actions.append(verify,logs,close);dialog.append(title,reason,host,retry,actions);document.body.append(dialog);
+ },
+ Render: failure => {
+  const banner=$(`worker-failure`),dialog=$(`worker-failure-dialog`);
+  banner.hidden=!failure;
+  if(!failure){
+   if(dialog.open)
+    dialog.close();
+
+   return;
+  }
+
+  $(`worker-failure-message`).textContent=failure.message;
+  if(WorkerFailure.Shown===failure.id)
+   return;
+
+  const perchance=/perchance/i.test(failure.message)||failure.operation===`perchance_connect`;
+  const title=perchance?`Perchance needs attention`:failure.outcome===`finished_with_errors`?`Run finished with errors`:`Operation stopped`;
+  $(`worker-failure-title`).textContent=title;$(`worker-failure-heading`).textContent=title;
+  $(`worker-failure-reason`).textContent=failure.message;
+  $(`worker-failure-host`).hidden=!perchance;$(`worker-failure-retry`).hidden=!perchance;$(`worker-failure-verify`).hidden=!perchance;
+  if(document.querySelector(`dialog[open]`))
+   return;
+
+  WorkerFailure.Shown=failure.id;dialog.showModal();
+ }
+};
+WorkerFailure.Initialize();
+const PerchanceInstall = {
+ Initialize: () => {
+  const dialog=el(`dialog`);dialog.id=`perchance-install`;
+  const heading=el(`h2`,`Install Perchance browser dependency?`);
+  const note=el(`p`,`Perchance is scheduled for this run, but its browser setup needs repair. Install Playwright and, if needed, Chromium on the worker computer, then verify browser launch?`);
+  const reason=el(`p`);reason.id=`perchance-install-reason`;reason.className=`muted`;
+  const scope=el(`p`,`No skips Perchance for this run. We will ask again on the next run if setup is still needed.`);
+  const actions=el(`div`);actions.className=`actions`;
+  const accept=button(`Yes, install`,()=>PerchanceInstall.Answer(true),`primary`);accept.id=`perchance-install-yes`;
+  const decline=button(`No, skip this run`,()=>PerchanceInstall.Answer(false));decline.id=`perchance-install-no`;
+  actions.append(accept,decline);dialog.append(heading,note,reason,scope,actions);document.body.append(dialog);
+  dialog.addEventListener(`cancel`,event=>{
+   event.preventDefault();
+   PerchanceInstall.Answer(false).catch(error=>showAlert(error.message));
+  });
+ },
+ Render: prompt => {
+  const dialog=$(`perchance-install`);
+  if(!prompt){
+   if(dialog.open)
+    dialog.close();
+
+   return;
+  }
+
+  if(dialog.dataset.promptId!==prompt.id){
+   dialog.dataset.promptId=prompt.id;
+   $(`perchance-install-reason`).textContent=prompt.reason;
+   $(`perchance-install-yes`).disabled=false;$(`perchance-install-no`).disabled=false;
+  }
+
+  if(PerchanceInstall.Submitted===prompt.id)
+   return;
+
+  if(!dialog.open)
+   dialog.showModal();
+ },
+ Answer: async approved => {
+  const dialog=$(`perchance-install`),id=dialog.dataset.promptId;
+  $(`perchance-install-yes`).disabled=true;$(`perchance-install-no`).disabled=true;
+  await api(`/api/perchance/setup-choice`,{id,approved}).catch(error=>{
+   $(`perchance-install-yes`).disabled=false;$(`perchance-install-no`).disabled=false;
+   throw error;
+  });
+  PerchanceInstall.Submitted=id;
+  dialog.close();await poll();
+ }
+};
+PerchanceInstall.Initialize();
+const PerchanceSetup = {
+ Initialize: () => {
+  const section=document.createElement('section');
+  $('page-setup').append(section);
+  const heading=document.createElement('h2');heading.textContent='Perchance Text Generator';section.append(heading);
+  const note=document.createElement('p');note.textContent='Select Perchance in Individual test or One model. It uses a remote service and is fixed to an 8 GB worker. Run all includes Perchance last on 8 GB workers. Larger workers and targeted All models runs remain local-only. Local tests use 120 seconds; Perchance uses 300 seconds. Repetitions run independently. Unsupported setting variants collapse within each repetition; seed effect and reproducibility are unverified.';section.append(note);
+  const fields=[['perchance_url','Worker URL','url'],['perchance_browser','Browser executable (blank discovers Edge/Chrome)','text'],['perchance_cdp_port','Local browser connection port','number'],['perchance_epoch','Study epoch (change explicitly for a new provider study)','text'],['perchance_only','Skip local model-folder onboarding','checkbox']];
+  PerchanceSetup.Inputs={};
+  for(const [setting,text,type] of fields){
+   const label=document.createElement('label');label.textContent=text+' ';
+   const input=document.createElement('input');input.type=type;input.setAttribute('aria-label',text);label.append(input);section.append(label,document.createElement('br'));
+   PerchanceSetup.Inputs[setting]=input;
+  }
+
+  const load=document.createElement('button');load.textContent='Load Perchance setup';load.addEventListener('click',()=>{
+   for(const [setting,input] of Object.entries(PerchanceSetup.Inputs)){
+    if(input.type==='checkbox')input.checked=!!state.settings[setting];
+    else input.value=state.settings[setting]||'';
+   }
+  });section.append(load);
+  for(const [text,path] of [['Install optional Perchance dependency','/api/perchance/setup'],['Verify Perchance connection','/api/perchance/connect']]){
+   const action=document.createElement('button');action.textContent=text;
+   action.addEventListener('click',()=>api(path,{}).then(poll).catch(error=>showAlert(error.message)));
+   section.append(action);
+  }
+  const save=document.createElement('button');save.textContent='Save Perchance setup';save.addEventListener('click',()=>{
+   const values={};
+   for(const [setting,input] of Object.entries(PerchanceSetup.Inputs)){
+    values[setting]=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value.trim();
+   }
+
+   api('/api/settings',values).then(()=>{if(values.perchance_only)$('folder-onboarding').close();return poll();}).then(()=>toast('Perchance setup saved')).catch(error=>showAlert(error.message));
+  });section.append(save);
+  const defaults={perchance_url:'https://perchance.org/056uh2nc6k',perchance_epoch:'1',perchance_cdp_port:9223};
+  for(const [setting,value] of Object.entries(defaults)){
+   PerchanceSetup.Inputs[setting].value=value;
+  }
+ }
+};
+PerchanceSetup.Initialize();
+//#endregion
+//#region Logs
+const LogsPage = {
+ Initialize: () => {
+  const actions = el(`div`, undefined, `actions`);
+  const download = button(`Download logs`, LogsPage.Download);
+  download.id = `download-logs`;
+  const copy = button(`Copy logs`, LogsPage.Copy);
+  copy.id = `copy-logs`;
+  download.disabled = copy.disabled = true;
+  actions.append(download, copy);
+  $(`log-view`).before(actions);
+ },
+ Render: logs => {
+  $(`log-view`).textContent = logs.map(log => `${log.time} [${log.category}] ${log.message}`).join(`\n`);
+  $(`download-logs`).disabled = $(`copy-logs`).disabled = !logs.length;
+ },
+ Download: () => {
+  const url = URL.createObjectURL(new Blob([$(`log-view`).textContent], {type: `text/plain;charset=utf-8`}));
+  const link = el(`a`);
+  link.href = url;
+  link.download = `rpg-testing-logs.txt`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+ },
+ Copy: () => {
+  const text = $(`log-view`).textContent;
+  if (!navigator.clipboard?.writeText)
+   return LogsPage.CopyFallback(text);
+
+  return navigator.clipboard.writeText(text).then(() => toast(`Logs copied.`), () => LogsPage.CopyFallback(text));
+ },
+ CopyFallback: text => {
+  const dialog = el(`dialog`);
+  dialog.id = `copy-logs-dialog`;
+  const input = el(`textarea`);
+  input.value = text;
+  input.readOnly = true;
+  input.rows = 12;
+  input.style.width = `100%`;
+  input.setAttribute(`aria-label`, `Logs to copy`);
+  dialog.append(el(`h2`, `Copy logs`), el(`p`, `Press Ctrl+C to copy the selected logs.`), input, button(`Close`, () => dialog.close()));
+  dialog.addEventListener(`close`, () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  input.focus();
+  input.select();
+  if (document.execCommand(`copy`)) {
+   dialog.close();
+   toast(`Logs copied.`);
+  }
+ }
+};
+LogsPage.Initialize();
+//#endregion
+const optimizationScript=el(`script`);optimizationScript.src=`/optimization.js`;document.body.append(optimizationScript);
+const resultsTableLink=el(`a`,`Open results table`);
+resultsTableLink.href=`/results/`;
+resultsTableLink.target=`_blank`;
+resultsTableLink.rel=`noopener`;
+resultsTableLink.style.display=`inline-block`;
+resultsTableLink.style.marginBottom=`12px`;
+$(`page-results`).prepend(resultsTableLink);
+poll();setInterval(poll,1200);

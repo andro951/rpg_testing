@@ -1,0 +1,246 @@
+from tests.suite_fixtures import LEGACY_ROOT, fixture_path, legacy_sharing
+"""Folder consent, browser-action contracts, verified downloads and cache-free storage."""
+import copy
+import hashlib
+import io
+import json
+import os
+import shutil
+import struct
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from workbench.controller import Controller
+from workbench.domain import read_json,write_json
+from workbench.downloads import download_model
+from workbench.hub import HubClient,group_variants
+from workbench.inventory import scan_models
+
+ROOT=Path(__file__).resolve().parents[1]
+DATA=b'GGUF'+struct.pack('<IQQ',3,0,0)
+
+class ModelManagementTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.base=Path(self.temp.name);self.root=self.base/'repository';self.root.mkdir()
+        self.models=self.base/'chosen-models';self.models.mkdir()
+        self.app=Controller(self.root);self.app.configure({'sync_source':False})
+    def selection(self):
+        return group_variants({'id':'publisher/example','sha':'a'*40,'siblings':[{
+            'rfilename':'Model-Q4_K_M.gguf','size':len(DATA),
+            'lfs':{'sha256':hashlib.sha256(DATA).hexdigest(),'size':len(DATA)}}]},8)
+    def test_first_launch_has_no_model_root_or_autodiscovery(self):
+        self.assertFalse((self.root/'models.json').exists());self.assertEqual(self.app.catalog(),[])
+        self.assertEqual(self.app.settings['model_root'],'')
+        self.assertIsNone(self.app.folder_info()['path'])
+        self.assertFalse(self.app.folder_scanned)
+        self.assertFalse((self.root/'models').exists())
+    def test_first_assignment_creates_machine_local_catalog(self):
+        (self.models/'Local-Q4_K_M.gguf').write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        self.assertEqual(len(self.app.last_models),1);self.assertFalse((self.root/'models.json').exists())
+        self.app.assign_model(self.app.last_models[0]['id'],8)
+        self.assertTrue((self.root/'models.json').is_file());self.assertEqual(len(self.app.catalog()),1)
+    def test_old_settings_do_not_implicitly_authorize_directory(self):
+        write_json(self.app.settings_path,{'backend':'lmstudio','model_root':str(self.models),'confirmed_empty_folder':str(self.models)})
+        app=Controller(self.root)
+        self.assertEqual(app.settings['model_root'],'');self.assertEqual(app.settings['backend'],'llamacpp')
+    def test_selected_empty_folder_needs_confirmation_and_persists(self):
+        self.app.configure({'model_root':str(self.models)})
+        self.assertFalse(self.app.folder_scanned)
+        self.app.scan_folder()
+        self.assertTrue(self.app.folder_scanned);self.assertEqual(self.app.last_models,[])
+        self.assertNotEqual(self.app.settings['confirmed_empty_folder'],str(self.models))
+        self.app.configure({'confirmed_empty_folder':str(self.models)})
+        again=Controller(self.root)
+        self.assertEqual(again.settings['model_root'],str(self.models.resolve()))
+        self.assertEqual(again.settings['confirmed_empty_folder'],str(self.models.resolve()))
+    def test_confirmation_cannot_authorize_different_folder(self):
+        self.app.configure({'model_root':str(self.models)})
+        other=self.base/'other';other.mkdir()
+        with self.assertRaises(ValueError):self.app.configure({'confirmed_empty_folder':str(other)})
+        self.assertEqual(self.app.settings['confirmed_empty_folder'],'')
+    def test_selecting_other_folder_resets_confirmation(self):
+        self.app.configure({'model_root':str(self.models),'confirmed_empty_folder':str(self.models)})
+        other=self.base/'other';other.mkdir();self.app.configure({'model_root':str(other)})
+        self.assertEqual(self.app.settings['confirmed_empty_folder'],'')
+    def test_existing_model_is_discovered_without_copy(self):
+        path=self.models/'existing.gguf';path.write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)})
+        self.app.scan_folder()
+        self.assertEqual(len(self.app.last_models),1)
+        self.assertEqual([Path(p).resolve() for p in self.app.last_models[0]['paths']],[path.resolve()])
+        self.assertEqual(list(self.root.rglob('*.gguf')),[])
+    def test_saving_model_root_does_not_hold_settings_request_for_scan(self):
+        with patch.object(self.app,'scan_folder',side_effect=AssertionError('scan must be separate')):
+            self.app.configure({'model_root':str(self.models)})
+        self.assertEqual(self.app.settings['model_root'],str(self.models.resolve()))
+        self.assertFalse(self.app.folder_scanned)
+    def test_vram_assignment_never_hashes_model_weights(self):
+        for name in ('Alpha-Q4_K_M.gguf','Beta-Q4_K_M.gguf'):
+            (self.models/name).write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        first,second=self.app.last_models
+        with patch.object(self.app,'identify_artifact',side_effect=AssertionError('VRAM assignment must not inspect artifact identity')):
+            self.app.assign_model(first['id'],8)
+            self.app.assign_model(second['id'],12)
+        self.assertEqual(first['required_vram_gb'],8)
+        self.assertEqual(second['required_vram_gb'],12)
+        saved={m['id']:m['required_vram_gb'] for m in self.app.catalog()}
+        self.assertEqual(saved,{first['id']:8,second['id']:12})
+
+    def test_artifact_identity_reads_metadata_not_model_contents(self):
+        p=self.models/'Local-Q4_K_M.gguf';p.write_bytes(DATA)
+        item={'id':'local-test','paths':[str(p)],'size_bytes':p.stat().st_size,
+              'catalog':{'repo_id':'publisher/example','revision':'a'*40,
+                         'sha256':{p.name:hashlib.sha256(DATA).hexdigest()}}}
+        with patch('pathlib.Path.open',side_effect=AssertionError('artifact identity must not read GGUF contents')):
+            first=self.app.identify_artifact(item)
+        self.assertEqual(first['files'][0]['name'],p.name);self.assertEqual(first['files'][0]['size_bytes'],len(DATA))
+        self.assertEqual(first['repo_id'],'publisher/example');self.assertEqual(first['revision'],'a'*40)
+        self.assertEqual(first['sha256'],item['catalog']['sha256'])
+        stat=p.stat();os.utime(p,ns=(stat.st_atime_ns,stat.st_mtime_ns+1_000_000))
+        second=self.app.identify_artifact(item)
+        self.assertNotEqual(first,second)
+
+    def test_vram_assignment_updates_one_discovered_model_immediately(self):
+        for name in ('Alpha-Q4_K_M.gguf','Beta-Q4_K_M.gguf'):
+            (self.models/name).write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        self.assertEqual(len(self.app.last_models),2)
+        first,second=self.app.last_models
+        self.assertIsNone(first['required_vram_gb']);self.assertIsNone(second['required_vram_gb'])
+        self.app.assign_model(first['id'],8)
+        self.assertEqual(first['required_vram_gb'],8);self.assertIsNone(second['required_vram_gb'])
+        self.assertTrue(first['catalogued']);self.assertEqual(first['catalog']['required_vram_gb'],8)
+        self.app.assign_model(second['id'],12)
+        self.assertEqual(first['required_vram_gb'],8);self.assertEqual(second['required_vram_gb'],12)
+        saved={m['id']:m['required_vram_gb'] for m in self.app.catalog()}
+        self.assertEqual(saved,{first['id']:8,second['id']:12})
+    def test_many_local_8gb_assignments_do_not_change_legacy_fixture_catalog(self):
+        for i in range(6):
+            (self.models/f'Local-{i}-Q4_K_M.gguf').write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        for model in list(self.app.last_models):
+            self.app.assign_model(model['id'],8)
+        self.assertEqual(len(self.app.catalog()),6)
+        legacy=read_json(ROOT/'tests/data/legacy_models.json')
+        self.assertEqual(len(legacy),3)
+        self.assertTrue(all(m['required_vram_gb']==8 for m in legacy))
+
+    def test_rescan_prunes_deleted_model_metadata_but_keeps_history(self):
+        for name in ('Keep-Q4_K_M.gguf','Delete-Q4_K_M.gguf'):
+            (self.models/name).write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        first,second=self.app.last_models
+        self.app.assign_model(first['id'],8);self.app.assign_model(second['id'],8)
+        for item in self.app.last_models:self.app.identify_artifact(item)
+        removed=first;kept=second
+        history=self.app.store.root/removed['id']/'historical-result.json'
+        history.parent.mkdir(parents=True,exist_ok=True);history.write_text('historical evidence')
+        Path(removed['paths'][0]).unlink()
+        self.app.scan_folder()
+        self.assertEqual([m['id'] for m in self.app.catalog()],[kept['id']])
+        self.assertEqual([m['id'] for m in self.app.last_models],[kept['id']])
+        self.assertNotIn(removed['id'],self.app.registry)
+        self.assertIn(kept['id'],self.app.registry)
+        self.assertTrue(history.exists())
+
+    def test_rescan_keeps_catalog_entry_for_incomplete_split_model(self):
+        first='Split-Q4_K_M-00001-of-00002.gguf';second='Split-Q4_K_M-00002-of-00002.gguf'
+        (self.models/first).write_bytes(DATA)
+        catalog=[{'id':'split-model','base_model':'Split','files':[first,second],
+                  'quantization':'Q4_K_M','required_vram_gb':8}]
+        write_json(self.root/'models.json',catalog)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        self.assertEqual([m['id'] for m in self.app.catalog()],['split-model'])
+        self.assertEqual(self.app.last_models[0]['id'],'split-model')
+        self.assertFalse(self.app.last_models[0]['complete'])
+        self.assertEqual(self.app.last_models[0]['missing_shards'],[second])
+
+    def test_preflight_prunes_deleted_models_before_planning(self):
+        (self.root/'test_specs').mkdir()
+        shutil.copy(LEGACY_ROOT / 'test_specs/time_only.json',self.root/'test_specs/time_only.json')
+        path=self.models/'Gone-Q4_K_M.gguf';path.write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        mid=self.app.last_models[0]['id'];self.app.assign_model(mid,8);self.app.identify_artifact(self.app.last_models[0])
+        path.unlink()
+        from workbench import preflight
+        report,plan=preflight.build(self.app,preparation={'gpu_name':'GTX 1080','vram_gb':8},track_progress=False)
+        self.assertEqual(self.app.catalog(),[])
+        self.assertNotIn(mid,self.app.registry)
+        self.assertEqual(report['removed_models'],[mid])
+        self.assertEqual(plan['pending'],0)
+        self.assertFalse(any(i['id']=='missing_'+mid for i in report['issues']))
+
+    def test_unavailable_models_folder_does_not_prune_catalog(self):
+        path=self.models/'Keep-Q4_K_M.gguf';path.write_bytes(DATA)
+        self.app.configure({'model_root':str(self.models)});self.app.scan_folder()
+        mid=self.app.last_models[0]['id'];self.app.assign_model(mid,8)
+        shutil.rmtree(self.models)
+        with self.assertRaises(ValueError):self.app.scan_folder()
+        self.assertEqual([m['id'] for m in self.app.catalog()],[mid])
+
+    def test_manager_download_requires_folder(self):
+        self.app.hub_detail=self.selection()
+        with patch('workbench.downloads.download_model') as fn:
+            with self.assertRaises(ValueError):self.app.download_selected({'ids':[self.app.hub_detail['variants'][0]['id']],'required_vram_gb':8})
+            fn.assert_not_called()
+    def test_manager_fetch_installs_in_approved_root_and_catalogs(self):
+        self.app.configure({'model_root':str(self.models)})
+        self.app.hub_detail=self.selection();variant=self.app.hub_detail['variants'][0]
+        def opener(*a,**k):
+            response=io.BytesIO(DATA);response.headers={'Content-Length':str(len(DATA))};return response
+        def download(model,root,cancel,log,**kwargs):return download_model(model,root,cancel,log,opener=opener,**kwargs)
+        with patch('workbench.downloads.download_model',side_effect=download):
+            self.app.download_selected({'ids':[variant['id']],'required_vram_gb':8})
+        p=self.models/'publisher/example'/('a'*12)/'Model-Q4_K_M.gguf'
+        self.assertEqual(p.read_bytes(),DATA);self.assertEqual(list(self.root.rglob('*.gguf')),[])
+        self.assertEqual(self.app.catalog()[0]['sha256'],variant['sha256'])
+        self.assertEqual(self.app.last_models[0]['required_vram_gb'],8)
+    def test_no_stale_selection_downloads(self):
+        self.app.configure({'model_root':str(self.models)});self.app.hub_detail=self.selection()
+        with patch('workbench.downloads.download_model') as fn:
+            with self.assertRaises(ValueError):self.app.download_selected({'ids':['not-approved'],'required_vram_gb':8})
+            fn.assert_not_called()
+    def test_demo_never_installs_real_models_or_runtime(self):
+        demo=Controller(self.root,True)
+        with self.assertRaises(ValueError):demo.download_selected({'ids':['x'],'required_vram_gb':8})
+        with self.assertRaises(ValueError):demo.install_runtime({'id':'x'})
+    def test_resumed_bytes_stay_in_selected_root(self):
+        m=self.selection()['variants'][0];folder=self.models/'publisher/example'/('a'*12);folder.mkdir(parents=True)
+        partial=folder/'Model-Q4_K_M.gguf.partial';partial.write_bytes(DATA[:10])
+        def opener(req,**kwargs):
+            self.assertEqual(req.get_header('Range'),'bytes=10-')
+            response=io.BytesIO(DATA[10:]);response.status=206
+            response.headers={'Content-Length':str(len(DATA)-10),'Content-Range':f'bytes 10-{len(DATA)-1}/{len(DATA)}'}
+            return response
+        download_model(m,self.models,threading.Event(),opener=opener)
+        self.assertFalse(partial.exists());self.assertEqual((folder/'Model-Q4_K_M.gguf').read_bytes(),DATA)
+    def test_catalog_path_disambiguates_equal_names(self):
+        a=self.models/'first/model'/('a'*12)/'model.gguf';b=self.models/'second/model'/('b'*12)/'model.gguf'
+        for p in [a,b]:p.parent.mkdir(parents=True);p.write_bytes(DATA)
+        catalog=[{'id':'first','repo_id':'first/model','revision':'a'*40,'files':['model.gguf'],'required_vram_gb':8},
+                 {'id':'second','repo_id':'second/model','revision':'b'*40,'files':['model.gguf'],'required_vram_gb':8}]
+        found=scan_models(self.models,catalog)
+        self.assertEqual([x['id'] for x in found],['first','second']);self.assertFalse(any(x['errors'] for x in found))
+    def test_preflight_runtime_repair_selects_official_candidate(self):
+        choices=[{'id':'cuda13','tag':'b2','name':'llama-win-cuda-cu13-x64.zip','note':'CUDA 13','prerelease':False},
+                 {'id':'cuda12','tag':'b2','name':'llama-win-cuda-cu12-x64.zip','note':'CUDA 12 candidate','prerelease':False}]
+        self.app.report={'gpu':{'name':'NVIDIA GeForce GTX 1080'},'issues':[{
+            'id':'backend','label':'Install llama.cpp','action':{'type':'runtime_install'}}]}
+        exe=str(self.root/'.local/runtime/b2/llama-server.exe')
+        with patch('workbench.runtimes.RuntimeClient.releases',return_value=choices),\
+             patch('workbench.runtimes.install',return_value=exe) as install,\
+             patch('workbench.native.capabilities',return_value={'version':'fixture'}):
+            self.app.fix({'issue_id':'backend'})
+        self.assertEqual(install.call_args.args[0]['id'],'cuda12')
+        self.assertEqual(self.app.settings['llama_path'],exe)
+    def test_runtime_repair_requires_server_issued_selection(self):
+        with patch('workbench.runtimes.install') as install:
+            with self.assertRaises(ValueError):self.app.install_runtime({'id':'arbitrary-url'})
+            install.assert_not_called()
+
+if __name__=='__main__':unittest.main()

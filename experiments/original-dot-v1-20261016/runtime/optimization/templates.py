@@ -1,0 +1,181 @@
+"""Full-message contracts, literal bindings, and immutable trial projections."""
+import copy
+import json
+import re
+from .catalog import catalog, expansion, registration, steps
+from workbench.domain import digest, read_json
+from workbench.presentation import render_source_text
+from workbench.workflows import messages
+from workbench.judgements import JudgementStore, definition_id
+
+LABELS = ('current_state', 'new_information', 'task_requirements', 'presentation_notes', 'prior_outputs')
+MARKER = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+
+
+def split_candidate(text):
+    if not isinstance(text, str):
+        raise ValueError('Candidate response must be text.')
+    text = text.replace('\r\n', '\n')
+    if not text.startswith('SYSTEM_MESSAGE:\n'):
+        raise ValueError('Start with the exact standalone SYSTEM_MESSAGE: heading; no preamble or fences.')
+    headings = re.findall(r'^(SYSTEM_MESSAGE:|USER_MESSAGE:)$', text, re.M)
+    if headings != ['SYSTEM_MESSAGE:', 'USER_MESSAGE:']:
+        raise ValueError('Use each standalone heading exactly once, SYSTEM_MESSAGE: before USER_MESSAGE:.')
+    system, user = text[len('SYSTEM_MESSAGE:\n'):].split('\nUSER_MESSAGE:\n', 1)
+    if not user.strip():
+        raise ValueError('USER_MESSAGE must not be empty.')
+    return system, user
+
+
+def parse_candidate(text, labels=LABELS):
+    system, user = split_candidate(text)
+    combined = system + '\n' + user
+    found = set(MARKER.findall(combined))
+    if '${' in MARKER.sub('', combined):
+        raise ValueError('Malformed placeholder; only literal ${label} is supported.')
+    if found != set(labels):
+        raise ValueError('Missing labels: ' + ', '.join(sorted(set(labels) - found)) +
+                         '; unknown labels: ' + ', '.join(sorted(found - set(labels))))
+    return {'system': system, 'user': user}
+
+
+def substitute(template, values):
+    return MARKER.sub(lambda match: values[match[1]], template)
+
+
+def render(candidate, values):
+    if candidate.get('template_format') == 'lpil':
+        from . import lpil
+        # Normalize the authored template before inserting arbitrary test data.
+        return [{'role': role, 'content': lpil.substitute(lpil.normalize(candidate[role]), values)}
+                for role in ('system', 'user') if candidate[role].strip()]
+    return [{'role': role, 'content': substitute(candidate[role], values)} for role in ('system', 'user')]
+
+
+def _legacy_full_paths(value, path='$'):
+    """Reconstruct archived positional experiments only, never database-v3 prompts."""
+    if isinstance(value, dict) and value:
+        return '\n'.join(_legacy_full_paths(item, path + '.' + key) for key, item in value.items())
+    if isinstance(value, list) and value:
+        return '\n'.join(_legacy_full_paths(item, path + '[' + str(index) + ']') for index, item in enumerate(value))
+    return path + ' = ' + json.dumps(value, ensure_ascii=False)
+
+
+def bindings(case, prior=None):
+    test, variant = case['test'], case['variant']
+    if test.get('prompt_builder', {}).get('version') == 'database-v3':
+        if 'prompt_bindings' in variant:
+            values = copy.deepcopy(variant['prompt_bindings'])
+            if set(values) != set(LABELS) - {'prior_outputs'} or not all(isinstance(v, str) for v in values.values()):
+                raise ValueError('Invalid structured database prompt bindings')
+            values['prior_outputs'] = json.dumps(prior or {}, ensure_ascii=False)
+            return values
+        final = next(s for s in steps(variant['steps']) if s['id'] == variant['result']['step'])
+        prefix, task = final['prompt'].split('\n\nTask:\n', 1)
+        guidance, state_text = prefix.split('\n\nCurrent data:\n', 1)
+        note = ''
+        if '\n\nInput presentation:\n' in guidance:
+            guidance, note = guidance.split('\n\nInput presentation:\n', 1)
+        return {'current_state': state_text, 'new_information': task, 'task_requirements': guidance,
+                'presentation_notes': note, 'prior_outputs': json.dumps(prior or {}, ensure_ascii=False)}
+    state = test['source']['initial_state']
+    presentation = case['presentation']
+    if presentation == 'Full paths':
+        state_text = _legacy_full_paths(state)
+        note = 'Paths show original state locations; arrays remain arrays. Output paths must be RFC 6901 JSON Pointers, not dotted input paths.'
+    else:
+        indexed = presentation == 'Indexed arrays'
+        state_text = render_source_text(state, 'indexed_arrays' if indexed else 'raw_json')
+        note = ('Numeric object keys display the real zero-based indexes of original arrays. The authoritative state still contains arrays; use RFC 6902 array semantics.'
+                if indexed else 'The state is ordinary JSON; arrays retain their real zero-based positions.')
+    event = variant.get('new_information_override', test['source'].get('new_information', ''))
+    if test.get('prompt_builder'):
+        final = next(s for s in steps(variant['steps']) if s['id'] == variant['result']['step'])
+        prefix, task = final['prompt'].split('\n\nTask:\n', 1)
+        note, state_text = prefix.split('State:\n', 1)
+        note = note.strip()
+        event = task.split('\nReturn only a JSON Patch array', 1)[0]
+    required = variant.get('result', {}).get('required_ops')
+    requirement = 'Return only an RFC 6902 JSON Patch array, with RFC 6901 JSON Pointer paths. Apply only established events, preserve unrelated values, and do not add explanations.'
+    if required is not None:
+        requirement += ' The operation list must contain exactly these operation types in this order: ' + json.dumps(required) + '.'
+    return {'current_state': state_text, 'new_information': event if isinstance(event, str) else json.dumps(event, ensure_ascii=False),
+            'task_requirements': requirement, 'presentation_notes': note,
+            'prior_outputs': json.dumps(prior or {}, ensure_ascii=False)}
+
+
+def freeze(root, target=None):
+    """Freeze only reviewed, active, non-rejected members; no solution in bindings."""
+    data = catalog()
+    if target is not None:
+        from .selection import validate_target
+        selected=validate_target(root,target)
+        origin=selected['test_id']+'/'+selected['variant_id']
+    else:
+        # Compatibility for existing API clients and the archived pilot fixtures.
+        path=root/'optimization/definitions/array_move_patch.json'
+        configured=read_json(path).get('target',{}) if path.exists() else {}
+        origin=configured.get('test_id','')+'/'+configured.get('variant_id','')
+        if origin not in data['variants']:
+            legacy_path=root/'optimization/definitions/array_move_patch.draft.json'
+            legacy=read_json(legacy_path).get('target',{}) if legacy_path.exists() else {}
+            origin=legacy.get('test_id','')+'/'+legacy.get('variant_id','')
+            if origin not in data['variants']:
+                origin=next((key for key,entry in data['variants'].items() if entry['objective_optimization_eligible']
+                             and entry['constraints'].get('required_ops')==['move']),None)
+    if origin is None or not data['variants'][origin]['objective_optimization_eligible']:
+        raise ValueError('No reviewed starting test is available. Select an enabled test before starting optimization.')
+    anchor = data['variants'][origin]
+    test = read_json(root / anchor['source_file'])
+    variant = next(v for v in test['variants'] if test['id'] + '/' + v['id'] == origin)
+    registration(test, variant, data)
+    # October 8 revision: one origin gate, then the complete matching task type.
+    scopes = [{'id': 'task_type', 'members': [key for key, entry in data['variants'].items()
+               if entry['objective_optimization_eligible'] and entry['task_family'] == anchor['task_family']
+               and entry['output_contract'] == anchor['output_contract']]}]
+    rejected = JudgementStore(root).read()['entries']
+    cases = {}
+    layers = []
+    for scope in scopes:
+        members = []
+        for key in scope['members']:
+            entry = data['variants'][key]
+            t = read_json(root / entry['source_file'])
+            v = next(v for v in t['variants'] if t['id'] + '/' + v['id'] == key)
+            registration(t, v, data)
+            if not t.get('enabled', True) or not v.get('enabled', True) or rejected.get(definition_id(t, v), {}).get('blocked'):
+                continue
+            if v['result']['representation'] not in ('json_patch','value_patch'):
+                raise ValueError('Full-message binding requires a JSON Patch contract: ' + key)
+            # Final-call replacement is supported; earlier calls are preserved.
+            cases[key] = {'id': key, 'test': copy.deepcopy(t), 'variant': copy.deepcopy(v),
+                          'presentation': entry['existing_groups']['input_presentation'],
+                          'definition_id': definition_id(t, v)}
+            members.append(key)
+        layers.append({'id': scope['id'] if 'id' in scope else digest(scope), 'members': members})
+    if origin not in cases:
+        raise ValueError('The origin test is disabled or rejected.')
+    layers.insert(0, {'id': 'origin', 'members': [origin]})
+    # The component's first scope is already origin; omit identical layers.
+    unique = []
+    for layer in layers:
+        if not unique or set(layer['members']) != set(unique[-1]['members']):
+            unique.append(layer)
+    return {'cases': cases, 'layers': unique, 'task_type': anchor['task_family'], 'workflow_fingerprint': data['workflow_fingerprint'],
+            'target':{'test_id':test['id'],'variant_id':variant['id'],'definition_id':definition_id(test,variant)}}
+
+
+def projection(case, candidate, remote=False):
+    """Prompt versions overridden by a candidate become aliases, never repeats."""
+    test, variant = case['test'], case['variant']
+    final = variant['result']['step']
+    earlier = [s for s in steps(variant['steps']) if s['id'] != final]
+    controls = {} if remote else {'sampling': variant.get('sampling', {}), 'cache': variant.get('cache', 'default')}
+    workflow = [{k: v for k, v in s.items() if k != 'prompt' and not (remote and k == 'sampling')}
+                for s in steps(variant['steps'])]
+    return digest({'bindings': bindings(case), 'earlier': [messages(test, s, {k: '<actual prior output>' for k in s.get('uses', [])}, variant) for s in earlier],
+                   'workflow': workflow,
+                   'controls': controls, 'contract': variant['result'], 'oracle': test.get('expected_state'),
+                   'candidate': candidate,
+                   'original_final_messages': messages(test, next(s for s in steps(variant['steps']) if s['id'] == final),
+                                                       {k: '<actual prior output>' for s in steps(variant['steps']) for k in s.get('uses', [])}, variant) if candidate is None else None})

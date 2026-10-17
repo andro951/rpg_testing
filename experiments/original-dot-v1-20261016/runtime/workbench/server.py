@@ -1,0 +1,287 @@
+"""Loopback/private-Tailscale browser UI; network access grants control."""
+from __future__ import annotations
+import functools
+import ipaddress
+import json
+import threading
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit,parse_qs
+from .controller import Controller
+from .domain import TIERS, read_json, write_json, safe_id, validate_test
+from .inventory import executable,command
+from .native_dialog import select_directory,select_llama_server
+
+class Forbidden(Exception):pass
+
+class WorkbenchServer(ThreadingHTTPServer):
+    daemon_threads=True
+    def __init__(self,address,app):
+        host=ipaddress.ip_address(address[0])
+        if not host.is_loopback and host not in ipaddress.ip_network('100.64.0.0/10'):
+            raise ValueError('Control server must bind to loopback or a Tailscale IPv4 address')
+        self.app=app;self.remote_server=None;self.exit_requested=False;self.owner=self;self.update_coordinator=None
+        self.report_snapshot=None
+        webroot=Path(__file__).parent/'web'
+        self.static_assets={
+            '/':(webroot/'index.html').read_bytes(),
+            '/app.js':(webroot/'app.js').read_bytes(),
+            '/optimization.js':(webroot/'optimization.js').read_bytes(),
+            '/style.css':(webroot/'style.css').read_bytes(),
+        }
+        for name in ('groupings.js','judgements.js','matrix.js','report.js'):
+            self.static_assets['/report-'+name]=(webroot.parent.parent/'reporting'/name).read_bytes()
+        super().__init__(address,Handler)
+    def enable_remote(self):
+        if self.owner is not self:return self.owner.enable_remote()
+        if self.app.operation.locked():raise RuntimeError('Wait until the current operation finishes.')
+        if self.remote_server:return self.app.remote_info
+        tailscale=executable('tailscale')
+        if not tailscale:raise ValueError('Install and sign in to Tailscale first.')
+        ip=command([tailscale,'ip','-4']).splitlines()[0].strip()
+        if ipaddress.ip_address(ip) not in ipaddress.ip_network('100.64.0.0/10'):raise ValueError('Tailscale did not return a private tailnet IPv4 address')
+        remote=WorkbenchServer((ip,self.server_port),self.app)
+        self.remote_server=remote;remote.owner=self
+        threading.Thread(target=remote.serve_forever,daemon=True).start()
+        self.app.settings['remote_enabled']=True;self.app.save_settings()
+        self.app.remote_info={'url':f'http://{ip}:{self.server_port}/','note':'Open this address on your laptop while connected to Tailscale. Keep the desktop awake.'}
+        self.app.log('network','Enabled private Tailscale controller at '+ip)
+        return self.app.remote_info
+    def disable_remote(self):
+        if self.owner is not self:return self.owner.disable_remote()
+        if self.remote_server:
+            self.remote_server.shutdown();self.remote_server.server_close();self.remote_server=None
+        self.app.settings['remote_enabled']=False;self.app.save_settings();self.app.remote_info=None
+    def close_all(self):
+        if self.owner is not self:return self.owner.close_all()
+        if self.update_coordinator:self.update_coordinator.stop.set()
+        if self.remote_server:
+            self.remote_server.shutdown();self.remote_server.server_close()
+        self.shutdown();self.server_close()
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version='HTTP/1.0'
+    def log_message(self,*args):pass
+    def authorize(self):
+        peer=ipaddress.ip_address(self.client_address[0])
+        if not peer.is_loopback and peer not in ipaddress.ip_network('100.64.0.0/10'):
+            raise Forbidden('Connect through loopback or Tailscale')
+        host=self.headers.get('Host','')
+        allowed={f'{self.server.server_address[0]}:{self.server.server_port}'}
+        if self.server.server_address[0]=='127.0.0.1':allowed.add(f'localhost:{self.server.server_port}')
+        if host not in allowed:raise Forbidden('Unrecognized Host header')
+        origin=self.headers.get('Origin')
+        if origin is not None and origin!='http://'+host:raise Forbidden('Cross-origin requests are not allowed')
+    def send(self,status,data,kind='application/json; charset=utf-8',filename=None):
+        if not isinstance(data,bytes):data=json.dumps(data,ensure_ascii=False,allow_nan=False).encode()
+        self.send_response(status)
+        self.send_header('Content-Type',kind);self.send_header('Content-Length',str(len(data)))
+        self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('Referrer-Policy','no-referrer');self.send_header('X-Frame-Options','DENY')
+        self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        if filename:self.send_header('Content-Disposition','attachment; filename="'+filename+'"')
+        try:
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):
+            # A browser may cancel a polling response while navigating/closing.
+            # There is no live connection on which to send a second HTTP error.
+            return
+    def do_GET(self):
+        try:
+            url=urlsplit(self.path);path=url.path;q=parse_qs(url.query);app=self.server.app
+            if path in self.server.static_assets:
+                kind='text/html; charset=utf-8' if path=='/' else 'text/css; charset=utf-8' if path=='/style.css' else 'application/javascript; charset=utf-8'
+                return self.send(200,self.server.static_assets[path],kind)
+            self.authorize()
+            if path=='/api/optimization/identity':
+                return self.send(200,{'application':'rpg-workbench','root':str(app.root.resolve())})
+            if path in ('/results/','/result/'):
+                if app.operation.locked():raise RuntimeError('Finish or stop the current operation before opening results.')
+                from reporting.report import build_report
+                from reporting.server import render_page
+                if path=='/results/' or self.server.report_snapshot is None:
+                    specs=[read_json(p) for p in sorted((app.root/'test_specs').glob('*.json'))]
+                    self.server.report_snapshot=build_report(app.result_records(),specs)
+                return self.send(200,render_page(app.root,self.server.report_snapshot,path=='/result/',
+                    {'url':'/api/judgements'}, {'target_url':'/api/optimization/from-result','base_url':'/'},True),'text/html; charset=utf-8')
+            if path=='/api/result':
+                if app.operation.locked():raise RuntimeError('Finish or stop the active operation before reading evidence.')
+                from .domain import ResultStore
+                store=ResultStore(app.root/'results')
+                source=store.path(safe_id(q['model_id'][0]),safe_id(q['case_id'][0]))
+                if not source.exists():return self.send(404,{'error':'Unknown result'})
+                return self.send(200,store.read(source))
+            if path=='/api/optimization/targets':
+                from optimization.selection import targets
+                from optimization.templates import freeze
+                if app.operation.locked():raise RuntimeError('Finish or stop the current operation before selecting a test.')
+                available=targets(app.root)
+                try:default=freeze(app.root)['target'] if available else None
+                except ValueError:default=None
+                return self.send(200,{'targets':available,'default_target':default})
+            if path=='/api/optimization/from-result':
+                from optimization.selection import from_result
+                if app.operation.locked():raise RuntimeError('Finish or stop the current operation before opening optimization.')
+                selection,_=from_result(app.root,q['model_id'][0],q['case_id'][0])
+                return self.send(200,selection)
+            if path=='/api/state':return self.send(200,{**app.snapshot(),'control_access':'private_network'})
+            if path=='/api/optimization/codex-options':
+                from optimization.codex import discover
+                if app.operation.locked():raise RuntimeError('Wait until the current operation finishes before rescanning Codex models.')
+                return self.send(200,discover())
+            if path=='/api/optimization/options':
+                from optimization.runtime import discover
+                if app.operation.locked():raise RuntimeError('Wait until the current operation finishes before rescanning host models.')
+                options=discover(app)
+                from optimization.engine import DEFAULTS
+                # Paths are host paths; never send saved credentials/settings.
+                return self.send(200,{**options,'defaults':DEFAULTS})
+            if path=='/api/optimization/sessions':
+                from optimization.storage import Store
+                return self.send(200,{'sessions':[{k:s.get(k) for k in ('id','created','status','message','generator_id')} for s in Store(app.root).list()]})
+            if path=='/api/optimization/session':
+                from optimization.engine import view
+                return self.send(200,view(app,q['id'][0]))
+            if path=='/api/optimization/evidence':
+                from optimization.storage import Store
+                return self.send(200,Store(app.root).get_evidence(q['id'][0],q['key'][0]))
+            if path=='/api/optimization/export':
+                from optimization.storage import Store
+                if app.operation.locked():raise RuntimeError('Pause and stop the operation before exporting a consistent session.')
+                return self.send(200,Store(app.root).export(q['id'][0]),'application/zip','prompt-optimization-session.zip')
+            if path=='/api/run-options':return self.send(200,app.run_options())
+            if path=='/api/results':return self.send(200,app.result_records())
+            if path=='/api/analysis':
+                from .analysis import summarize
+                return self.send(200,summarize(app.result_records()))
+            if path=='/api/export':return self.send(200,app.export(),'application/zip','rpg-testing-evidence.zip')
+            if path=='/api/tests':
+                if app.operation.locked():raise RuntimeError('Wait until the operation finishes before reading test files.')
+                return self.send(200,{'tests':[read_json(p) for p in sorted((app.root/'test_specs').glob('*.json'))],
+                    'examples':[p.stem for p in sorted((app.root/'examples/test_specs').glob('*.json'))]})
+            if path=='/api/unity-script':
+                from .unity import make_script
+                return self.send(200,make_script(q.get('tier',['16'])[0]).encode(),'text/plain; charset=utf-8','rpg-unity-job.sh')
+            self.send(404,{'error':'Not found'})
+        except Forbidden as exc:self.send(403,{'error':str(exc)})
+        except (ValueError,KeyError,TypeError,OSError) as exc:self.send(400,{'error':str(exc)})
+        except RuntimeError as exc:self.send(409,{'error':str(exc)})
+        except Exception as exc:self.server.app.log('http_error',exc);self.send(500,{'error':'Internal error; inspect Logs.'})
+    def do_POST(self):
+        try:
+            app=self.server.app;path=urlsplit(self.path).path
+            size=int(self.headers.get('Content-Length','0'))
+            if not 0<=size<=16*1024**2:raise ValueError('Invalid request size')
+            # Consume bounded request bytes before sending a rejection. Closing
+            # with unread POST bytes can reset TCP on Windows, losing the 4xx.
+            self.connection.settimeout(10)
+            raw=self.rfile.read(size) if size else b''
+            if len(raw)!=size:raise ValueError('Incomplete request body')
+            self.authorize()
+            if self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('Use application/json')
+            from .scoring import parse
+            data=parse(raw.decode()) if size else {}
+            if not isinstance(data,dict):raise ValueError('Request body must be an object')
+            if path=='/api/judgements':
+                from .judgements import JudgementStore
+                if app.operation.locked():raise RuntimeError('Finish or stop the active operation before changing test judgements.')
+                return self.send(200,{'entries':JudgementStore(app.root).update(**data)['entries']})
+            if path=='/api/picker/models':
+                if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                    raise ValueError('The native folder picker opens on the GPU host. Open the workbench on that computer, or type the host path in Worker setup.')
+                if app.operation.locked():raise RuntimeError('Finish or stop the active benchmark operation before changing the models folder.')
+                selected=select_directory(data.get('initial',''))
+                return self.send(200,{'cancelled':selected is None,'path':selected})
+            if path=='/api/picker/llama':
+                if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                    raise ValueError('The native file picker opens on the GPU host. Open the workbench on that computer, or type the host path in Worker setup.')
+                if app.operation.locked():raise RuntimeError('Finish or stop the active benchmark operation before changing the runtime path.')
+                selected=select_llama_server(data.get('initial',''))
+                return self.send(200,{'cancelled':selected is None,'path':selected})
+            if path=='/api/preflight':
+                prep=data.get('preparation')
+                if prep and (type(prep.get('vram_gb'))is not int or prep['vram_gb'] not in (*TIERS,11) or not isinstance(prep.get('gpu_name'),str)):raise ValueError('Invalid preparation GPU')
+                app.start('preflight',data);return self.send(202,{'started':True})
+            operations={'/api/hub/search':'hub_search','/api/hub/inspect':'hub_inspect','/api/hub/download':'hub_download',
+                        '/api/runtime/list':'runtime_list','/api/runtime/install':'runtime_install','/api/models/scan':'scan'}
+            if path in operations:
+                app.start(operations[path],data);return self.send(202,{'started':True})
+            if path=='/api/unit-tests':app.start('unit_tests');return self.send(202,{'started':True})
+            if path=='/api/run':app.start('run',data);return self.send(202,{'started':True})
+            if path=='/api/optimization/run':app.start('optimization',data);return self.send(202,{'started':True})
+            if path=='/api/optimization/settings':
+                from optimization.engine import update_settings
+                if set(data)!={'session_id','settings'}:raise ValueError('Expected session_id and settings')
+                if not app.operation.acquire(blocking=False):raise RuntimeError('Stop the active operation before changing generator settings.')
+                try:update_settings(app,data['session_id'],data['settings'])
+                finally:app.operation.release()
+                return self.send(200,{'ok':True})
+            if path=='/api/optimization/import':
+                import base64
+                from optimization.storage import Store
+                if not app.operation.acquire(blocking=False):raise RuntimeError('Wait until the active operation finishes.')
+                try:session_id=Store(app.root).import_archive(base64.b64decode(data['archive'],validate=True))
+                finally:app.operation.release()
+                return self.send(200,{'id':session_id})
+            if path=='/api/fix':app.start('fix',data);return self.send(202,{'started':True})
+            if path=='/api/control':app.control(data['action']);return self.send(200,{'ok':True})
+            if path=='/api/settings':app.configure(data);return self.send(200,{'ok':True})
+            if path=='/api/perchance/setup-choice':
+                from .perchance_setup import answer
+                answer(app,data.get('id'),data.get('approved'));return self.send(200,{'ok':True})
+            if path=='/api/perchance/setup':app.start('perchance_setup',{});return self.send(202,{'started':True})
+            if path=='/api/perchance/connect':app.start('perchance_connect',{});return self.send(202,{'started':True})
+            if path=='/api/model/assign':app.assign_model(data['id'],data['required_vram_gb']);return self.send(200,{'ok':True})
+            if path=='/api/result/delete':app.delete_result(data['model_id'],data['case_id']);return self.send(200,{'ok':True})
+            if path=='/api/test/save':
+                test=data['test'];validate_test(test)
+                if not app.operation.acquire(blocking=False):raise RuntimeError('Wait until the active operation finishes.')
+                try:write_json(app.root/'test_specs'/(safe_id(test['id'])+'.json'),test);app.report=None
+                finally:app.operation.release()
+                return self.send(200,{'ok':True})
+            if path=='/api/test/import-example':
+                name=safe_id(data['id']);source=app.root/'examples/test_specs'/(name+'.json')
+                test=read_json(source);validate_test(test)
+                if not app.operation.acquire(blocking=False):raise RuntimeError('Wait until the active operation finishes.')
+                try:
+                    target=app.root/'test_specs'/(name+'.json')
+                    if target.exists():raise ValueError('This example is already installed; use its editor.')
+                    write_json(target,test);app.report=None
+                finally:app.operation.release()
+                return self.send(200,{'ok':True})
+            if path=='/api/remote/enable':return self.send(200,self.server.enable_remote())
+            if path=='/api/remote/disable':
+                if app.operation.locked():raise RuntimeError('Wait until the active operation finishes.')
+                self.send(200,{'ok':True});threading.Thread(target=self.server.owner.disable_remote,daemon=True).start();return
+            if path=='/api/shutdown':
+                if app.operation.locked():raise RuntimeError('Stop the active operation before closing.')
+                self.send(200,{'ok':True});threading.Thread(target=self.server.owner.close_all,daemon=True).start();return
+            if path=='/api/restart':
+                if app.operation.locked():raise RuntimeError('Stop the active operation before restarting.')
+                self.server.owner.exit_requested=True;self.send(200,{'ok':True})
+                threading.Thread(target=self.server.owner.close_all,daemon=True).start();return
+            self.send(404,{'error':'Not found'})
+        except Forbidden as exc:self.send(403,{'error':str(exc)})
+        except (ValueError,KeyError,TypeError,OSError) as exc:self.send(400,{'error':str(exc)})
+        except RuntimeError as exc:self.send(409,{'error':str(exc)})
+        except Exception as exc:app.log('http_error',exc);self.send(500,{'error':'Internal error; inspect Logs.'})
+
+
+def serve(root,demo=False,port=8765,open_browser=True):
+    app=Controller(Path(root),demo=demo)
+    server=WorkbenchServer(('127.0.0.1',port),app)
+    if app.settings.get('remote_enabled'):
+        try:server.enable_remote()
+        except Exception as exc:app.log('network','Could not restore previously approved Tailscale binding: '+str(exc))
+    from .restarts import UpdateCoordinator
+    server.update_coordinator=UpdateCoordinator(server).start()
+    if open_browser:webbrowser.open(f'http://127.0.0.1:{server.server_port}/')
+    try:server.serve_forever()
+    finally:
+        if server.update_coordinator:server.update_coordinator.stop.set()
+        app.control('stop')
+        if app.thread:app.thread.join(10)
+        app.flush_logs();server.server_close()
+    return 75 if server.exit_requested else 0

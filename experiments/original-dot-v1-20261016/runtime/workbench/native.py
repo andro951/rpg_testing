@@ -1,0 +1,359 @@
+"""Owned llama.cpp process; cancellable loading and bounded benchmark requests."""
+from __future__ import annotations
+import contextlib
+import http.client
+import os
+import re
+import secrets
+import socket
+import subprocess
+import threading
+import time
+from pathlib import Path
+from .execution_policy import (CPUOffload, ContextCapacity, DoesNotFit, RunFailure, RuntimeStall,
+    UnverifiedPlacement, classify_load_failure, placement)
+from .inventory import executable
+from .domain import implementation_fingerprint
+from .workflows import Cancelled, Unsupported
+
+LOAD_DIAGNOSTIC_INTERVAL = 5
+
+
+def loading_phase(line):
+    if 'warming up the model' in line:return 'Warming up model'
+    if any(text in line for text in ('llama_context:', 'llama_kv_cache:', 'llama_memory_recurrent:', 'sched_reserve:')):
+        return 'Allocating context and runtime buffers'
+    if 'load_tensors:' in line:return 'Loading model weights'
+    if 'llama_model_loader:' in line or 'load_model: loading model' in line:return 'Reading model metadata'
+    return None
+
+
+def diagnostic_command(args, timeout=30):
+    flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
+    p=subprocess.run(args,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=timeout,**flags)
+    output='\n'.join(x for x in (p.stdout,p.stderr) if x)
+    if p.returncode:raise RunFailure(output or 'Native runtime command failed')
+    return output.strip()
+
+
+def capabilities(exe, preparation=False):
+    help_text=diagnostic_command([exe,'--help'])
+    required=['--ctx-size','--n-predict','--gpu-layers','--parallel','--no-context-shift','--slots','--fit','--api-key','--list-devices','--reasoning']
+    missing=[flag for flag in required if not re.search(re.escape(flag)+r'(?=[\s,=]|$)',help_text)]
+    if missing:raise RunFailure('Runtime lacks required controls: '+', '.join(missing))
+    result={'help':help_text,'version':diagnostic_command([exe,'--version'])}
+    if not preparation:
+        devices=diagnostic_command([exe,'--list-devices'])
+        if not re.search(r'^\s*(?:CUDA|Vulkan)\d+\s*:',devices,re.M|re.I):
+            raise RunFailure('Runtime reports no CUDA/Vulkan GPU. A CPU-only build is not eligible.')
+        result['devices']=devices
+    return result
+
+
+def _template_compatible_messages(messages, properties):
+    """Adapt only when the model's own chat-template metadata requires it."""
+    props=properties or {};caps=props.get('chat_template_caps') or {};template=props.get('chat_template') or ''
+    supports_system=caps.get('supports_system_role')
+    strict_alternation=bool(re.search(r'roles?\\s+must\\s+alternate|alternate\\s+user/assistant',template,re.I))
+    if supports_system is not False and not strict_alternation:return messages,None
+    system_parts=[];dialogue=[]
+    for message in messages:
+        role=message.get('role');content=message.get('content','')
+        if not isinstance(content,str):raise Unsupported('Chat-template compatibility requires string message content')
+        if role=='system':system_parts.append(content)
+        elif role in ('user','assistant'):dialogue.append({'role':role,'content':content})
+        else:raise Unsupported('Chat-template compatibility cannot rewrite role: '+str(role))
+    if system_parts:
+        prefix='\\n\\n'.join(system_parts)
+        if dialogue and dialogue[0]['role']=='user':dialogue[0]['content']=prefix+'\\n\\n'+dialogue[0]['content']
+        else:dialogue.insert(0,{'role':'user','content':prefix})
+    merged=[];merged_count=0
+    for message in dialogue:
+        if merged and merged[-1]['role']==message['role']:
+            merged[-1]['content']+='\\n\\n'+message['content'];merged_count+=1
+        else:merged.append(dict(message))
+    if not merged:raise Unsupported('Chat-template compatibility produced no messages')
+    if strict_alternation and merged[0]['role']!='user':
+        raise Unsupported('Model chat template requires the conversation to start with a user message')
+    if merged==messages:return messages,None
+    return merged,{'reason':'model_chat_template_compatibility','supports_system_role':supports_system,
+                   'strict_alternation_detected':strict_alternation,'merged_system_messages':len(system_parts),
+                   'merged_adjacent_messages':merged_count}
+
+
+class NativeBackend:
+    supports_cache=True
+    supports_schema=True
+    def __init__(self,settings,gpu,log=lambda *args:None):
+        from .backends import Transport
+        self.settings,self.gpu,self.log=settings,gpu,log
+        if settings.get('backend','llamacpp')!='llamacpp':raise ValueError('Only native llama.cpp is supported')
+        self.port=settings.get('inference_port',1235)
+        if type(self.port) is not int or not 1024 <= self.port <= 65535:
+            raise ValueError('inference_port must be an integer from 1024 through 65535')
+        self.token=secrets.token_urlsafe(32)
+        self.transport=Transport(f'http://127.0.0.1:{self.port}',self.token,timeout=60)
+        self.process=None;self.reader=None;self.owned_id=None;self.context=None
+        self.load_metadata={};self.version_info={};self.lines=[];self.timed_out=False
+        self.requested_layers='all';self.execution_class='full_gpu';self.progress=lambda task,pct,detail='':None
+        self._loading_lock=threading.RLock();self._loading_status={}
+
+    def _loading_snapshot(self,started):
+        with self._loading_lock:status=dict(self._loading_status)
+        stamp=time.perf_counter()
+        last=status.pop('last_output_at',None)
+        return {**status,'elapsed_seconds':stamp-started,
+                'seconds_since_runtime_output':stamp-last if last is not None else None}
+
+    @contextlib.contextmanager
+    def _loading_scope(self,model,started):
+        original_timeout=self.transport.timeout
+        self.transport.timeout=None;self.timed_out=False
+        done=threading.Event()
+        def report():
+            status=self._loading_snapshot(started)
+            self.log('model_loading',{'model_id':model['id'],'load_timeout_seconds':None,
+                                     'load_timeout_policy':'completion_manual_stop_or_runtime_error',**status})
+            age=status['seconds_since_runtime_output']
+            detail=f"{status['phase']} · {status['elapsed_seconds']:.0f}s elapsed"
+            detail+=f' · last runtime output {age:.0f}s ago' if age is not None else ' · waiting for first runtime output'
+            self.progress('Loading model',None,detail)
+        def monitor():
+            while not done.wait(LOAD_DIAGNOSTIC_INTERVAL):report()
+        reporter=threading.Thread(target=monitor,name='model-loading-progress',daemon=True)
+        report();reporter.start()
+        try:yield
+        finally:
+            done.set();reporter.join()
+            self.load_metadata.update(load_timeout_seconds=None,
+                load_timeout_policy='completion_manual_stop_or_runtime_error',
+                loading_diagnostics=self._loading_snapshot(started))
+            self.transport.timeout=original_timeout
+
+    def _model_health(self,cancel):
+        #A short polling request is retried, not an overall model-load deadline.
+        previous=self.transport.timeout;self.transport.timeout=1
+        try:return self.transport.request('/health',cancel=cancel)
+        finally:self.transport.timeout=previous
+
+    def cancel_request(self):
+        self.transport.cancel()
+
+    def cancel(self):
+        self.cancel_request()
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
+
+    @contextlib.contextmanager
+    def budget(self,seconds,terminate_process=True):
+        self.timed_out=False
+        def expire():
+            self.timed_out=True
+            self.cancel() if terminate_process else self.cancel_request()
+        timer=threading.Timer(seconds,expire);timer.daemon=True;timer.start()
+        try:
+            yield
+            if self.timed_out:raise RuntimeStall('Operational watchdog expired',{'timeout_seconds':seconds})
+        except Exception as exc:
+            if self.timed_out:
+                error=RuntimeStall('Operational watchdog expired',{'timeout_seconds':seconds})
+                error.partial=getattr(exc,'partial',{})
+                error.partial_response=getattr(exc,'partial_response',{})
+                raise error from exc
+            raise
+        finally:timer.cancel()
+
+    def launch_arguments(self,exe,model,context,help_text,layers='all'):
+        args=[exe,'--model',model['paths'][0],'--alias',self.owned_id,'--host','127.0.0.1','--port',str(self.port),
+              '--ctx-size',str(context['allocated_tokens']),'--n-predict','-1','--gpu-layers',str(layers),
+              '--fit','off','--parallel','1','--split-mode','none','--no-context-shift','--slots',
+              '--reasoning','off','--api-key',self.token]
+        # Structured-state benchmarks use direct output only. Never let
+        # llama.cpp/model chat templates silently enable reasoning via "auto".
+        # capabilities() requires --reasoning so this cannot degrade silently.
+        # llama.cpp routes core INFO messages (including the authoritative
+        # "offloaded X/Y layers to GPU" placement summary) at verbosity 4.
+        # The server default is 3, which hides that evidence on current builds.
+        if '--log-verbosity' in help_text or '--verbosity' in help_text or '-lv' in help_text:
+            args += ['--log-verbosity','4']
+        # Current llama.cpp gates POST /slots/{id}?action=erase behind
+        # --slot-save-path even though erase itself writes no slot file.
+        # Keep that directory private to the Workbench runtime cache.
+        if '--slot-save-path' in help_text:
+            slot_path=Path(self.settings.get('runtime_cache',Path.cwd()/'.local/runtime-cache'))/'slots'
+            slot_path.mkdir(parents=True,exist_ok=True)
+            args += ['--slot-save-path',str(slot_path.resolve())]
+        for flag in ('--jinja','--no-webui','--no-mmproj','--op-offload','--kv-offload'):
+            if flag in help_text:args.append(flag)
+        for flag in ('--n-cpu-moe','--n-cpu-ffn'):
+            if flag in help_text:args += [flag,'0']
+        return args
+
+    def load(self,model,context,cancel=None,layers='all',execution_class='full_gpu'):
+        self.progress('Loading model',0,'Checking runtime and GPU controls.')
+        self.lines=[];self.load_metadata={};self.context=context['allocated_tokens'];self.timed_out=False
+        self.requested_layers=layers;self.execution_class=execution_class
+        self.owned_id='rpg-workbench-'+model['id']
+        exe=executable('llama-server',self.settings.get('llama_path',''))
+        if not exe:raise RunFailure('Select or install llama-server in Worker setup')
+        info=capabilities(exe,preparation=False);self.version_info={'llama_server':info['version']}
+        with socket.socket() as sock:
+            sock.settimeout(.25)
+            if sock.connect_ex(('127.0.0.1',self.port))==0:
+                raise RunFailure(f'Port {self.port} belongs to another process; it was not stopped')
+        args=self.launch_arguments(exe,model,context,info['help'],layers)
+        self.progress('Loading model',15,'Runtime verified; launching llama-server.')
+        devices=re.findall(r'^\s*((?:CUDA|Vulkan)\d+)\s*:\s*(.*)$',info.get('devices',''),re.M)
+        if devices:
+            cuda=[d for d in devices if d[0].startswith('CUDA')]
+            if cuda:
+                if len(cuda)!=1:raise RunFailure('Native runtime exposes multiple CUDA devices; use one allocated/visible GPU')
+                chosen=cuda[0][0]
+            else:
+                if os.environ.get('SLURM_JOB_ID'):raise RunFailure('Use CUDA in Slurm; Vulkan does not honor the CUDA allocation mask')
+                name=re.sub(r'^(?:NVIDIA\s+)?(?:GeForce\s+)?','',self.gpu.get('name',''),flags=re.I)
+                matches=[d for d in devices if name and name.lower() in d[1].lower()]
+                if len(matches)!=1:raise RunFailure('Could not map the Vulkan device to the detected NVIDIA GPU')
+                chosen=matches[0][0]
+            args+=['--device',chosen]
+            self.version_info['selected_device']=chosen
+        elif info.get('devices') is not None:raise RunFailure('Native runtime did not identify a GPU device')
+        env={k:v for k,v in os.environ.items() if not k.startswith(('LLAMA_ARG_','HF_','GGML_'))}
+        if 'CUDA_VISIBLE_DEVICES' not in env and self.gpu.get('uuid'):env['CUDA_VISIBLE_DEVICES']=self.gpu['uuid']
+        cache=Path(self.settings.get('runtime_cache',Path.cwd()/'.local/runtime-cache'));cache.mkdir(parents=True,exist_ok=True)
+        env.update(CUDA_CACHE_PATH=str(cache),XDG_CACHE_HOME=str(cache),HF_HOME=str(cache/'huggingface'))
+        flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
+        started=time.perf_counter()
+        with self._loading_lock:
+            self._loading_status={'phase':'Starting runtime','last_output_at':None,'last_runtime_line':None}
+        try:
+            self.progress('Loading model',25,'Starting model process and waiting for readiness.')
+            self.process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,
+                                          encoding='utf-8',errors='replace',env=env,**flags)
+            process=self.process
+            def drain():
+                for line in process.stdout:
+                    line=line.rstrip().replace(self.token,'[REDACTED]')
+                    self.lines.append(line);self.log('backend',line)
+                    with self._loading_lock:
+                        self._loading_status.update(last_output_at=time.perf_counter(),last_runtime_line=line)
+                        phase=loading_phase(line)
+                        if phase and self._loading_status['phase'] not in ('Verifying model','Readiness probe','Ready'):
+                            self._loading_status['phase']=phase
+            self.reader=threading.Thread(target=drain,daemon=True);self.reader.start()
+            with self._loading_scope(model,started):
+                from .backends import BackendError
+                while True:
+                    if cancel and cancel.is_set():raise Cancelled('Stopped during loading')
+                    if process.poll() is not None:
+                        if self.reader:self.reader.join(timeout=1)
+                        raise classify_load_failure('\n'.join(self.lines[-60:]) or 'Runtime exited while loading')
+                    evidence=placement(self.lines)
+                    if execution_class=='full_gpu' and evidence['status']=='cpu_offloaded':
+                        raise CPUOffload('CPU model placement detected before benchmark',evidence)
+                    try:
+                        if self._model_health(cancel).get('status')=='ok':
+                            with self._loading_lock:self._loading_status['phase']='Verifying model'
+                            self.progress('Loading model',75,'llama-server is healthy; verifying placement and context.')
+                            break
+                    except BackendError as exc:
+                        #503 means loading; connection errors can occur before
+                        #the owned process starts listening. Other errors fail.
+                        if not str(exc).startswith('HTTP 503:') and not isinstance(exc.__cause__,(OSError,http.client.HTTPException)):
+                            raise
+                        with self._loading_lock:self._loading_status['last_health_error']=str(exc)
+                    time.sleep(.15)
+                evidence=placement(self.lines)
+                if evidence['status']=='unverified':raise UnverifiedPlacement('No verifiable layer-placement report',evidence)
+                if execution_class=='full_gpu' and evidence['status']!='full_gpu':raise CPUOffload('Partial GPU placement',evidence)
+                if execution_class=='cpu_offloaded' and evidence['status']=='full_gpu':
+                    raise RunFailure('Hybrid load unexpectedly reports all layers on GPU',evidence)
+                if evidence.get('gpu_layers',0)==0:raise DoesNotFit('No model layers were placed on the GPU',evidence)
+                models=self.transport.request('/v1/models')
+                if not any(m.get('id')==self.owned_id for m in models.get('data',[])):raise RunFailure('Loaded model identity mismatch')
+                props=self.transport.request('/props')
+                settings=props.get('default_generation_settings',{})
+                actual=settings.get('n_ctx') or settings.get('params',{}).get('n_ctx')
+                if actual and actual!=self.context:raise RunFailure('Runtime changed the context allocation')
+                self.load_metadata={'placement':evidence,'execution_class':execution_class,'requested_gpu_layers':layers,
+                    'context':context,'load_seconds':time.perf_counter()-started,'load_timeout_seconds':None,
+                    'implementation_fingerprint':implementation_fingerprint(),
+                    'arguments':['[REDACTED]' if a==self.token else a for a in args],
+                    'runtime':self.version_info,'properties':props,
+                    'full_gpu_layers_verified':evidence['status']=='full_gpu',
+                    'independent_os_residency_verified':False}
+                with self._loading_lock:self._loading_status['phase']='Readiness probe'
+                self.progress('Loading model',90,'Placement verified; running readiness probe.')
+                probe=self.generate([{'role':'user','content':'Reply with the single word READY.'}],
+                                    {'temperature':0,'seed':42,'top_p':1},None,'default',cancel)
+                if probe['finish_reason']!='stop' or not probe['text'].strip():raise RunFailure('Readiness probe did not finish normally')
+                self.load_metadata['health_check']=probe;self.load_metadata['health_exact_ready']=probe['text'].strip()=='READY'
+                self.clear_cache()
+                with self._loading_lock:self._loading_status['phase']='Ready'
+                self.progress('Loading model',100,'Model loaded and ready.')
+            return self.load_metadata
+        except Exception as exc:
+            from .backends import BackendError
+            if cancel and cancel.is_set() and not isinstance(exc,Cancelled):
+                exc=Cancelled('Stopped during loading')
+            elif isinstance(exc,BackendError):
+                converted=classify_load_failure(str(exc));converted.partial_response=getattr(exc,'partial_response',{})
+                exc=converted
+            self.load_metadata.update(context=context,execution_class=execution_class,
+                placement=placement(self.lines),load_seconds=time.perf_counter()-started,load_timeout_seconds=None,
+                load_timeout_policy='completion_manual_stop_or_runtime_error',loading_diagnostics=self._loading_snapshot(started),
+                implementation_fingerprint=implementation_fingerprint())
+            if isinstance(exc,RunFailure):exc.evidence={**self.load_metadata,**exc.evidence}
+            self.unload();raise exc
+
+    def seed_reproducibility_check(self,cancel=None):
+        from .seedcheck import run_seed_check
+        return run_seed_check(self,cancel,self.progress)
+
+    def clear_cache(self):
+        result=self.transport.request('/slots/0?action=erase',{})
+        if type(result.get('n_erased')) is not int:raise Unsupported('Runtime did not confirm prompt-cache erasure')
+        return result
+
+    def generate(self,messages,settings,schema,cache='default',cancel=None):
+        if cancel and cancel.is_set():raise Cancelled('Stopped')
+        request_messages,adaptation=_template_compatible_messages(messages,self.load_metadata.get('properties',{}))
+        from .backends import BackendError
+        try:text=self.transport.request('/apply-template',{'messages':request_messages})['prompt']
+        except BackendError as exc:
+            classified=classify_load_failure(str(exc));partial=getattr(exc,'partial_response',{})
+            if adaptation:partial={**partial,'request_messages':request_messages,'message_adaptation':adaptation}
+            classified.partial_response=partial;raise classified from exc
+        count=len(self.transport.request('/tokenize',{'content':text,'add_special':True})['tokens'])
+        if count+256>=self.context:raise ContextCapacity('Input leaves insufficient continuation space',count+4096)
+        if cache=='off':self.clear_cache()
+        body={'model':self.owned_id,'messages':request_messages,**settings,'stream':True,'stream_options':{'include_usage':True},
+              'max_tokens':-1,'id_slot':0,'cache_prompt':cache!='off'}
+        if schema is not None:body['response_format']={'type':'json_schema','json_schema':{'name':'step_output','strict':True,'schema':schema}}
+        try:result=self.transport.request('/v1/chat/completions',body,stream=True,cancel=cancel)
+        except BackendError as exc:
+            partial=getattr(exc,'partial_response',{})
+            if adaptation:partial={**partial,'request_messages':request_messages,'message_adaptation':adaptation}
+            if cancel and cancel.is_set():
+                stopped=Cancelled('Stopped');stopped.partial_response=partial;raise stopped from exc
+            classified=classify_load_failure(str(exc));classified.partial_response=partial
+            raise classified from exc
+        result['input_tokens_verified']=count;result['output_limit_policy']='EOS or native context; no token cap'
+        if adaptation:
+            result['request_messages']=request_messages;result['message_adaptation']=adaptation
+        if result['finish_reason']=='length':
+            error=ContextCapacity('Continuation reached context capacity',self.context+1)
+            error.partial_response=result;raise error
+        return result
+
+    def unload(self):
+        process=self.process
+        try:
+            if process:
+                if process.poll() is None:
+                    process.terminate()
+                    try:process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:process.kill();process.wait(timeout=10)
+                if self.reader:self.reader.join(timeout=2)
+                if process.stdout:process.stdout.close()
+        finally:self.process=None;self.reader=None;self.owned_id=None
