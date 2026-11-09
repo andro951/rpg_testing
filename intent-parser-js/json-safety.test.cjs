@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict');const {normalizeIntent}=require('./index.cjs');let passed=0;
+const symbolObject={[Symbol('secret')]:1};assert.throws(()=>normalizeIntent('',symbolObject));passed++;
+const extra=[];extra.note=1;assert.throws(()=>normalizeIntent('',extra));passed++;
+const sparse=Array(2);assert.throws(()=>normalizeIntent('',sparse));passed++;
+let reads=0;const getter={get x(){reads++;return 1;}};assert.throws(()=>normalizeIntent('',getter));assert.equal(reads,0);passed++;
+const hidden={};Object.defineProperty(hidden,'x',{value:1});assert.throws(()=>normalizeIntent('',hidden));passed++;
+const cycle={};cycle.x=cycle;assert.throws(()=>normalizeIntent('',cycle));passed++;
+const frozen=Object.freeze({a:1});assert.deepEqual(normalizeIntent('update path:a value:2',frozen),[{op:'update',path:['a'],value:2}]);passed++;
+const nullProto=Object.assign(Object.create(null),{a:1});assert.deepEqual(normalizeIntent('',nullProto),[]);passed++;
+console.log(JSON.stringify({passed,failed:0,scope:'JSON-only API inputs without silently discarded properties or getter execution'}));

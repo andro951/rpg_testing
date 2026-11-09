@@ -1,0 +1,41 @@
+operation : component+
+component : operation_field | path_field | value_field | operation_type | json_value | path
+operation_field : OP_LABEL delimiter operation_type
+path_field : PATH_LABEL delimiter path
+value_field : VALUE_LABEL delimiter json_value
+delimiter : COLON | DELIMITER
+separator : SLASH | PATH_SEPARATOR
+path_delimiter : SLASH | PATH_SEPARATOR | SEP_COMMA
+operation_type : OPERATION | STRING
+path : grouped_path | scalar_path
+scalar_path : SLASH? path_part (separator path_part)*
+grouped_path : LPAREN path_parts RPAREN | LBRACKET path_parts RBRACKET | LBRACE path_parts RBRACE
+path_parts : (path_part path_delimiter?)*
+path_part : STRING | NUMBER | WORD | OPERATION | BOOLEAN | NULL
+json_value : json_object | json_array | STRING | NUMBER | BOOLEAN | NULL
+json_object : LBRACE members? RBRACE
+members : member (SEP_COMMA member)*
+member : json_key COLON json_value
+json_key : STRING | OP_LABEL | PATH_LABEL | VALUE_LABEL
+json_array : LBRACKET elements? RBRACKET
+elements : json_value (SEP_COMMA json_value)*
+OP_LABEL : /(?:"(?:op|operation|type)"|(?:op|operation|type)\b)(?=\s*(?::|=|->))/i (KEEP)
+PATH_LABEL : /(?:"(?:path|from|source|to|destination)"|(?:path|from|source|to|destination)\b)(?=\s*(?::|=|->))/i (KEEP)
+VALUE_LABEL : /(?:"(?:value)"|(?:value)\b)(?=\s*(?::|=|->))/i (KEEP)
+OPERATION : /(?:add|append|insert|update|remove|delete|copy|move)\b/i (KEEP)
+STRING : /"(?:[^"\\\r\n]|\\.)*"/ (KEEP)
+NUMBER : /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/ (KEEP)
+BOOLEAN : /(?:true|false)\b/ (KEEP)
+NULL : /null\b/ (KEEP)
+DELIMITER : /=>|->|=/ (KEEP)
+COLON : /:/ (KEEP)
+SLASH : /\// (KEEP)
+PATH_SEPARATOR : /\./ (KEEP)
+WORD : /(?:(?!->)[^\s"(){}\[\],;:=\/\.>])+/ (KEEP)
+LPAREN : /\(/ (KEEP)
+RPAREN : /\)/ (KEEP)
+LBRACE : /\{/ (KEEP)
+RBRACE : /\}/ (KEEP)
+LBRACKET : /\[/ (KEEP)
+RBRACKET : /\]/ (KEEP)
+SEP_COMMA : /,/ (KEEP)

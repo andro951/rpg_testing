@@ -2,6 +2,7 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const GF=require('./load-forge.cjs');
+const safety=require('./json-contract.cjs');
 const grammar=fs.readFileSync(path.join(__dirname,'intent.grammar'),'utf8');
 const forge=new GF(grammar);
 const operationForge=new GF(fs.readFileSync(path.join(__dirname,'operation.grammar'),'utf8'));
@@ -16,16 +17,17 @@ function simplify(x){
  return {kind:'token',type:x.type,text:x.value};
 }
 function flatten(x){return Array.isArray(x)?x.flatMap(flatten):[x];}
-function lexParse(text){return flatten(simplify(forge.parse(text)));}
+function lexParse(text){const tree=flatten(simplify(forge.parse(text)));function check(x){if(x.kind==='group')flatten(x.children).forEach(check);else if(x.type==='STRING')safety.unicode(JSON.parse(x.text));else if(x.type==='WORD')safety.unicode(x.text);else if(x.type==='NUMBER')safety.number(x.text);}tree.forEach(check);return tree;}
 function isSep(x){return x.kind==='token'&&['SEP_COMMA','NEWLINE'].includes(x.type);}
 function tokenValue(x){return x.type==='STRING'?JSON.parse(x.text):x.text;}
 function render(x){if(x.kind==='group')return x.open+x.children.map(render).join(' ')+opens[x.open];return x.text;}
 function pathTokens(xs){
+ const explicitlyGrouped=xs.length===1&&xs[0].kind==='group';
  if(xs.length===1&&xs[0].kind==='group'){xs=flatten(xs[0].children);if(xs.length===0)return [];}
  if(xs.length===1&&xs[0].type==='STRING'){
   const s=tokenValue(xs[0]);
   // Quoted slash strings use RFC6901 escaping. Quoted literal segments use array notation.
-  if(s.startsWith('/'))return s.slice(1).split('/').map(p=>p.replace(/~1/g,'/').replace(/~0/g,'~'));
+  if(!explicitlyGrouped&&s.startsWith('/')){if(/~(?:[^01]|$)/.test(s))throw Error('Invalid JSON Pointer escape');return s.slice(1).split('/').map(p=>p.replace(/~1/g,'/').replace(/~0/g,'~'));}
   return [s];
  }
  const out=[];
@@ -33,6 +35,7 @@ function pathTokens(xs){
   if(x.kind!=='token')throw Error('Nested path grouping is ambiguous');
   if(['PATH_SEPARATOR','SEP_COMMA','NEWLINE'].includes(x.type))continue;
   if(!['STRING','WORD','NUMBER'].includes(x.type))throw Error('Invalid path token');
+  if(x.type==='NUMBER'&&Number.isInteger(Number(x.text))&&!Number.isSafeInteger(Number(x.text)))throw Error('Unsafe integer path token');
   out.push(x.type==='NUMBER'?JSON.parse(x.text):x.type==='WORD'&&['true','false','null'].includes(x.text)?JSON.parse(x.text):tokenValue(x));
  }
  if(!out.length)throw Error('Empty path requires explicit root representation');
@@ -47,7 +50,7 @@ function valueOf(xs){
    const key=tokenValue(children[i]);if(keys.has(key))throw Error('Duplicate JSON value key');keys.add(key);
   }
  }children.forEach(checkGroup);};xs.forEach(checkGroup);
- const checkNumber=x=>{if(typeof x==='number'&&!Number.isFinite(x))throw Error('Nonfinite JSON number');if(x&&typeof x==='object')Object.values(x).forEach(checkNumber);};checkNumber(value);
+ const checkNumber=x=>{if(typeof x==='number'&&(!Number.isFinite(x)||(Number.isInteger(x)&&!Number.isSafeInteger(x))))throw Error('Nonfinite or unsafe JSON number');if(x&&typeof x==='object')Object.values(x).forEach(checkNumber);};checkNumber(value);
  return value;
 }
 function parseRecord(xs){
@@ -89,7 +92,8 @@ function parseRecord(xs){
  let op;
  if(fields.op){if(fields.op.length!==1)throw Error('Exactly one operation type required');op=operations[String(tokenValue(fields.op[0])).toLowerCase()];}
  else{
-  const positions=unlabeled.map((x,i)=>x.type==='WORD'&&operations[x.text.toLowerCase()]?i:-1).filter(i=>i>=0);
+  let positions=unlabeled.map((x,i)=>x.type==='WORD'&&operations[x.text.toLowerCase()]?i:-1).filter(i=>i>=0);
+  if(!positions.length)positions=unlabeled.map((x,i)=>x.type==='STRING'&&operations[String(tokenValue(x)).toLowerCase()]?i:-1).filter(i=>i>=0);
   if(positions.length!==1)throw Error('Exactly one unambiguous operation type required');
   op=operations[String(tokenValue(unlabeled.splice(positions[0],1)[0])).toLowerCase()];
  }
@@ -110,12 +114,12 @@ function parseRecord(xs){
   }
  }
  if(unlabeled.length){
-  if((op==='copy'||op==='move')&&!ir.path&&Boolean(ir.from)!==Boolean(ir.to)&&unlabeled.length===1&&unlabeled[0].kind==='group'){
+  if((op==='copy'||op==='move')&&!ir.path&&Boolean(ir.from)!==Boolean(ir.to)&&unlabeled.length===1&&(unlabeled[0].kind==='group'||unlabeled[0].type==='STRING')){
    ir[ir.from?'to':'from']=pathTokens(unlabeled);unlabeled.length=0;
   }
   if(unlabeled.length&&(ir.path||ir.from||ir.to))throw Error('Unlabeled component conflicts with labeled paths');
   if(unlabeled.length&&(op==='copy'||op==='move')){
-   if(unlabeled.length!==2||!unlabeled.every(x=>x.kind==='group'))throw Error('Two unlabeled paths require explicit grouping');
+   if(unlabeled.length!==2||!unlabeled.every(x=>x.kind==='group'||x.type==='STRING'))throw Error('Two unlabeled paths require explicit grouping');
    ir.unlabeledPaths=unlabeled.map(x=>pathTokens([x]));
   }else if(unlabeled.length)ir.path=pathTokens(unlabeled);
  }
@@ -152,10 +156,13 @@ function repairOuterWrapper(text,{maxDepth=64}={}){
  return {text,repair:null};
 }
 function hasOperation(node){const children=flatten(node.children);return children.some((x,i)=>x.kind==='group'?hasOperation(x):
- (x.type==='WORD'&&Object.hasOwn(operations,x.text.toLowerCase()))||
+ (['WORD','STRING'].includes(x.type)&&Object.hasOwn(operations,String(tokenValue(x)).toLowerCase()))||
  (labels[String(tokenValue(x)).toLowerCase()]==='op'&&children[i+1]?.type==='DELIMITER'));}
 function parseIntent(text,options){return parseIntentWithDiagnostics(text,options).operations;}
 function parseSequence(nodes,{maxBoundaryAttempts=4096,maxOperations=256}={}){
+ nodes=flatten(nodes);while(nodes.length&&isSep(nodes[0]))nodes.shift();while(nodes.length&&isSep(nodes.at(-1)))nodes.pop();
+ const compact=[];for(let i=0;i<nodes.length;i++){if(!isSep(nodes[i])){compact.push(nodes[i]);continue;}let chosen=nodes[i];while(i+1<nodes.length&&isSep(nodes[i+1])){i++;if(nodes[i].type==='NEWLINE')chosen=nodes[i];}compact.push(chosen);}nodes=compact;
+
  // Newlines are candidate boundaries, never unconditional boundaries.
  // Exhaust all complete grammatical partitions and accept exactly one meaning.
  const xs=flatten(nodes);
@@ -191,23 +198,23 @@ function parseSequence(nodes,{maxBoundaryAttempts=4096,maxOperations=256}={}){
  if(candidates.length!==1)throw Error(candidates.length?'Ambiguous newline operation boundaries':'No complete operation sequence');
  return candidates[0];
 }
+function unwrapFence(text){const m=/^\s*```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*\s*$/i.exec(text);return m?{text:m[1],diagnostics:[{code:'MARKDOWN_FENCE_REMOVED',detail:'single enclosing JSON code fence'}]}:{text,diagnostics:[]};}
 function parseIntentWithDiagnostics(text,options={}){
  if(typeof text!=='string')throw Error('Intent text must be a string');
  if(text.length>(options.maxChars??65536))throw Error('Intent text size limit exceeded');
- const repaired=repairOuterWrapper(text,options);
- const tree=lexParse(repaired.text);
- // Groups and semicolons establish boundaries; newlines require a unique grammatical partition.
- const records=[]; let current=[];
- const flush=()=>{if(current.some(x=>!isSep(x)))records.push(...parseSequence(current,options));current=[];};
+ const unwrapped=unwrapFence(text),repaired=repairOuterWrapper(unwrapped.text,options),tree=lexParse(repaired.text);
+ const diagnostics=[...unwrapped.diagnostics,...(repaired.repair?[{code:'OUTER_GROUP_RECOVERED',detail:repaired.repair}]:[])];
+ const meaningful=tree.filter(x=>!isSep(x));
+ if(meaningful.length===1&&meaningful[0].kind==='group'&&flatten(meaningful[0].children).every(isSep))return {operations:[],diagnostics};
+ const candidates=new Map();const accept=r=>{if(r.length>(options.maxOperations??256))throw Error('Operation count limit exceeded');candidates.set(JSON.stringify(r),r);};
+ const retain=e=>{if(/limit exceeded|Ambiguous/.test(e.message))throw e;};
+ try{accept(parseSequence(tree,options));}catch(e){retain(e);}
+ try{const records=[];let current=[];const flush=()=>{if(current.some(x=>!isSep(x)))records.push(...parseSequence(current,options));current=[];};
  for(const node of tree){
-  if(node.kind==='token'&&node.type==='SEMICOLON'){flush();continue;}
-  if(node.kind==='group'&&current.every(isSep)&&hasOperation(node)){
-   flush();
-   const inner=flatten(node.children).filter(x=>!isSep(x));
-   if(inner.length&&inner.every(x=>x.kind==='group'))for(const child of inner)records.push(parseRecord(child.children));
-   else records.push(...parseSequence(node.children,options));
-  }else current.push(node);
- }
- flush();if(records.length>(options.maxOperations??256))throw Error('Operation count limit exceeded');return {operations:records,diagnostics:repaired.repair?[{code:"OUTER_GROUP_RECOVERED",detail:repaired.repair}]:[]};
+ if(node.kind==='token'&&node.type==='SEMICOLON'){flush();continue;}
+ if(node.kind==='group'&&current.every(isSep)&&hasOperation(node)){flush();const inner=flatten(node.children).filter(x=>!isSep(x));if(inner.length&&inner.every(x=>x.kind==='group'))for(const child of inner)records.push(parseRecord(child.children));else records.push(...parseSequence(node.children,options));}else current.push(node);
+ }flush();accept(records);}catch(e){retain(e);}
+ if(candidates.size!==1)throw Error(candidates.size?'Ambiguous complete operation interpretations':'No complete operation sequence');
+ return {operations:[...candidates.values()][0],diagnostics};
 }
 module.exports={parseIntent,parseIntentWithDiagnostics,parseRecord,parseSequence,lexParse,pathTokens,grammar};

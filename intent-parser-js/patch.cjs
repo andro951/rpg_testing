@@ -1,10 +1,19 @@
 'use strict';
+const {unicode}=require('./json-contract.cjs');
 function assertJSON(x,seen=new Set()){
- if(x===null||typeof x==='string'||typeof x==='boolean')return;
- if(typeof x==='number'){if(!Number.isFinite(x))throw Error('Nonfinite JSON number');return;}
+ if(typeof x==='string'){unicode(x);return;}if(x===null||typeof x==='boolean')return;
+ if(typeof x==='number'){if(!Number.isFinite(x)||(Number.isInteger(x)&&!Number.isSafeInteger(x)))throw Error('Nonfinite or unsafe JSON number');return;}
  if(typeof x!=='object')throw Error('Non-JSON value');
  if(seen.has(x))throw Error('Cyclic JSON value');
  if(!Array.isArray(x)&&Object.getPrototypeOf(x)!==Object.prototype&&Object.getPrototypeOf(x)!==null)throw Error('Non-JSON object');
+ if(Object.getOwnPropertySymbols(x).length)throw Error('Symbol keys are not JSON');
+ const descriptors=Object.getOwnPropertyDescriptors(x);
+ for(const [key,descriptor] of Object.entries(descriptors)){
+  unicode(key);
+  if(Array.isArray(x)&&key==='length')continue;
+  if(!Object.hasOwn(descriptor,'value')||!descriptor.enumerable)throw Error('JSON requires enumerable data properties, not accessors');
+  if(Array.isArray(x)&&(!/^(0|[1-9][0-9]*)$/.test(key)||Number(key)>=x.length))throw Error('Extra array properties are not JSON');
+ }
  seen.add(x);if(Array.isArray(x)){for(let i=0;i<x.length;i++){if(!Object.hasOwn(x,i))throw Error('Sparse JSON array');assertJSON(x[i],seen);}}else Object.values(x).forEach(v=>assertJSON(v,seen));seen.delete(x);
 }
 const clone=x=>{assertJSON(x);return JSON.parse(JSON.stringify(x));};
@@ -26,10 +35,8 @@ function resolve(root,path,{idKey='id'}={}){
 const ptr=parts=>parts.length?'/'+parts.map(s=>s.replace(/~/g,'~0').replace(/\//g,'~1')).join('/'):'';
 function setOwn(obj,key,value){Object.defineProperty(obj,key,{value,writable:true,enumerable:true,configurable:true});}
 function deleteResolved(r){if(r.parent===null)throw Error('Root removal unsupported');if(Array.isArray(r.parent))r.parent.splice(r.key,1);else delete r.parent[r.key];}
-function checkIdAppend(array,value,idKey){
- if((value===null||typeof value!=='object')&&array.some(v=>JSON.stringify(v)===JSON.stringify(value)))throw Error('Append would duplicate primitive identity');
- if(value&&typeof value==='object'&&own(value,idKey)&&array.some(v=>v&&typeof v==='object'&&own(v,idKey)&&JSON.stringify(v[idKey])===JSON.stringify(value[idKey])))throw Error('Append would create ambiguous duplicate identity');
-}
+function identity(value,idKey){if(value!==null&&typeof value==='object'){if(!own(value,idKey))return undefined;if(value[idKey]!==null&&typeof value[idKey]==='object')throw Error('Object identities must be scalar JSON values');return JSON.stringify(value[idKey]);}return JSON.stringify(value);}
+function checkIdAppend(array,value,idKey,exclude=-1){const id=identity(value,idKey);if(id!==undefined&&array.some((v,i)=>i!==exclude&&identity(v,idKey)===id))throw Error('Duplicate collection identity');}
 function concrete(op,state,options){
  op=clone(op);
  if(op.unlabeledPathValue){
@@ -50,7 +57,7 @@ function concrete(op,state,options){
  return op;
 }
 function execute(state,op,options){
- const idKey=options.idKey||'id';
+ const idKey=options.idKey??'id';
  if(['copy','move'].includes(op.op)){
   const source=resolve(state,op.from,options),dest=resolve(state,op.to,options);
   if(!Array.isArray(dest.node))throw Error('Destination must be a collection');
@@ -74,10 +81,14 @@ function execute(state,op,options){
  if(op.op==='update'){
   if(!r.parent)throw Error('Root replacement unsupported');
   // Identity changes can invalidate later ID-addressed operations; do not silently introduce duplicates.
-  if(r.key===idKey)throw Error('Identity-field update requires explicit policy');
-  if(Array.isArray(r.parent)&&op.value&&typeof op.value==='object'&&own(op.value,idKey)){
-   if(r.parent.some((v,i)=>i!==r.key&&v&&typeof v==='object'&&own(v,idKey)&&JSON.stringify(v[idKey])===JSON.stringify(op.value[idKey])))throw Error('Update would create ambiguous duplicate identity');
+  if(r.key===idKey){
+   const owner=resolve(state,op.path.slice(0,-1),options);
+   if(Array.isArray(owner.parent)){
+    if(op.value!==null&&typeof op.value==='object')throw Error('Object identities must be scalar JSON values');
+    checkIdAppend(owner.parent,{[idKey]:op.value},idKey,owner.key);
+   }
   }
+  if(Array.isArray(r.parent))checkIdAppend(r.parent,op.value,idKey,r.key);
   setOwn(r.parent,r.key,clone(op.value));return [{op:'replace',path:ptr(r.pointer),value:clone(op.value)}];
  }
  if(op.op==='remove'){deleteResolved(r);return [{op:'remove',path:ptr(r.pointer)}];}
@@ -102,4 +113,4 @@ function applyPatch(input,patch,options={}){
  for(const op of patch){validateShape(op);if(op.unlabeledPaths||op.unlabeledPathValue)throw Error('Custom patch must have resolved roles');execute(state,op,options);}
  return state;
 }
-module.exports={convertIntent,applyPatch,resolve};
+module.exports={convertIntent,applyPatch,resolve,assertJSON};

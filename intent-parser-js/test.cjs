@@ -15,18 +15,14 @@ test('unlabeled uniquely typed roles',()=>{const ir=parseIntent('copy (items.a) 
 for(const s of ['remove path:/items/a value:1','op:remove op:copy path:/items/a','op:set path:/items/a value:2','op:insert path:/items before:a value:3','copy (items) (archive)','op:update path:/items/a/score value:"unterminated','op:remove path:/items/missing'])test('reject '+s,()=>assert.throws(()=>convertIntent(parseIntent(s),base)));
 test('unchanged input',()=>assert.equal(base.items.length,2));
 test('atomic failure',()=>{assert.throws(()=>applyPatch(base,[{op:'remove',path:['items','a']},{op:'remove',path:['missing']}]));assert.equal(base.items.length,2);});
-console.log(`${count} tests passed`);
 for(const s of ['(op:remove path:/items/a','op:remove path:/items/a)','[{op:remove path:/items/a},{op:remove path:/items/b}]'])test('outer recovery/list '+s,()=>assert.equal(parseIntent(s)[0].op,'remove'));
 for(const s of ['(op:append path:/items value:{"id":"x"','op:append path:/items value:[1,2','(op:remove path:/items/a]'])test('reject inner/mismatch '+s,()=>assert.throws(()=>parseIntent(s)));
 test('arrow delimiter',()=>eq('op=>remove path=>/items/a',[{op:'remove',path:['items','a']}]));
-console.log(`${count} total tests passed`);
 for(const value of ['[]','{}','null','true','false','0','"hi"','{"a":[],"b":{},"c":[1,2]}'])test('JSON value '+value,()=>assert.deepEqual(parseIntent('op:append path:/items value:'+value)[0].value,JSON.parse(value)));
 for(const value of ['{"a":1,"a":2}','{"nested":{"a":1,"a":2}}','1e400'])test('ambiguous/nonfinite '+value,()=>assert.throws(()=>parseIntent('op:append path:/items value:'+value)));
 test('path before operation',()=>eq('(items.a) remove',[{op:'remove',path:['items','a']}]));
-console.log(`${count} total tests passed`);
 for(const s of ['path: /items/a remove','path: (items.a) remove','path: (items.a) op:remove'])test('path first '+s,()=>eq(s,[{op:'remove',path:['items','a']}]));
 test('single directional label',()=>assert.deepEqual(convertIntent(parseIntent('copy (items.a) to:archive'),base),[{op:'copy',from:['items','a'],to:['archive']}]));
-console.log(`${count} total tests passed`);
 test('typed numeric identity differs from string',()=>{const input={items:[{id:1,v:0},{id:'1',v:5}]};const ir=parseIntent('op:update path:["items",1,"v"] value:2');assert.equal(applyPatch(input,convertIntent(ir,input)).items[0].v,2);assert.equal(applyPatch(input,convertIntent(ir,input)).items[1].v,5);});
 test('primitive identity removal',()=>{const input={items:[null,true,1,'1']};const ir=parseIntent('op:remove path:["items",1]');assert.deepEqual(applyPatch(input,convertIntent(ir,input)),{items:[null,true,'1']});});
 test('primitive move',()=>{const input={a:[3],b:[]};const ir=parseIntent('op:move from:["a",3] to:["b"]');assert.deepEqual(applyPatch(input,convertIntent(ir,input)),{a:[],b:[3]});});
@@ -34,7 +30,6 @@ test('same collection primitive transfer rejected',()=>assert.throws(()=>convert
 test('copy into descendant rejected',()=>assert.throws(()=>convertIntent(parseIntent('op:copy from:["a","x"] to:["a","x","children"]'),{a:[{id:'x',children:[]}]})));
 test('duplicate primitive append rejected',()=>assert.throws(()=>convertIntent(parseIntent('op:append path:["a"] value:3'),{a:[3]})));
 test('empty root append',()=>assert.deepEqual(applyPatch([],convertIntent(parseIntent('op:append path:[] value:3'),[])),[3]));
-console.log(`${count} final tests passed`);
 for(const s of ['append (archive) {"id":"c"}','{"id":"c"} append (archive)'])test('unlabeled path/value '+s,()=>assert.deepEqual(applyPatch(base,convertIntent(parseIntent(s),base)).archive,[{id:'c'}]));
 test('unlabeled quoted operation word is value',()=>assert.equal(applyPatch(base,convertIntent(parseIntent('update (items.a.score) "copy"'),base)).items[0].score,'copy'));
 test('labeled path unlabeled value',()=>assert.equal(applyPatch(base,convertIntent(parseIntent('update 3 path:items.a.score'),base)).items[0].score,3));

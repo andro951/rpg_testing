@@ -1,0 +1,114 @@
+[
+  {
+    "name": "generic replace is not an intent alias",
+    "text": "replace path:caption value:\"after\"",
+    "input": {
+      "caption": "before"
+    },
+    "reject": true
+  },
+  {
+    "name": "generic quoted replace is not an intent alias",
+    "text": "{\"op\":\"replace\",\"path\":[\"caption\"],\"value\":\"after\"}",
+    "input": {
+      "caption": "before"
+    },
+    "reject": true
+  },
+  {
+    "name": "generic set is not an intent alias",
+    "text": "set path:caption value:\"after\"",
+    "input": {
+      "caption": "before"
+    },
+    "reject": true
+  },
+  {
+    "name": "generic update remains supported",
+    "text": "update path:caption value:\"  edge text  \"",
+    "input": {
+      "caption": "before"
+    },
+    "expected": {
+      "caption": "  edge text  "
+    }
+  },
+  {
+    "name": "replace remains a literal field name",
+    "text": "update path:[\"replace\"] value:2",
+    "input": {
+      "replace": 1
+    },
+    "expected": {
+      "replace": 2
+    }
+  },
+  {
+    "name": "set remains a literal field name",
+    "text": "remove path:[\"set\"]",
+    "input": {
+      "set": 1
+    },
+    "expected": {}
+  },
+  {
+    "name": "current value patch replace is explicitly scoped",
+    "text": "[{\"op\":\"replace\",\"path\":\"/items/\\\"job/1\\\"/caption\",\"value\":\"  edge text  \"}]",
+    "input": {
+      "items": [
+        {
+          "key": "job/1",
+          "caption": "before"
+        }
+      ]
+    },
+    "options": {
+      "pathSyntax": "value_patch",
+      "idKey": "key"
+    },
+    "expected": {
+      "items": [
+        {
+          "key": "job/1",
+          "caption": "  edge text  "
+        }
+      ]
+    }
+  },
+  {
+    "name": "current host does not enable set",
+    "text": "set path:caption value:\"after\"",
+    "input": {
+      "caption": "before"
+    },
+    "options": {
+      "pathSyntax": "value_patch"
+    },
+    "reject": true
+  },
+  {
+    "name": "typed slash identity is literal",
+    "text": "remove [\"queue\",\"tasks\",\"job/1\"]",
+    "input": {
+      "queue": {
+        "tasks": [
+          {
+            "id": "job/1"
+          },
+          {
+            "id": "job/2"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "queue": {
+        "tasks": [
+          {
+            "id": "job/2"
+          }
+        ]
+      }
+    }
+  }
+]

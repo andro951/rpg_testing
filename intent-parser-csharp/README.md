@@ -1,0 +1,68 @@
+# Native C# intent parser
+
+A dependency-free .NET 8 port of the JavaScript GrammarForge intent-parser prototype. The native structural lexer and ordered component parser implement the two included grammar files; no Node.js, JavaScript engine, network service, or live model is needed at runtime.
+
+## Run
+
+```sh
+dotnet build
+dotnet run --no-build -- self-test
+dotnet run --no-build -- check fixtures/parity-fixtures.json
+dotnet run --no-build -- check fixtures/optional-parity-fixtures.json
+dotnet run --no-build -- check robustness-parity-fixtures.json
+dotnet run --no-build -- check fixtures/current-revision-fixtures.json
+dotnet run --no-build -- check fixtures/current-contract-regressions.json
+dotnet run --no-build -- replay fixtures/shared-fixtures.json
+dotnet run --no-build -- replay fixtures/shared-fixtures.json --json-patch
+```
+
+`check` verifies parsing, custom and RFC6902 conversion, final-state equality, immutability, expected rejection, and an independent RFC6902 interpreter. `replay` preserves original raw output and its SHA-256 hash. Expected answers are evaluated only after normalization/application, never supplied to parsing or conversion. These are offline software checks, not live-model accuracy measurements.
+
+## API
+
+Namespace `Csc592.IntentParser`, class `IntentParser`:
+
+- `BuildPrompt(string request, JsonNode? document, string idKey = "id")`
+- `ParseIntent(string text, IntentOptions? options = null)`
+- `ParseIntentWithDiagnostics(string text, IntentOptions? options = null)`
+- `ConvertIntent(JsonArray ir, JsonNode? input, IntentOptions? options = null)`
+- `NormalizeIntent(string text, JsonNode? document, IntentOptions? options = null)`
+- `ApplyPatch(JsonNode? input, JsonArray patch, IntentOptions? options = null)`
+- `ReplayPrepared(JsonArray records, IntentOptions? options = null)`
+
+`IntentOptions` defaults: `JsonPatch=false`, `IdKey="id"`, `MaxChars=65536` UTF-16 units, `MaxDepth=64`, `MaxOperations=256`, `MaxBoundaryAttempts=4096`, `PathSyntax=null`. Return objects preserve the JavaScript/Python wire keys (`op`, `path`, `value`, `from`, `to`, `operations`, `diagnostics`). CLR naming follows C# conventions.
+
+Default normalization returns only custom ID-addressed patches. `JsonPatch=true` returns only RFC6902 output, compiled against the exact input state in sequential order. Copy/move emit append-copy plus optional source removal, not positional insertion. Input objects are cloned; failures never partially mutate the caller's input.
+
+`--json-lines` reads requests from standard input and writes one `{"ok":true,"result":...}` or `{"ok":false,"error":...}` result per line. Actions are `parse`, `diagnostics`, `normalize`, `convert`, `apply`, `prompt`, and `replay`. Options use portable wire names `json_patch`, `idKey`, `maxChars`, `maxDepth`, `maxOperations`, and `maxBoundaryAttempts`, and `pathSyntax`. This provides a process-level conformance interface for tests and other hosts.
+
+## Current host paths
+
+`PathSyntax="value_patch"` is an explicit CSC592 host option for typed slash paths. Unquoted scalar path parts retain their JSON types; quoted embedded JSON string parts preserve literal strings and slashes. The default remains RFC6901-style quoted pointer strings with string parts. Array-form paths always preserve explicit scalar types. The current host operation `replace` maps to update only in this explicitly selected mode. Generic intent does not accept `replace` or `set` operation aliases.
+
+Normalization accepts the documented intent grammar only. RFC6902 remains an output format; no RFC input importer or automatic input-dialect bridge is provided.
+
+One exact enclosing bare/JSON Markdown fence can be removed with `MARKDOWN_FENCE_REMOVED` diagnostics. Prefix/suffix prose is not stripped. Values that resemble operation objects are considered as values and as operation groups, accepting exactly one complete interpretation.
+
+## Safety and limits
+
+Paths identify unordered object elements by typed ID and primitive elements by their own unique typed value. A primitive `1` and object `{ "id": 1 }` collide in the same collection because both have the same selector. String `"1"`, number `1`, boolean `true`, and `null` remain distinct. Append, replacement, transfers, and identity edits reject ambiguous duplicates.
+
+Literal values require intact strict JSON. Duplicate keys, unpaired UTF-16 surrogates, nonfinite or unsafe integer numbers, and nonzero numbers that underflow to zero reject. Valid Unicode surrogate pairs work. The numeric contract intentionally matches JavaScript binary64, rather than claiming arbitrary-precision JSON arithmetic.
+
+Newly introduced nonscalar object IDs also reject. Objects without IDs remain a host-schema concern.
+
+Root replacement/removal, positional insertion, same-collection transfers, transfer into the source/its descendants, and unresolved role ambiguity reject. One unmatched outer wrapper can recover with a diagnostic; inner malformed JSON is never repaired by guessing. Domain schema validation and whether a patch fulfills the user's actual request remain host responsibilities.
+
+This is a prototype port, not a production-readiness claim. `differential.cjs` is an optional development-only comparison with the reference JavaScript project, and is not a runtime dependency. Error wording can differ across language runtimes; accepted IR/patch/final-state semantics and rejection categories are tested.
+
+## Validation commands
+
+`./run-tests.sh` runs the dependency-free native suite. Optional developer comparisons:
+
+```sh
+JS_REFERENCE=../csc592-intent-parser DOTNET=dotnet node differential.cjs
+PYTHON_REFERENCE=../rpg_testing DOTNET=dotnet python3 cross-language-test.py
+```
+
+These compare acceptance, diagnostics, intent IR, both patch formats, offline replay, hashes, prompt strings, typed host paths, and numeric/Unicode edge cases. Diagnostic/error wording is not a stable cross-language API.
