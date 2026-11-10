@@ -1,116 +1,176 @@
-# RPG Testing Workbench â€” native llama.cpp
+# CSC592 JSON-update research and RPG Testing Workbench
 
-## Current research parser integration
+This repository studies how reliably language models can update structured state from **an existing JSON document and new information**. It contains the prompt/test builders, a native-model Workbench, intent-parser libraries, evaluators, and saved research evidence.
 
-The new Python intent parser is explicitly selectable in the live Workbench runner. See [selection, scope and validation](docs/live-intent-evaluation.md). The published root test_specs is the historical five-operation suite; current frozen overnight definitions must be supplied to the preparer. Existing strict scores, raw evidence and frozen runners remain unchanged. Preparation and validation do not start model inference.
+## Start here
 
-A browser-controlled benchmark for **original JSON state + new information â†’ structured state update**. The model and harness run on the GPU computer; your laptop is a private remote control through Tailscale.
+This is the navigation guide for the code on `main`. There are three different meanings of “current” to keep separate:
 
-**The active workbench no longer uses LM Studio.** It runs its own `llama-server`, browses Hugging Face model repositories, installs selected GGUF variants, and handles a full-GPU primary pass followed by an automatic recovery pass when needed. Setup can ask questions; a running experiment never waits for a repair popup.
+1. **Current research scope:** update existing fields, append elements to existing arrays, remove elements by unique ID/value, and no change. The base suite has **13 task cases, 38 input presentations, and 114 observations per method/model at three repetitions**. Start with [the scope description](docs/test-suite-v2/required-scope-v2.md) and [its builder](test_builder/required_scope.py).
+2. **Current reusable parser:** the JavaScript, C# and Python intent libraries support a broader language, including custom Move/Copy. The current research host intentionally permits a narrower set of operations. Start with [the grammar](intent-parser-js/intent.grammar) and [the live integration](docs/live-intent-evaluation.md).
+3. **What the default app discovers:** root [test_specs/](test_specs/) still contains the **historical five-operation suite: 21 definitions and 62 variants**. It is still executable, but it is **not the current research round**. Opening the root Workbench does not automatically select the 13-case scope or the newest frozen experiment. Prepare an explicit run from the intended definitions instead.
 
-## Open it without a terminal
+A retained file, an `enabled` flag, or an older document calling something “active” does not make it part of today's research scope. Historical evidence stays available for reproduction; do not mix it into current results just because it is present.
 
-Update `main` with GitHub Desktop, open the repository folder, and double-click **Start Workbench.vbs**. Python 3.10+ must already be installed. The graphical bootstrap asks permission before creating its private Python environment and installing missing requirements. Git is required by the harness's own tests and Git synchronization. No drivers are installed.
+### Find what you need
 
-**Start Demo.vbs** opens the same interface with a simulated model and no hardware requirement. It cannot install real models or runtimes. The current approved suite schedules **186 simulated observations** (62 prompt variations, each repeated three times). Run preflight, run, then run again to verify that completed cases are skipped. These outputs are not measurements of model quality or GPU speed.
+| I want to… | Start here |
+| --- | --- |
+| Understand the current research tasks and rules | [required-scope-v2.md](docs/test-suite-v2/required-scope-v2.md), [required_scope.py](test_builder/required_scope.py) |
+| Read or change the current model instructions | [Prompt sources and generated prompts](#prompt-sources-and-generated-prompts) below |
+| Read the actual intent grammar | [intent.grammar](intent-parser-js/intent.grammar), then [GRAMMAR-DESIGN.md](intent-parser-js/GRAMMAR-DESIGN.md) |
+| Use the parser/converter/updater in another program | [JavaScript](intent-parser-js/README.md), [C#](intent-parser-csharp/README.md), [Python](intent_parser/README.md) |
+| Run the current tests with the intent evaluator | [live-intent-evaluation.md](docs/live-intent-evaluation.md), [workbench/live.py](workbench/live.py) |
+| Follow one model call through scoring | [controller.py](workbench/controller.py) → [scheduler.py](workbench/scheduler.py) → [workflows.py](workbench/workflows.py) → [live_intent.py](evaluation/live_intent.py) / [scoring.py](workbench/scoring.py) |
+| Inspect completed experiments and exact prompts | [experiments/required-scope-v2/](experiments/required-scope-v2/), especially `cohorts/` and `runs/` |
+| Inspect raw model outputs or make reports | [results/](results/), [reporting/README.md](reporting/README.md), [evaluation/README.md](evaluation/README.md) |
+| Work on the UI or native model runtime | [workbench/web/](workbench/web/), [server.py](workbench/server.py), [native.py](workbench/native.py) |
+| Work on prompt optimization | [optimization/](optimization/), [full-model-coverage.md](docs/prompt-optimization/full-model-coverage.md) |
+| Identify things to skip as a newcomer | [Historical, superseded and archived material](#historical-superseded-and-archived-material) below |
 
-## First-time setup
+## Prompt sources and generated prompts
 
-1. **Choose your models folder.** It starts unset. On the GPU computer, **Choose models folderâ€¦** opens the operating systemâ€™s normal folder picker. The path is saved immediately and model scanning continues separately, so you can switch to **Installed models** while it scans. Existing GGUFs are discovered in place. A successful rescan/preflight treats this folder as the authoritative installed-model inventory: if you manually delete a model's GGUF files, its machine-local catalog assignment and stale artifact cache are removed automatically while historical benchmark results are retained. An unavailable/disconnected models folder is never treated as an empty authoritative scan. If empty, confirm **Use this empty folder**, or choose another. There is no automatic C-drive model location.
-2. **Find models.** Search a name or enter a Hugging Face `publisher/repository`, view quantizations and file sizes, select variants and a VRAM tier, then approve their download. Recommendations are estimates, not measurements. Split GGUFs are handled as one variant. You may also download models manually into your chosen folder.
-3. **Native runtime.** Browse official llama.cpp releases and explicitly install a suitable GPU build, or locate an existing `llama-server`. Runtime archives and caches stay inside the repository, not in the models folder. An old GTX 1080 needs a compatible driver/build; the runtime labels and preflight checks help identify candidates but cannot promise compatibility before a real load.
-4. **Preflight.** Resolve any listed issue using its specific action button. Preflight checks benchmark readiness only; Workbench unit/smoke tests are run separately with **Run Unit Tests**. It checks only models needed for unfinished work. A completed model does not need to remain installed. Existing uncatalogued models have a VRAM dropdown and an **Accept recommended** action. Model identity uses filename, size, modification time, and known repository/revision metadata; preflight does not reread entire GGUF files to generate SHA-256 hashes. Source-provided hashes are retained when available.
-5. **Run remaining tests.** Leave it running. No model-failure confirmation dialog will hold the rest of the queue hostage.
+### Current research prompts
 
-This folder choice applies **only to model files and their partial downloads**. Model assignments are stored in a machine-local root `models.json`; a fresh checkout can discover GGUFs before that file exists, and the file is created only when local model metadata is saved. `models.json` is ignored by Git. Tests stay in `test_specs/`. Real benchmark result JSON files are stored under tracked `results/` so they are normal Git evidence. Logs, preflight reports and operational settings stay under `.local/workbench/`; runtime files use `.local/runtime/`. Credentials and weights are excluded from Git. On first launch after this change, legacy result JSON under `.local/workbench/results/` is migrated into `results/` without overwriting conflicting evidence.
+- **[test_builder/required_scope.py](test_builder/required_scope.py)** owns the base current-scope selection and shared prompt text. `COMMON` contains database/operation/path rules, `JSON_FORMAT` contains output instructions, and `parts()` assembles them. Its active `METHODS` tuple contains only `research_json_v2`; the retained two-line `TEXT_FORMAT` is not an active method.
+- **[test_builder/templates/](test_builder/templates/)** contains individual task wording. **[fixtures.json](test_builder/fixtures.json)** supplies task data, schemas and parameters. That file contains all 21 base fixtures; `required_scope.fixtures()` selects the 13 in-scope ones and explicitly lists the eight excluded transfer cases.
+- **[test_builder/builder.py](test_builder/builder.py)** is the shared test/prompt builder. It validates fixtures, renders task wording and schema descriptions, constructs expected results, and packages definitions. It delegates `research_json_v2` construction to `required_scope.py`. It also retains older methods, so it is not exclusively current-scope code.
+- **[test_builder/original_prompt.py](test_builder/original_prompt.py)** supplies the original wrapper used by the current-scope renderer as well as earlier dot-path experiments. **[presentation.py](test_builder/presentation.py)** and **[workbench/dot_paths.py](workbench/dot_paths.py)** handle ID-keyed and full-path views.
+- **[test_builder/methods/](test_builder/methods/)** holds method-specific instructions for other builder paths. For `research_json_v2`, edit the actual constants in `required_scope.py`, not just the similarly named text file. **[normal_prompt.json](test_builder/normal_prompt.json)** and **[promotions/](test_builder/promotions/)** belong to the promoted value-patch/OPRO path, not a universal prompt used by every experiment.
 
-On **Logs**, **Download logs** saves the displayed entries as `rpg-testing-logs.txt`, and **Copy logs** copies the same text. The view contains the latest 300 events. Copy supports plain HTTP/Tailscale through a fallback; if the browser blocks automatic copying, a dialog selects the text for Ctrl+C. Both buttons are disabled when the log view is empty.
+To export a fresh current-scope draft without model inference:
 
-## Targeted runs
+```sh
+python -m test_builder.required_scope --output NEW_DRAFT_DIRECTORY
+```
 
-For the objective results table, double-click **Open_Results_Table.bat**. It now has
-five grouping presets, an editable ordered grouping list, user-created/deletable
-presets, and percentage subtotals at the bottom of each collapsible group. See
-[results table grouping](docs/results-table-grouping.md) for controls and total rules.
+Use a new directory. The export includes `test_specs/`, `references/`, `prompts/`, and `manifest.json`; definitions need exact-prompt review before execution. The command does not approve prompts or run models. Expected answers/reference patches must never be inserted into model prompts.
 
-**Run Individual Test** in the left sidebar selects one modelâ€”or **All** modelsâ€”and one enabled test definition, with all enabled variants or one chosen variant. **Test One Model** shows every enabled test with a checkbox; all are selected by default, and you can run any checked subset for one model. Native-model runs keep the test's repetitions, seeds and sampling settings; only pending cases run. Perchance runs each repetition independently, collapsing only unavailable setting variants within a repetition. Seeds are forwarded experimentally without a reproducibility guarantee. Use the page's check button to preflight that selection, or its run button to preflight and execute it. Progress and any repair actions appear in Overview; normal Results, Comparison and exports contain the evidence.
+**Do not use bare `python -m test_builder` as a shortcut for the current scope.** That command rebuilds the root generated suite from the full fixture/method catalog and refreshes its exports and metadata.
 
-Selection is temporary and does not edit `models.json` or test files. Targeted and full runs share case IDs and context allocation, so finishing targeted cases removes that work from the normal queue. The selected model must still satisfy the normal hardware tier and runtime checks. Unrelated missing or unassigned models do not block a selected run. Source-update restarts and automatic repair preserve the selection; they never broaden it to the entire queue.
+### Read the complete prompt actually sent
 
-## What happens while you are away
+In a generated experiment directory, look for:
 
-**Primary pass:** load a model with all layers requested on GPU, automatic fitting disabled, and llama.cpp reasoning explicitly set to `off` so every model is measured in direct-output mode rather than template-selected `auto` reasoning. Inspect the backend's placement report and readiness probe. If CPU model placement or GPU-memory failure occurs, record the failed qualification, unload, and proceed to the next model. Unknown placement is not called full GPU.
+- `prompts/<test-id>/<presentation>.txt`: readable complete prompt.
+- `prompts/<test-id>/<presentation>.messages.json`: exact API roles/content.
+- `test_specs/<test-id>.json`: captured workflow, prompt bindings, variants, sampling, expected state and result contract.
+- `manifest.json`: experiment identity, scope, prompt digests and exclusions where supplied.
 
-**Recovery pass:** after primary work finishes, revisit memory-related skips, smallest downloaded footprint first. Retry full GPU, then try a bounded sequence of hybrid placements. Hybrid results have separate identities and `execution_class: cpu_offloaded`; they are not pooled with full-GPU results. Unrelated model/runtime errors do not enter an endless retry loop.
+For a completed observation, its captured request and definition are the authority, not today's edited template. Root [prompt-review/](prompt-review/) and [prompts/patch-suite/](prompts/patch-suite/) are generated exports of the older broad suite, not an index of only the current 13-case scope. Edit source templates/data and use the appropriate exporter; do not hand-edit frozen evidence to match newer code.
 
-**Loading and test deadlines:** model loading and its readiness probe have no elapsed-time deadline. They wait for readiness, manual Stop or a runtime failure. Loading progress/logs report the phase, elapsed time and time since the last runtime output every five seconds; silence alone does not prove a hang. Legacy `load_timeout_seconds` settings are ignored. Every benchmark test has an explicit positive `timeout_seconds` field; the configured value controls only the time allowed for an active workflow after loading. It is excluded from case IDs, test-version comparison and table grouping. Changing it does not reopen completed cases, including timeouts; actual deadlines remain saved as run metadata. A case that reaches its test limit has only that active request cancelled, keeps its streamed partial output, is recorded as a terminal failed timeout, resets the prompt slot, and continues to the next case. Hybrid layer trials are bounded to four; automatic context expansions to two. The policy is recorded with results.
+## Intent parser, conversion and evaluation
 
-**Context:** generous automatic allocation includes the shared prefix, source, prompts and workflow structure. There is no context slider or artificial output-token cap. Native context is finite. If capacity is exhausted, the attempt is preserved and the worker retries from the beginning with a larger allocation when possible. Extra context consumes memory, so successful GPU fit is still required.
+### Reusable language implementations
 
-You can explicitly **Pause after case**, **Resume**, **Stop after model**, or **Stop now**. Completed files survive interruption. A bad JSON answer is a completed model result, not a reason to reroll until it passes.
+| Location | Purpose |
+| --- | --- |
+| [intent-parser-js/](intent-parser-js/) | Readable reference implementation. `index.cjs` exposes prompt building, parsing, conversion and patch application as separate functions. |
+| [intent-parser-js/intent.grammar](intent-parser-js/intent.grammar) | Canonical complete program/operation grammar, including component ordering, recursive groups, paths and JSON values. |
+| [intent-parser-js/tokens.grammar](intent-parser-js/tokens.grammar) | Structural token-tree adapter used during semantic conversion, not the complete program grammar. |
+| [intent-parser-js/build-grammar-spec.cjs](intent-parser-js/build-grammar-spec.cjs) | Generates `operation.grammar` and the shared grammar specification. Run it after canonical grammar edits; do not edit generated copies independently. |
+| [intent-parser-js/GrammarForge/](intent-parser-js/GrammarForge/) | Vendored GrammarForge runtime used directly by JavaScript. |
+| [intent-parser-csharp/](intent-parser-csharp/) | Native .NET 8 implementation, using the generated grammar specification. |
+| [intent_parser/](intent_parser/) | Native Python implementation using the same generated rules; no Node/model/provider invocation is required. |
 
-## Results and visibility
+Read [GRAMMAR-DESIGN.md](intent-parser-js/GRAMMAR-DESIGN.md) for the boundary between grammar and code. State-dependent path resolution, ambiguous-role rejection, literal `add` interpretation, data safety and resource limits remain semantic checks. [ALIASES.md](intent-parser-js/ALIASES.md) records accepted/rejected spellings. These remain experimental libraries with explicit limits, not a claim of arbitrary text recovery or production readiness.
 
-Detailed objective-test diagnostics can be generated offline with `python -m evaluation`. Reports explain format, operation structure, pointer resolution, requested changes, array order/content and final-state checks, while keeping saved scores and raw evidence unchanged. See [evaluator instructions](evaluation/README.md) and [coverage review](docs/evaluator-plan/implementation-review.md).
+The generic API keeps parsing, conversion and updating separate. Custom patches are the default. `json_patch: true` selects standard RFC 6902 output **instead**; its indexed paths depend on the starting state and generated operation order. Custom Move/Copy semantics are not the same as directly emitting RFC Move/Copy. See each language's README for its API and limitations.
 
-Prompt-sharing metadata lives in [optimization/sharing.json](optimization/sharing.json). It records reviewed instruction locations, compatible component families and ordered expansion scopes for future prompt optimization. Validate it with `python -m optimization`; see [catalog instructions](optimization/README.md). Metadata does not start optimization runs or alter existing benchmark prompts.
+### Current live research integration
 
-Generate a self-contained offline statistics dashboard from saved evidence with `python -m reporting.report`. Open `.local/reports/statistics.html` in a modern browser. It opens on a compact objective-results matrix with 24-pixel pass/fail squares, models as columns, variants/repetitions as rows, test subtotals and model totals. It includes tests with fixed answer or final-state oracles, current/historical scope filters and links to original evidence. Dialogue and other open-ended generation are excluded from this table and its totals, with saved evidence preserved for a separate view later. The existing long-array comparison, failure and latency views remain available. See [offline reporting](reporting/README.md) for ZIP input, matching rules and tests.
+- **[evaluation/live_intent.py](evaluation/live_intent.py):** versioned `dot-intent-v1` host for the current dot-path contract. It normalizes once, with state/schema checks, before the usual final-state verdict.
+- **[workbench/live.py](workbench/live.py):** prepares isolated definitions with an explicit evaluator identity and serves that run.
+- **[workbench/workflows.py](workbench/workflows.py):** integrates selection into normal execution/scoring. **[domain.py](workbench/domain.py)** and **[scoring.py](workbench/scoring.py)** hold definition/identity validation and core grading. **[dot_paths.py](workbench/dot_paths.py)** and **[value_paths.py](workbench/value_paths.py)** implement distinct path contracts. The live dot host also reuses the schema-aware resolver in **[evaluation/dot_separators_v2.py](evaluation/dot_separators_v2.py)**.
+- **[evaluation/value_intent.py](evaluation/value_intent.py)** and **[intent_replay.py](evaluation/intent_replay.py):** retained offline/dialect-aware replay entry points. They are not the current live dot host.
 
-Overview shows the current pass, execution class, reported GPU/CPU layer counts, and available whole-device memory samples. Layer reports do not prove that Windows will never page GPU allocations. CPU utilization, a host-pinned buffer, or a CPU-mapped model file alone is not proof of CPU model-layer execution.
+**Strict scoring remains the default.** Installing the new parser does not silently regrade old results. `dot-intent-v1` must be selected for a new run, and its fingerprint includes parser/grammar/host dependencies. It does not enable generic Move/Copy in the narrower research suite. No-change currently requires an explicit empty array; ordinary no-change prose is not automatically accepted.
 
-**Results** exposes raw prompts, responses, scores, attempts, timings and provenance. Delete a case file to make that case pending again. A failed primary qualification and a later hybrid result are separate records. Recovery interrupted before completion resumes as recovery work.
+Prepare a new run from the exact intended, enabled definitions, then serve it separately:
 
-**Comparison** separates model files, test definitions, context configurations, hardware, software and execution classes. **Download all logs & results** exports JSON evidence, logs and CSV/JSON summaries. Application logging and Git writes occur outside timed workflows. GPU telemetry is sampled in memory through NVML; it is a sampled total-device peak, not exact model-only memory accounting.
+```sh
+python -m workbench.live prepare --definitions CURRENT_ROUND/test_specs --output NEW_RUN --evaluator dot-intent-v1
+python -m workbench.live serve --root NEW_RUN --port 8787
+```
 
-## Tests and caching
+Use repeated `--test EXACT_TEST_ID` arguments for a subset. `strict-json-v1` prepares a separate strict control. Preparation does not start inference, approve prompts or alter frozen runners. Configure runtime/models and inspect the selected model/test scope before pressing Run. See [live integration](docs/live-intent-evaluation.md) and [recorded validation](docs/live-intent-validation.md).
 
-The Perchance Text Generator adapter follows the standing [provider capability policy](docs/perchance-capability-policy.md): unsupported or unverified setting/seed-only sweeps collapse within each configured repetition; ordinary repetitions remain independent service trials, with collapsed cases mapped to that observation. They are never reported as independently executed controlled trials. The adapter is implemented and locally tested; real service inference remains unverified until connection setup succeeds.
+## Workbench application and supporting code
 
-Preflight first checks whether Perchance has pending work on this worker, then verifies its browser dependency and local browser launch. Missing or broken setup opens an **Install Perchance browser dependency?** popup. **Yes, install** installs Playwright and a managed Chromium browser if needed, verifies launch, then continues preflight. **No, skip this run** records the choice and leaves Perchance pending while local tests can continue. A preflight's No applies to exactly one matching run; the next run asks again if setup is still needed. Installation occurs on the worker computer, including when controlling through Tailscale.
+The current app is **[workbench/](workbench/)**, using its own native `llama-server`, with a separately selected Perchance remote provider. It no longer uses LM Studio.
 
-In **Worker setup**, use **Verify Perchance connection** to complete any site verification in the separate window. Select **Perchance Text Generator** under **Test One Model** or **Run Individual Test**, check the plan, then run. It requires exactly one detected NVIDIA GPU in the 8 GB tier; larger tiers are excluded. Choose **Skip local model-folder onboarding** for a remote-only worker. The browser window closes after the batch; its private profile under `.local/workbench/perchance-profile` retains site verification without sharing the EmberAdventures browser. No saved Perchance page is changed.
+| Area | Files and directories |
+| --- | --- |
+| App entry points and setup | [launch_workbench.py](launch_workbench.py), [bootstrap.pyw](bootstrap.pyw), `Start Workbench.vbs`, `Start Workbench.command`, `Start Demo.vbs` |
+| Web UI / API | [workbench/web/](workbench/web/), [server.py](workbench/server.py) |
+| Queue, execution and resume | [controller.py](workbench/controller.py), [scheduler.py](workbench/scheduler.py), [workflows.py](workbench/workflows.py), [planning.py](workbench/planning.py) |
+| Native inference and model setup | [native.py](workbench/native.py), [model_manager.py](workbench/model_manager.py), [runtimes.py](workbench/runtimes.py), [inventory.py](workbench/inventory.py), [preflight.py](workbench/preflight.py) |
+| Perchance adapter | [perchance.py](workbench/perchance.py), [perchance_setup.py](workbench/perchance_setup.py), [perchance_trials.py](workbench/perchance_trials.py), [tools/perchance-text/](tools/perchance-text/) |
+| Optimization and coverage | [optimization/](optimization/), [workbench/coverage_worker.py](workbench/coverage_worker.py), [workbench/unity.py](workbench/unity.py) |
+| Results, detailed diagnostics and test review | [reporting/](reporting/), [evaluation/](evaluation/), [workbench/judgements.py](workbench/judgements.py), [test_judgements.json](test_judgements.json) |
+| Software tests and verification tools | [tests/](tests/), [scripts/](scripts/), [.github/workflows/](.github/workflows/) |
 
-Each distinct effective workflow runs once per configured repetition. Requested temperature/cache/seed/schema constraints remain recorded as unavailable controls; ordinary-text schema answers are validated locally. Observation mappings are saved before generation and exported with results. **Run all** and **All models** keep their local-model scope. See [preparation and acceptance review](docs/perchance-integration-prep.md).
+On Windows, **Start Workbench.vbs** starts the UI. Python 3.10+ is required; setup asks before creating its private environment or installing missing requirements. **Start Demo.vbs** uses simulated inference, not a model-quality measurement. Both root launchers inherit the root definition directory, so heed the historical-suite warning above. **Open_Results_Table.bat** opens the review/results viewer.
 
-The current database suite is built with `python -m test_builder`: 21 cases and 62 complete prompts, covering Update, Append, Remove, Move and Copy, plus No change. Move removes an element from one collection and appends it to a different collection; Copy appends an independent copy to a different collection and leaves the source unchanged. Shared database rules live in `test_builder/database-rules.txt`; the common explanation of all five operations and typed value-based paths lives in `test_builder/methods/value_patch.txt`. Active views are Normal JSON, ID-keyed arrays and Full paths; positional methods are retired from the builder. Task wording and schema/data inputs stay separate so future methods can reuse them. The `prompt-review/` folder contains only one complete prompt per `.txt` file. The current 21 cases are approved and enabled, scheduling 186 observations per eligible model. Future edits disable the affected cases until their exact prompts are approved again. The case-by-case review is in `docs/test-suite-v2/five-operation-coverage.txt`. Old prompts, test data, results and optimization sessions are outside active discovery under `archives/`; see `archives/suite-before-activation-2026-10-15/README.txt`. Edit source templates/data and rebuild; generated exports are refreshed and obsolete managed exports removed.
+Choose the models folder, install/select a suitable official llama.cpp runtime, resolve preflight issues, and run only the intended scope. GGUFs and credentials are machine-local. Native loading has no overall elapsed-time deadline; configured workflow deadlines start after readiness. Stop/Pause controls preserve completed evidence. A wrong answer is a completed benchmark observation, not a reason to reroll it.
 
-The previous 61 benchmark/example definitions and their metadata are preserved under `archives/test-suite-2026-10-14/`, with verified source hashes. Saved responses and scores remain unchanged. The ten deferred tasks are listed in `docs/test-suite-v2/deferred-tests.txt`. See `docs/test-suite-v2/build-and-review.txt` for scope and review details.
+Operational detail is in [WORKBENCH_GUIDE.md](docs/WORKBENCH_GUIDE.md), [results-table-grouping.md](docs/results-table-grouping.md), and [reporting/README.md](reporting/README.md). The [Perchance capability policy](docs/perchance-capability-policy.md) and [desktop/Unity workflow](docs/desktop-unity-benchmark-workflow.md) describe provider/scheduling rules. Those documents also retain dated implementation notes; verify the selected code and run manifest rather than assuming an older “current” count or launcher limitation still applies.
 
-Native llama.cpp exposes the cache controls. The harness starts the server with a Workbench-owned slot path under `.local/runtime-cache/slots`, clears the slot between required measurements, and records reuse evidence. Missing or inconsistent cached-token counters mark a cache measurement unverified; keeping a chat open is not accepted as proof. The interface does not use `experiment.json` or require a hand-written `worker.local.json`.
+Prompt optimization is a separate workflow, not an ordinary extra dimension of every benchmark. See [optimization/README.md](optimization/README.md), [Codex writer](docs/prompt-optimization/codex-writer.txt), and [full-model coverage](docs/prompt-optimization/full-model-coverage.md). Older optimization pilots focus on collection transfer and do not redefine the current Update/Add/Remove research scope. Do not resume an old session or promote a candidate merely to browse the repository.
 
-## Laptop and Unity
+## Research evidence and generated files
 
-On the desktop, open **Worker setup â†’ Enable private Tailscale access**. Open the displayed address on the laptop while connected to Tailscale; the workbench opens directly without a pairing key. These controls operate the desktop; inference remains on loopback. Keep the desktop awake. Tailnet permissions and the host firewall govern access. The service accepts only loopback/Tailscale clients and retains Host/Origin checks. No public listener, port forwarding or Funnel is enabled.
+| Location | What it contains / how to use it |
+| --- | --- |
+| [experiments/required-scope-v2/cohorts/](experiments/required-scope-v2/cohorts/) | Current-scope experiment inputs and extensions: definitions, manifests, plans, references and prompts. Read the specific cohort's plan and role labels. |
+| [experiments/required-scope-v2/runs/](experiments/required-scope-v2/runs/) | Saved run evidence, summaries and findings for those experiments. The directory includes multiple dates, methods and development/held-out roles, not one interchangeable score. |
+| [results/](results/) | Version-controlled synthetic model observations from the Workbench, including historical cohorts. Filter by captured definition, evaluator and provenance. |
+| [optimization_results/](optimization_results/) | Prompt-writing sessions, candidates, feedback and their captured evidence. Separate from normal benchmark outcomes. |
+| [coverage_results/](coverage_results/) | Promotion/coverage orchestration records and evidence. Not another independent set of model responses by default. |
+| [docs/analysis/](docs/analysis/) | Dated retrospective reports, inventories and normalization analyses. They describe their own captured protocols. |
+| `.local/` (Git-ignored) | Machine-local settings, logs, reports, runtime/cache/browser data. Not the shared source of research definitions. |
+| `models.json`, `.venv-workbench/`, model weights | Machine-local catalog/environment/weights; excluded from Git. Never publish credentials or real private records. |
 
-Unity support is intentionally practical rather than a promise of zero setup: put the repo, Python environment, native runtime and models on permitted storage, select the models folder there, then submit the generated job with Unity OnDemand/Slurm. Preparation checks on the laptop cannot certify a remote installation. The job requests a GPU and forwards scheduler warning/termination signals so the worker can stop and retain evidence. Actual cluster authorization and runtime compatibility must be checked on Unity.
+Experiment folders are evidence, not all canonical editable source. Some more recent runs are retained only in separate desktop/cloud run directories; their absence from `main` does not mean they never ran. Use the saved run's exact manifest and raw evidence rather than inferring status from a folder name.
 
-## Git behavior and validation
+Preserve original responses, scores, errors, prompts and source hashes. Keep regression/development/selection/final roles separate. New parser replay is a separate analysis, not permission to overwrite earlier scores or tune on reserved-final outcomes. Software fixtures and mock/demo outputs are not real model trials. See [evaluation](evaluation/README.md) and [reporting](reporting/README.md) for offline inspection commands.
 
-Optional source synchronization pulls before a real run. When code changes, the supervisor restarts with the new source and resumes the explicitly requested Run; automatic restart chains are bounded. No hot-reloading experimental code during a measurement. Result JSON under `results/` is intentionally visible to normal Git workflows on the main checkout. Optional result publishing still mirrors evidence to a worker-specific branch for unattended checkpoints, using narrow staging and no force reset or automatic stash.
+## Historical, superseded and archived material
 
-Only synthetic benchmark data belongs in this public repository. Test outputs may include mature fictional benchmark content when that is part of the experiment. Do not publish private saves, real patient/student records, credentials, or other personal data.
+These items are retained deliberately. **Skip them for a first pass through the current solution**, unless reproducing an older result or maintaining compatibility. “Historical” does not mean safe to delete.
 
-See [TEST_REPORT.md](docs/TEST_REPORT.md) for actual test evidence, [WORKBENCH_GUIDE.md](docs/WORKBENCH_GUIDE.md) for operation details, and [PLANNED_CHANGES.md](docs/PLANNED_CHANGES.md) for requirement coverage and validation limits. UI/subprocess fixtures are not real GPU inference.
+| Material | Status and replacement / reason to keep |
+| --- | --- |
+| Root [test_specs/](test_specs/), [prompt-review/](prompt-review/), [prompts/patch-suite/](prompts/patch-suite/) | Historical five-operation generated suite, still discovered by root Workbench. Use explicitly selected current-scope definitions for new current research. |
+| [test_builder/methods/value_patch.txt](test_builder/methods/value_patch.txt), [normal_prompt.json](test_builder/normal_prompt.json), [promotions/](test_builder/promotions/) | Earlier typed slash-path/promoted-prompt route. Still implemented for compatible controls and old sessions; not the current research prompt source. |
+| [experiments/dot-path-v1/](experiments/dot-path-v1/), [dot-path-v1-output-only/](experiments/dot-path-v1-output-only/), [ember-text-v1/](experiments/ember-text-v1/) | Earlier format/notation experiments. Read their manifests and [dot-path](docs/test-suite-v2/dot-path-v1.md) / [Ember-text](docs/test-suite-v2/ember-text-v1.md) caveats before comparing. Some earlier presentation variants were superseded or invalidated. |
+| [normalization/](normalization/), [evaluation/dot_outer_arrays_v1.py](evaluation/dot_outer_arrays_v1.py) | Retained opt-in offline outer-array repair protocol. It is much narrower than the grammar-based intent parser and is not an alias for `dot-intent-v1`. The older `dot-separators-v2` offline protocol is also retained, but its resolver remains an active dependency of the live intent host. |
+| [archives/test-suite-2026-10-14/](archives/test-suite-2026-10-14/) | Original definitions, fixtures and metadata retained for historical reproduction. |
+| [archives/suite-before-activation-2026-10-15/](archives/suite-before-activation-2026-10-15/) | Earlier prompts, results and optimization sessions. See its [README](archives/suite-before-activation-2026-10-15/README.txt). Archives are outside default discovery; do not reactivate them for current coverage. |
+| [rpgbench/](rpgbench/), [run_worker.py](run_worker.py), root [fixtures/](fixtures/), [experiment.json](experiment.json), `worker.example.json`, `worker.unity.example.json` | Previous worker/configuration architecture. Use `workbench/` and the supported current run preparation instead. Retained for reproduction, not the new-app entry point. |
+| Standard `json_patch` input benchmarks and positional-array renderers | Retired from new prompt generation. Their evaluators remain for old evidence. Optional RFC 6902 **output conversion** in the new library is a separate feature. |
+| [audit-notes-2026-09-30/](audit-notes-2026-09-30/) and older `docs/test-suite-v2/` reviews | Dated audits/design history. Counts such as 61, 14 or 21 describe those checkpoints, not the current 13-case base scope. |
+| Root `tmp*` directories | Retained temporary/test artifacts, not supported entry points or current experiment catalogs. |
+| [README.txt](README.txt) | Old one-line description. Use this `README.md`. |
 
-The old `rpgbench/`, `run_worker.py`, `fixtures/`, and `experiment.json` are retained only for historical reproduction. The active UI is `workbench/`, with native inference and an explicitly selected Perchance remote text provider.
+The broad fixture catalog, historical evaluators and compatibility tests remain useful code; do not delete them just because their cases are outside current research. Conversely, [PLANNED_CHANGES.md](docs/PLANNED_CHANGES.md) and [RESEARCH_ROADMAP.md](docs/RESEARCH_ROADMAP.md) describe plans, not proof of implemented or measured capabilities. For parser architecture prefer [GRAMMAR-DESIGN.md](intent-parser-js/GRAMMAR-DESIGN.md); [intent-parser-current-contract.md](docs/intent-parser-current-contract.md) describes an earlier offline checkpoint, while [live-intent-evaluation.md](docs/live-intent-evaluation.md) documents the later live integration.
 
-On 8 GB workers, Overview **Run all remaining tests** runs eligible local models first (including native recovery), then Perchance Text Generator unless you declined its setup for this run. Local test definitions use a 120-second watchdog; Perchance uses 300 seconds. Completed local cases remain complete, so the same button can run only the remaining Perchance observations. Larger workers and explicitly targeted local runs do not include Perchance. Configured Perchance repetitions run independently; unsupported setting variants collapse within each repetition. Existing compatible baselines fulfill only repetition zero.
+## Editing and verification
 
+Read [AGENTS.md](AGENTS.md) for development rules and dated scope decisions. Keep unrelated work and immutable research evidence intact. Never put private records, credentials or model weights in this public repository.
 
-### Manual test judgements
+- Prompt/task changes: edit the source for the intended method, export to a new run, inspect complete prompts and review their exact digests. Do not silently regenerate a frozen cohort.
+- Grammar changes: edit canonical grammar sources, regenerate the shared artifact, then check all language implementations.
+- Evaluator changes: use a new version/fingerprint and separate run/analysis. Old observations must retain their original identity.
+- Operational-only changes: review identity preservation; [operational-source-compatibility.json](workbench/operational-source-compatibility.json) is an exact reviewed allowlist, not permission to mark arbitrary changes equivalent.
 
-`Open_Results_Table.bat` opens a local viewer with separate Rejected, Needs review,
-and Accepted tables, in that order. Every definition initially needs review.
-Click a variant label or a test-version group's Judge action to record a decision.
-Rejected definitions stay saved but cannot run again; editing the execution
-definition creates a fresh Needs review definition. Grouping panels start collapsed
-and retain separate presets per table. Keep the launcher console open to save reviews.
-The offline HTML remains a read-only snapshot. See [review and grouping details](docs/results-table-grouping.md).
+Core software checks (from the repository root, with requirements installed):
 
+```sh
+python -m unittest discover -s tests -v
+node intent-parser-js/build-grammar-spec.cjs --check
+node intent-parser-js/run-all.cjs
+dotnet run --project intent-parser-csharp -- self-test
+```
 
-### Prompt Optimization
-
-Open the **Prompt Optimization** Workbench tab; it scans runnable benchmark models and the worker's installed Codex. Choose **Codex** or **Local model** for prompt writing. Codex has separate GPT model and effort selectors populated from its local model catalog. It uses the worker's existing Codex sign-in and one persistent thread per session, including after pause/resume or a Workbench restart. Local model mode keeps its model, randomized temperature and reasoning controls. Writer selections apply to new sessions; Continue uses the saved writer and thread. The pilot optimizes collection-transfer operation instructions: an origin pass opens all matching task-type tests across every runnable host model. Only complete host-cohort candidates qualify for the top three. Maximum attempts defaults to 20; benchmark reasoning always stays off. Sessions, raw proposals and objective feedback are stored separately under `optimization_results/`. Export/import sessions and **Evaluate remaining on this machine** support other hosts without generating new candidates. See [Codex writer details](docs/prompt-optimization/codex-writer.txt) and [the optimization plan](docs/prompt-optimization/optimization-plan.md).
-
-Generator context and output space are managed automatically from the selected model and each actual request. There are no token controls in the optimizer settings; measured allocation and pruning decisions remain available in evidence.
+See the language READMEs for cross-language fixtures and differential checks. These deterministic tests do not run the research models. Browser smoke tests and the identity-preservation audit are defined separately in [.github/workflows/tests.yml](.github/workflows/tests.yml); passing a local unit suite does not establish that every CI stage passed. [GRAMMAR-VERIFICATION.md](intent-parser-js/GRAMMAR-VERIFICATION.md) and [live-intent-validation.md](docs/live-intent-validation.md) record what was actually tested for those checkpoints.
