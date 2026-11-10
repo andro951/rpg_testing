@@ -121,13 +121,31 @@ def evaluate(test,variant,values):
         checks={k:equal(values.get(k),v) and k in values for k,v in expected.items()}
         result_score={'valid':True,'exact_match':all(checks.values()) if checks else None,'answer_checks':checks}
     elif 'expected_state' in test:
-        result_score=score_state(test,values.get(result.get('step')),representation)
+        normalized_response=None;normalization_error=None
+        if 'evaluator' in result:
+            from evaluation.live_intent import validate_selection, normalize_response
+            requested=result['evaluator'] if isinstance(result['evaluator'],dict) else {'requested':result['evaluator']}
+            try:
+                validate_selection(test, variant)
+                normalized=normalize_response(values.get(result.get('step')),
+                    test['source']['initial_state'], test['state_schema'])
+                normalized_response=normalized['normalized_patch']
+                result_score=score_state(test,normalized['final_state'],'state')
+                result_score['evaluation']={**requested, 'accepted':True,
+                    **{k:v for k,v in normalized.items() if k!='final_state'}}
+            except Exception as exc:
+                normalization_error=str(exc)
+                result_score={'valid':False,'exact_match':False,'error':normalization_error,
+                    'evaluation':{**requested,'accepted':False,'error':normalization_error}}
+        else:
+            result_score=score_state(test,values.get(result.get('step')),representation)
         required_ops=result.get('required_ops')
         if required_ops is not None:
             state_exact=result_score.get('exact_match',False)
             result_score['state_exact_match']=state_exact
             try:
-                patch=values.get(result.get('step'))
+                if normalization_error is not None:raise ValueError(normalization_error)
+                patch=normalized_response if normalized_response is not None else values.get(result.get('step'))
                 if representation=='ember_text_v1':
                     from .ember_text import decode
                     patch=decode(patch,test['source']['initial_state'],test['state_schema'])
@@ -146,7 +164,8 @@ def evaluate(test,variant,values):
         if 'response_schema' in result:
             from jsonschema import Draft202012Validator
             try:
-                response=values.get(result.get('step'))
+                if normalization_error is not None:raise ValueError(normalization_error)
+                response=normalized_response if normalized_response is not None else values.get(result.get('step'))
                 if representation=='ember_text_v1':
                     from .ember_text import decode
                     response=decode(response,test['source']['initial_state'],test['state_schema'])
@@ -176,6 +195,9 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progr
     """No disk writes. Include all request work in pipeline time; score afterward."""
     from jsonschema import Draft202012Validator
     from jsonschema.exceptions import ValidationError
+    if 'evaluator' in variant.get('result', {}):
+        from evaluation.live_intent import validate_selection
+        validate_selection(test, variant)
     values={};calls=[];events=[];cache=variant.get('cache','default');cache_valid=True
     def units(items):
         total=0

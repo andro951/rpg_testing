@@ -284,6 +284,9 @@ def validate_test(test: dict) -> None:
             raise ValueError('Unknown result representation')
         if result.get('representation') in ('value_patch','dot_patch_v1','ember_text_v1','field_value_v2') and not test.get('state_schema'):
             raise ValueError('Value-based paths require a predefined state_schema')
+        if 'evaluator' in result:
+            from evaluation.live_intent import validate_selection
+            validate_selection(test, variant)
         required_ops=result.get('required_ops')
         if 'response_schema' in result:
             local_schema(result['response_schema'])
