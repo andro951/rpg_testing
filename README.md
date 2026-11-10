@@ -1,5 +1,9 @@
 # RPG Testing Workbench â€” native llama.cpp
 
+## Current research parser integration
+
+The new Python intent parser is explicitly selectable in the live Workbench runner. See [selection, scope and validation](docs/live-intent-evaluation.md). The published root test_specs is the historical five-operation suite; current frozen overnight definitions must be supplied to the preparer. Existing strict scores, raw evidence and frozen runners remain unchanged. Preparation and validation do not start model inference.
+
 A browser-controlled benchmark for **original JSON state + new information â†’ structured state update**. The model and harness run on the GPU computer; your laptop is a private remote control through Tailscale.
 
 **The active workbench no longer uses LM Studio.** It runs its own `llama-server`, browses Hugging Face model repositories, installs selected GGUF variants, and handles a full-GPU primary pass followed by an automatic recovery pass when needed. Setup can ask questions; a running experiment never waits for a repair popup.

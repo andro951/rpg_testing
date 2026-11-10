@@ -103,13 +103,16 @@ class RunAllPerchanceTests(unittest.TestCase):
                 setattr(self, control, False)
                 self.app.cancel_event.clear()
 
-    def test_larger_workers_and_targeted_local_runs_exclude_remote(self):
+    def test_larger_workers_exclude_but_targeted_local_runs_include_remote(self):
         for tier in (11, 12, 16, 24):
             self.tier = tier
             self.assertNotIn('perchance_plan', self.app.build_preflight()[1])
         self.tier = 8
         for selection in ({'model_id': self.model['id']}, {'all_models': True, 'test_id': fixture()['id']}):
-            self.assertNotIn('perchance_plan', self.app.build_preflight(selection=selection)[1])
+            plan=self.app.build_preflight(selection=selection)[1]
+            self.assertIn('perchance_plan',plan)
+            self.assertEqual(plan['perchance_plan']['selection']['model_id'],perchance.MODEL_ID)
+            self.assertEqual(plan['perchance_plan']['independent_observations'],3)
         self.app.demo = True
         self.assertNotIn('perchance_plan', self.app.build_preflight()[1])
 
@@ -253,11 +256,17 @@ class RunAllPerchanceTests(unittest.TestCase):
         self.assertEqual(record['status'],'completed')
         self.assertEqual(record['attempts'][0]['status'],'error')
 
-    def test_dependency_check_excludes_larger_demo_and_local_selections(self):
+    def test_dependency_check_includes_local_scope_and_excludes_larger_demo(self):
         with patch.object(perchance_setup, 'health') as health:
             self.tier = 12; perchance_setup.prepare(self.app)
+            health.assert_not_called()
+            health.return_value={'ready':True,'reason':''}
             self.tier = 8; perchance_setup.prepare(self.app, selection={'model_id': self.model['id']})
-            perchance_setup.prepare(self.app, selection={'all_models': True})
+            health.assert_called_once()
+            health.reset_mock()
+            perchance_setup.prepare(self.app, selection={'all_models': True,'test_id':fixture()['id']})
+            health.assert_called_once()
+            health.reset_mock()
             self.app.demo = True; perchance_setup.prepare(self.app)
             health.assert_not_called()
 

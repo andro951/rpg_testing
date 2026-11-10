@@ -94,7 +94,7 @@ def prepare(app, preparation=None, selection=None, reuse=False, force_pending=Fa
     app.perchance_setup_decision = {'id': uuid.uuid4().hex, 'context': context, 'consumed': reuse,
                                     'status': 'not_scheduled', 'reason': '', 'time': time.time()}
     decision = app.perchance_setup_decision
-    if app.demo or (selection is not None and not perchance.selected(selection)):
+    if app.demo:
         return
     app.set_progress('preflight', 'Checking whether Perchance is scheduled', 0, 0,
                      'Checking the 8 GB assignment before other preflight checks.')
@@ -105,8 +105,10 @@ def prepare(app, preparation=None, selection=None, reuse=False, force_pending=Fa
     if len(gpus) != 1 or device_tier(gpus[0]['total_gib'], gpus[0]['name']) != 8:
         return
     target = {'backend': 'perchance', 'vram_gb': 8, 'gpu_name': gpus[0]['name']}
+    provider_selection = {**(selection or {}), 'model_id': perchance.MODEL_ID}
+    provider_selection.pop('all_models', None)
     plan = perchance.plan(load_tests(app.root / 'test_specs'), app.settings, target, app.store,
-                         selection or {'model_id': perchance.MODEL_ID})
+                         provider_selection)
     if not plan['pending'] and not force_pending:
         decision['status'] = 'no_pending_work'
         return

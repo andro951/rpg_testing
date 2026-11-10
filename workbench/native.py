@@ -88,8 +88,11 @@ class NativeBackend:
         from .backends import Transport
         self.settings,self.gpu,self.log=settings,gpu,log
         if settings.get('backend','llamacpp')!='llamacpp':raise ValueError('Only native llama.cpp is supported')
+        self.port=settings.get('inference_port',1235)
+        if type(self.port) is not int or not 1024 <= self.port <= 65535:
+            raise ValueError('inference_port must be an integer from 1024 through 65535')
         self.token=secrets.token_urlsafe(32)
-        self.transport=Transport('http://127.0.0.1:1235',self.token,timeout=60)
+        self.transport=Transport(f'http://127.0.0.1:{self.port}',self.token,timeout=60)
         self.process=None;self.reader=None;self.owned_id=None;self.context=None
         self.load_metadata={};self.version_info={};self.lines=[];self.timed_out=False
         self.requested_layers='all';self.execution_class='full_gpu';self.progress=lambda task,pct,detail='':None
@@ -161,7 +164,7 @@ class NativeBackend:
         finally:timer.cancel()
 
     def launch_arguments(self,exe,model,context,help_text,layers='all'):
-        args=[exe,'--model',model['paths'][0],'--alias',self.owned_id,'--host','127.0.0.1','--port','1235',
+        args=[exe,'--model',model['paths'][0],'--alias',self.owned_id,'--host','127.0.0.1','--port',str(self.port),
               '--ctx-size',str(context['allocated_tokens']),'--n-predict','-1','--gpu-layers',str(layers),
               '--fit','off','--parallel','1','--split-mode','none','--no-context-shift','--slots',
               '--reasoning','off','--api-key',self.token]
@@ -196,8 +199,8 @@ class NativeBackend:
         info=capabilities(exe,preparation=False);self.version_info={'llama_server':info['version']}
         with socket.socket() as sock:
             sock.settimeout(.25)
-            if sock.connect_ex(('127.0.0.1',1235))==0:
-                raise RunFailure('Port 1235 belongs to another process; it was not stopped')
+            if sock.connect_ex(('127.0.0.1',self.port))==0:
+                raise RunFailure(f'Port {self.port} belongs to another process; it was not stopped')
         args=self.launch_arguments(exe,model,context,info['help'],layers)
         self.progress('Loading model',15,'Runtime verified; launching llama-server.')
         devices=re.findall(r'^\s*((?:CUDA|Vulkan)\d+)\s*:\s*(.*)$',info.get('devices',''),re.M)

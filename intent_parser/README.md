@@ -5,12 +5,13 @@ with the same two grammar stages, JSON-shaped intermediate representation, optio
 state-aware conversion and atomic application stages. The C# port uses the same
 contract. It does not invoke Node, a model, a provider, or the desktop.
 
-This is an experimental library and an **opt-in offline integration**, not a
-replacement for the CSC592 benchmark acceptor or its approved prompts. The generic library leaves input schemas and request correctness to its host.
-CSC592's `evaluation.value_intent.replay_value_intent` supplies the active
-schema-aware host: it decodes typed value paths, validates every resulting state,
-and enforces the existing operation scopes and per-collection identity fields.
-It does not consult expected states or change the approved scorer.
+This is an experimental library with explicit host integrations. The generic
+library leaves input schemas and request correctness to its host.
+The historical value-patch offline host remains available unchanged.
+The current dot-path research host is now selectable in the real Workbench
+runner as `dot-intent-v1`; strict baseline scoring remains the default.
+See [live integration and immutable validation](../docs/live-intent-evaluation.md).
+No approved prompt or saved benchmark score is changed by selecting a new run.
 
 ## API
 

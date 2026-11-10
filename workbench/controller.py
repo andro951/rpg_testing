@@ -67,7 +67,7 @@ class Controller(ModelManager):
         defaults={'backend':'llamacpp','model_root':'','confirmed_empty_folder':'','llama_path':'',
                   'hf_token':'','sync_source':not demo,'publish_results':False,'remote_enabled':False,'models_folder_version':1,
                   'perchance_url':'https://perchance.org/056uh2nc6k','perchance_browser':'','perchance_headless':False,
-                  'perchance_only':False,'perchance_epoch':'1','perchance_cdp_port':9223}
+                  'perchance_only':False,'perchance_epoch':'1','perchance_cdp_port':9223,'inference_port':1235}
         saved=read_json(self.settings_path) if self.settings_path.exists() else {}
         # Explicit consent for the new folder policy: no migration from LM Studio or guessed defaults.
         if saved.get('models_folder_version')!=1:saved.pop('model_root',None);saved.pop('confirmed_empty_folder',None)
@@ -245,8 +245,10 @@ class Controller(ModelManager):
         # Overview Run all includes the remote baseline only on the assigned tier.
         gpu=report.get('gpu',{})
         from .domain import device_tier
-        if selection is None and not self.demo and not omit_perchance and device_tier(gpu.get('total_gib',0),gpu.get('name',''))==8:
-            remote_report,remote_plan=perchance.preflight(self,preparation,{'model_id':perchance.MODEL_ID})
+        if not self.demo and not omit_perchance and device_tier(gpu.get('total_gib',0),gpu.get('name',''))==8:
+            remote_selection={**(selection or {}),'model_id':perchance.MODEL_ID}
+            remote_selection.pop('all_models',None)
+            remote_report,remote_plan=perchance.preflight(self,preparation,remote_selection)
             plan={**plan,'perchance_plan':remote_plan,'perchance_report':remote_report,
                   'pending':plan['pending']+remote_plan['pending'],'complete':plan['complete']+remote_plan['complete']}
             report['plan']={**report['plan'],'pending':plan['pending'],'complete':plan['complete'],

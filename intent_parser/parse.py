@@ -196,6 +196,11 @@ def _value_path_tokens(path):
 
 
 def path_tokens(nodes, options=None):
+    # Private host hook preserves lexical boundaries without changing the generic
+    # language or the shared JS/C# contract. Never sourced from model output.
+    decoder = (options or {}).get('_host_path_decoder')
+    if decoder is not None:
+        return decoder(nodes, options)
     explicit = len(nodes) == 1 and nodes[0].group
     if explicit:
         nodes = nodes[0].children
@@ -224,10 +229,13 @@ def path_tokens(nodes, options=None):
     return result
 
 
-def _value_of(nodes):
+def _value_of(nodes, options=None):
     if not nodes:
         raise IntentError('Missing value')
-    return _json(' '.join(map(_render, nodes)))
+    raw = ' '.join(map(_render, nodes))
+    value = _json(raw)  # Retain shared finite/safe/duplicate/Unicode validation.
+    decoder = (options or {}).get('_host_value_decoder')
+    return decoder(raw) if decoder is not None else value
 
 
 # Declarative counterpart of operation.grammar. An expression is either a token,
@@ -342,17 +350,17 @@ def parse_record(nodes, options=None):
         if key in fields:
             ir[key] = path_tokens(fields[key], options)
     if 'value' in fields:
-        ir['value'] = _value_of(fields['value'])
+        ir['value'] = _value_of(fields['value'], options)
     if op in ('append', 'update') and unlabeled:
         if 'path' in ir and 'value' not in ir:
-            ir['value'] = _value_of(unlabeled)
+            ir['value'] = _value_of(unlabeled, options)
             unlabeled.clear()
         elif 'path' not in ir and 'value' not in ir:
             candidates = {}
             for split in range(1, len(unlabeled)):
                 for path, value in [(unlabeled[:split], unlabeled[split:]), (unlabeled[split:], unlabeled[:split])]:
                     try:
-                        candidate = {'path': path_tokens(path, options), 'value': _value_of(value)}
+                        candidate = {'path': path_tokens(path, options), 'value': _value_of(value, options)}
                         candidates[_key(candidate)] = candidate
                     except IntentError:
                         pass
