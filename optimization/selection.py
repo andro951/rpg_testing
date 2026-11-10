@@ -16,7 +16,7 @@ def targets(root):
         test=read_json(path)
         if not test.get('enabled',True):continue
         for variant in test['variants']:
-            if not variant.get('enabled',True) or variant.get('result',{}).get('representation') not in ('json_patch','value_patch'):continue
+            if not variant.get('enabled',True) or variant.get('result',{}).get('representation') not in ('json_patch','value_patch','dot_patch_v1'):continue
             key=test['id']+'/'+variant['id']
             entry=data['variants'].get(key)
             if not entry or not entry['objective_optimization_eligible']:continue

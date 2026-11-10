@@ -10,6 +10,7 @@ COMPONENTS = {
     'established_facts': 'Output-neutral established-facts and preservation instructions',
     'json_patch_formatting': 'RFC 6902 output and JSON Pointer formatting guidance',
     'value_patch_formatting': 'Value-based operation output and typed collection identity paths',
+    'dot_patch_v1_formatting': 'Versioned dot operation paths resolved from the root through declared collection identities',
     'semantic_formatting': 'Semantic operation output guidance',
     'index_location': 'Locate requested array entries without changing answer arity',
     'single_index_formatting': 'One exact index answer',
@@ -67,7 +68,7 @@ def build(root=ROOT):
                 def append(component):
                     text = rendered(test, variant, final)[-1]['content']
                     entry['components'][component] = {'slots': [slot(final, 'last_user', len(text), len(text), 'insert_instruction')], 'expansion_scopes': []}
-                if rep in ('json_patch', 'value_patch', 'semantic'):
+                if rep in ('json_patch', 'value_patch', 'dot_patch_v1', 'semantic'):
                     # Add reusable guidance after the final instruction without
                     # replacing embedded inputs or required-operation clauses.
                     append(rep + '_formatting')

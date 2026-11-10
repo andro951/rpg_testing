@@ -144,6 +144,15 @@ const PromptOptimization = {
    PromptOptimization.Inputs[name] = input;
   }
 
+  const guidanceLabel = el(`label`, `Optional manual guidance for the optimizer `);
+  const guidance = el(`textarea`);
+  guidance.id = `optimization-manual_guidance`;
+  guidance.rows = 4;
+  guidance.setAttribute(`aria-label`, `Optional manual guidance for the optimizer`);
+  guidanceLabel.append(guidance);
+  controls.append(el(`br`), guidanceLabel, el(`p`, `Supplemental context for the prompt writer. It does not change the selected test scope, target-model inputs or grading. Apply settings while stopped to use edited guidance on later attempts.`, `muted`));
+  PromptOptimization.Inputs.manual_guidance = guidance;
+
   const scope = el(`p`, `Opening this tab scans the host's runnable models.`, `muted`);
   scope.id = `optimization-scope`;
   scope.setAttribute(`role`, `status`);
@@ -203,6 +212,16 @@ const PromptOptimization = {
   section.append(importLabel);
   const status = el(`p`);
   status.id = `optimization-status`;
+  const coverage = el(`p`);
+  coverage.id = `optimization-coverage`;
+  coverage.setAttribute(`role`, `status`);
+  const resumeCoverage = button(`Resume full model coverage`, async () => {
+   const id = PromptOptimization.Current?.coverage?.id;
+   if (id) await api(`/api/coverage/resume`, {id, retry_blocked: true});
+  });
+  resumeCoverage.id = `optimization-coverage-resume`;
+  resumeCoverage.hidden = true;
+  section.append(coverage, resumeCoverage);
   const ranking = el(`div`);
   ranking.id = `optimization-ranking`;
   const history = el(`div`);
@@ -594,6 +613,11 @@ const PromptOptimization = {
  Settings: (provider = $(`optimization-provider`).value) => {
   const settings = {};
   for (const [key, input] of Object.entries(PromptOptimization.Inputs)) {
+   if (key === `manual_guidance`) {
+    if (input.value.trim())
+     settings[key] = input.value;
+    continue;
+   }
    if (provider === `local` || key === `max_attempts`)
     settings[key] = input.type === `checkbox` ? input.checked : Number(input.value);
   }
@@ -692,11 +716,15 @@ const PromptOptimization = {
      if (input.type === `checkbox`)
       input.checked = session.settings[key];
      else
-      input.value = session.settings[key];
+      input.value = session.settings[key] ?? ``;
     }
    }
 
    PromptOptimization.Current = session;
+   $(`optimization-coverage`).textContent = session.coverage
+    ? `Full coverage: ${session.coverage.status}. ${session.coverage.message} ${session.coverage.workers.map(worker => `${worker.id}: ${worker.status || `pending`}`).join(`; `)}`
+    : `A fully successful accepted candidate automatically promotes to the normal builder and starts full configured-model coverage.`;
+   $(`optimization-coverage-resume`).hidden = !session.coverage || session.coverage.status === `completed` || !!state?.busy;
    $(`optimization-status`).textContent = `${session.status}: ${session.message} · ${session.attempts.length}/${session.settings.max_attempts} generation attempts · ${session.scope.layers.at(-1).members.length} task-type tests · ${session.cohort.models.map(model => model.id).join(`, `)}. Original baseline: ${PromptOptimization.Percentage(session.baseline)}.`;
    const originKey = session.scope.layers[0].members[0];
    const originCase = session.scope.cases[originKey];

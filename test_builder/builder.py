@@ -16,6 +16,11 @@ PRESENTATIONS = ('normal_json', 'id_keyed_arrays', 'full_paths')
 LABELS = {'normal_json': 'Normal JSON', 'id_keyed_arrays': 'ID-keyed arrays', 'full_paths': 'Full paths'}
 METHODS = {'value_patch': {'name': 'Value-based patch', 'file': 'methods/value_patch.txt', 'representation': 'value_patch',
     'operations': {'update': 'replace', 'append': 'add', 'remove': 'remove', 'move': 'move', 'copy': 'copy', 'no_change': None}}}
+METHODS['original_value_patch_v1'] = {**METHODS['value_patch'], 'name':'Original pre-optimization value patch', 'file':'methods/original_value_patch_v1.txt'}
+METHODS['dot_patch_v1'] = {**METHODS['value_patch'], 'name':'Original pre-optimization dot paths v1', 'file':'methods/dot_patch_v1.txt', 'representation':'dot_patch_v1'}
+METHODS['ember_text_v1'] = {'name':'Ember typed-line records (supported tasks only)', 'file':'methods/ember_text_v1.txt',
+    'representation':'ember_text_v1', 'operations':{'update':'replace','append':'add','remove':None,'move':None,'copy':None,'no_change':None}}
+METHODS['research_json_v2'] = {'name':'Current-scope JSON operations','file':'methods/research_json_v2.txt','representation':'dot_patch_v1','operations':{'update':'replace','append':'add','remove':'remove','no_change':None}}
 DEFAULT_METHOD = 'value_patch'
 TASKS = {
     'update_field': ('update', ('property_path', 'new_value')),
@@ -29,9 +34,9 @@ TASKS = {
     'move_record': ('move', ('array_path', 'id_field', 'id_value', 'destination_array')),
     'copy_value': ('copy', ('array_path', 'value', 'destination_array')),
     'copy_record': ('copy', ('array_path', 'id_field', 'id_value', 'destination_array')),
-    'no_change': ('no_change', ('array_path', 'id_field', 'id_value', 'property_path', 'new_value')),
+    'no_change': ('no_change', ()),
 }
-TASK_TEMPLATES = {task: 'update_record' if task in ('update_record_nested', 'no_change') else task for task in TASKS}
+TASK_TEMPLATES = {task: 'update_record' if task == 'update_record_nested' else task for task in TASKS}
 
 
 def literal(value):
@@ -132,7 +137,7 @@ def validate_fixture(fixture):
                 at(array[index], p['property_path'])
         if 'value' in p:
             locate(array, None, p['value'])
-    else:
+    elif 'property_path' in p:
         at(state, p['property_path'])
     if 'destination_array' in p:
         if p['destination_array'] == p['array_path'] or not isinstance(at(state, p['destination_array']), list):
@@ -181,8 +186,11 @@ def task_text(fixture, templates=ROOT / 'templates', method=DEFAULT_METHOD):
     if slots != set(fixture['parameters']):
         raise ValueError('Template must use exactly its task parameters')
     parameters = copy.deepcopy(fixture['parameters'])
-    if METHODS[method]['representation'] == 'value_patch':
-        from workbench.value_paths import from_pointer
+    if METHODS[method]['representation'] in ('value_patch','dot_patch_v1'):
+        if method == 'dot_patch_v1':
+            from workbench.dot_paths import from_pointer
+        else:
+            from workbench.value_paths import from_pointer
         state, schema = fixture['state'], fixture['schema']
         for key in ('array_path','destination_array'):
             if key in parameters:
@@ -200,6 +208,15 @@ def task_text(fixture, templates=ROOT / 'templates', method=DEFAULT_METHOD):
 
 
 def prompt_parts(fixture, presentation, method=DEFAULT_METHOD, templates=ROOT / 'templates'):
+    if method in ('research_json_v2','research_field_value_v2'):
+        from .required_scope import parts
+        return parts(fixture,presentation,method)
+    if method == 'ember_text_v1':
+        from .ember_prompt import parts
+        return parts(fixture, presentation, templates)
+    if method in ('original_value_patch_v1','dot_patch_v1'):
+        from .original_prompt import parts
+        return parts(fixture, presentation, method, templates)
     oracle(fixture)  # Reject malformed or impossible task data before exporting any prompt.
     if method not in METHODS or presentation not in presentations(fixture):
         raise ValueError('Unknown operation method or inapplicable presentation')
@@ -222,24 +239,60 @@ def prompt_parts(fixture, presentation, method=DEFAULT_METHOD, templates=ROOT / 
     guidance = ('Database rules:\n' + (ROOT/'database-rules.txt').read_text(encoding='utf-8').strip() +
         '\n\n' + (ROOT/METHODS[method]['file']).read_text(encoding='utf-8').strip() +
         '\n\nDatabase structure:\n' + structure_text(fixture['schema']))
+    if TASKS[fixture['task']][0] == 'update' and 'array_path' in fixture['parameters']:
+        from .normal_prompt import configuration
+        guidance += '\n\nTask-specific path construction:\n' + configuration()['collection_update_guidance']
+    if TASKS[fixture['task']][0] in ('remove', 'move', 'copy'):
+        from .normal_prompt import configuration
+        key = 'collection_remove_guidance' if TASKS[fixture['task']][0] == 'remove' else 'collection_transfer_guidance'
+        guidance += '\n\nTask-specific element path construction:\n' + configuration()[key]
     return {'task_requirements': guidance, 'presentation_notes': note, 'current_state': state,
             'new_information': task_text(fixture, templates, method)}
 
 
+def build_messages(fixture, presentation, templates=ROOT / 'templates', method=DEFAULT_METHOD, promotion=None):
+    if method in ('research_json_v2','research_field_value_v2'):
+        if promotion is not None:raise ValueError('Current-scope comparison does not apply a historical operation promotion')
+        from .original_prompt import render
+        return render(prompt_parts(fixture,presentation,method,templates))
+    if method == 'ember_text_v1':
+        if promotion is not None:raise ValueError('Ember method does not use a JSON-operation promotion')
+        from .ember_prompt import render
+        return render(prompt_parts(fixture, presentation, method, templates))
+    if promotion is not None:
+        if templates != ROOT / 'templates':
+            raise ValueError('Reviewed promotions use the frozen standard task templates')
+        from workbench.workflows import messages
+        test = compile_test(fixture, method=method, promotion=promotion)
+        variant = next(v for v in test['variants'] if v['id'] == presentation)
+        return messages(test, variant['steps'][0], {}, variant)
+    if method in ('original_value_patch_v1','dot_patch_v1'):
+        from .original_prompt import render
+        return render(prompt_parts(fixture, presentation, method, templates))
+    from .normal_prompt import render
+    return render(prompt_parts(fixture, presentation, method, templates), operation=TASKS[fixture['task']][0])
+
+
 def build_prompt(fixture, presentation, templates=ROOT / 'templates', method=DEFAULT_METHOD):
-    p = prompt_parts(fixture, presentation, method, templates)
-    return '\n\n'.join([p['task_requirements']] + (['Input presentation:\n' + p['presentation_notes']] if p['presentation_notes'] else []) +
-        ['Current data:\n' + p['current_state'], 'Task:\n' + p['new_information']])
+    return build_messages(fixture, presentation, templates, method)[-1]['content']
 
 
 def oracle(fixture, method=DEFAULT_METHOD):
     """Reference patch/final state, never inserted into a model prompt."""
+    if method in ('research_json_v2','research_field_value_v2'):
+        from .required_scope import reference
+        return reference(fixture,method)
+    if method == 'ember_text_v1':
+        from .ember_prompt import reference
+        return reference(fixture)
     validate_fixture(fixture)
     task, p, original = fixture['task'], fixture['parameters'], fixture['state']
     kind = TASKS[task][0]
     if task == 'update_field':
         patch = [{'op': 'replace', 'path': p['property_path'], 'value': p['new_value']}]
-    elif kind in ('update', 'no_change'):
+    elif kind == 'no_change':
+        patch = []
+    elif kind == 'update':
         index = locate(at(original, p['array_path']), p['id_field'], p['id_value'])
         path = p['array_path'] + '/' + str(index) + p['property_path']
         patch = [] if equal(at(original, path), p['new_value']) else [{'op': 'replace', 'path': path, 'value': p['new_value']}]
@@ -255,8 +308,11 @@ def oracle(fixture, method=DEFAULT_METHOD):
     if kind == 'update' and equal(original, final):
         raise ValueError('Update fixtures must change a value; use the no-change task for an already satisfied request')
     validate_database(final, fixture['schema'])
-    if METHODS[method]['representation'] == 'value_patch':
-        from workbench.value_paths import from_pointer
+    if METHODS[method]['representation'] in ('value_patch','dot_patch_v1'):
+        if method == 'dot_patch_v1':
+            from workbench.dot_paths import from_pointer
+        else:
+            from workbench.value_paths import from_pointer
         result = []
         context = copy.deepcopy(original)
         for item in patch:
@@ -271,26 +327,56 @@ def oracle(fixture, method=DEFAULT_METHOD):
     return patch, final
 
 
-def compile_test(fixture, reviews=None, method=DEFAULT_METHOD):
+def compile_test(fixture, reviews=None, method=DEFAULT_METHOD, promotion=None):
+    if method in ('research_json_v2','research_field_value_v2'):
+        if promotion is not None:raise ValueError('Current-scope comparison does not apply a historical operation promotion')
+        from .required_scope import compile_test as compile_current
+        return compile_current(fixture,method,reviews)
+    if method == 'ember_text_v1':
+        if promotion is not None:raise ValueError('Ember method does not use a JSON-operation promotion')
+        from .ember_prompt import compile_test as compile_text
+        return compile_text(fixture, reviews)
+    if promotion is None:
+        from .automatic_promotion import compiled
+        promoted = compiled(ROOT.parent, fixture, method)
+        if promoted is not None:
+            return promoted
+    if promotion is not None:
+        if method != 'dot_patch_v1':
+            raise ValueError('This reviewed promotion requires the dot_patch_v1 method')
+        from .original_prompt import compile_test as compile_original
+        from .reviewed_promotion import apply_to_test
+        return apply_to_test(compile_original(fixture, reviews, method), promotion, reviews)
+    if method in ('original_value_patch_v1','dot_patch_v1'):
+        from .original_prompt import compile_test as compile_original
+        return compile_original(fixture, reviews, method)
     if method not in METHODS:
         raise ValueError('Unknown operation method')
     validate_fixture(fixture)
     operation = METHODS[method]['operations'][TASKS[fixture['task']][0]]
-    prompts = {mode: build_prompt(fixture, mode, method=method) for mode in presentations(fixture)}
-    proof, test_id = digest(prompts), fixture['id'] + '__' + method
+    from .normal_prompt import configuration, render, selected
+    config = configuration()
+    effective_candidate, effective_provenance = selected(config, TASKS[fixture['task']][0])
+    parts = {mode: prompt_parts(fixture, mode, method) for mode in presentations(fixture)}
+    requests = {mode: render(value, operation=TASKS[fixture['task']][0]) for mode, value in parts.items()}
+    systems = {request[0]['content'] for request in requests.values()}
+    if len(systems) != 1:
+        raise ValueError('Normal system instructions must not vary with the input presentation')
+    prompts = {mode: request[-1]['content'] for mode, request in requests.items()}
+    proof, test_id = digest(requests), fixture['id'] + '__' + method
     review = (reviews or {}).get(test_id, {})
     approved = all(review.get(role, {}).get('prompt_digest') == proof and review.get(role, {}).get('status') == 'accepted' for role in ('assistant', 'isaac'))
     test = {'schema_version': 2, 'id': test_id, 'name': fixture['name'], 'description': 'Database ' + TASKS[fixture['task']][0] + ' using ' + METHODS[method]['name'] + '.',
-        'workflow': 'steps', 'enabled': approved, 'instructions': '', 'repetitions': fixture.get('repetitions', 3), 'timeout_seconds': 120,
+        'workflow': 'steps', 'enabled': approved, 'instructions': next(iter(systems)), 'repetitions': fixture.get('repetitions', 3), 'timeout_seconds': 120,
         'source': {'initial_state': copy.deepcopy(fixture['state'])}, 'state_schema': copy.deepcopy(fixture['schema']),
         'expected_state': oracle(fixture)[1], 'prompt_builder': {'version': 'database-v3', 'task': fixture['task'],
             'operation': TASKS[fixture['task']][0], 'method': method, 'fixture': fixture['id'], 'prompt_digest': proof,
-            'review_status': 'accepted' if approved else 'needs_review',
+            'review_status': 'accepted' if approved else 'needs_review', 'normal_template': copy.deepcopy(effective_provenance),
             'template_sha256': digest({'task': (ROOT/'templates'/(TASK_TEMPLATES[fixture['task']]+'.txt')).read_text(encoding='utf-8'),
-                'database_rules': (ROOT/'database-rules.txt').read_text(encoding='utf-8'), 'method': (ROOT/METHODS[method]['file']).read_text(encoding='utf-8')})}, 'variants': []}
+                'database_rules': (ROOT/'database-rules.txt').read_text(encoding='utf-8'), 'method': (ROOT/METHODS[method]['file']).read_text(encoding='utf-8'), 'normal_template': effective_candidate, 'collection_update_guidance': config['collection_update_guidance'], 'collection_transfer_guidance': config['collection_transfer_guidance'], 'collection_remove_guidance': config['collection_remove_guidance']})}, 'variants': []}
     for mode, prompt in prompts.items():
         from .response_contract import json_patch_schema, value_patch_schema
-        test['variants'].append({'id': mode, 'prompt_style': 'direct_text_v1',
+        test['variants'].append({'id': mode, 'prompt_style': 'direct_text_v1', 'prompt_bindings': copy.deepcopy(parts[mode]),
             # direct_text_v1 sends the already-rendered prompt unchanged; the variant ID records its view.
             'state_presentation': 'raw_json', 'cache': 'default',
             'steps': [{'id': 'patch', 'type': 'generate', 'prompt': prompt, 'output': {'type': 'text'}, 'sampling': {'temperature': 0, 'top_p': 1, 'seed': 42}}],
@@ -298,3 +384,4 @@ def compile_test(fixture, reviews=None, method=DEFAULT_METHOD):
                        'response_schema': value_patch_schema(fixture['state'],fixture['schema']) if METHODS[method]['representation']=='value_patch' else json_patch_schema(fixture['state'])}})
     validate_test(test)
     return test
+

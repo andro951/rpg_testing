@@ -67,7 +67,7 @@ class Controller(ModelManager):
         defaults={'backend':'llamacpp','model_root':'','confirmed_empty_folder':'','llama_path':'',
                   'hf_token':'','sync_source':not demo,'publish_results':False,'remote_enabled':False,'models_folder_version':1,
                   'perchance_url':'https://perchance.org/056uh2nc6k','perchance_browser':'','perchance_headless':False,
-                  'perchance_only':False,'perchance_epoch':'1','perchance_cdp_port':9223}
+                  'perchance_only':False,'perchance_epoch':'1','perchance_cdp_port':9223,'inference_port':1235}
         saved=read_json(self.settings_path) if self.settings_path.exists() else {}
         # Explicit consent for the new folder policy: no migration from LM Studio or guessed defaults.
         if saved.get('models_folder_version')!=1:saved.pop('model_root',None);saved.pop('confirmed_empty_folder',None)
@@ -93,6 +93,7 @@ class Controller(ModelManager):
         self.perchance_setup_decision=None;self.perchance_setup_prompt=None;self.perchance_setup_event=None
         self.perchance_setup_answer=None
         self.failure=None
+        self.coverage_id=None
         self.store.root.mkdir(parents=True,exist_ok=True)
         for name in ('logs','preflight_reports'):(self.data/name).mkdir(exist_ok=True)
         self.process_source_commit=self.source_commit()
@@ -245,8 +246,10 @@ class Controller(ModelManager):
         # Overview Run all includes the remote baseline only on the assigned tier.
         gpu=report.get('gpu',{})
         from .domain import device_tier
-        if selection is None and not self.demo and not omit_perchance and device_tier(gpu.get('total_gib',0),gpu.get('name',''))==8:
-            remote_report,remote_plan=perchance.preflight(self,preparation,{'model_id':perchance.MODEL_ID})
+        if not self.demo and not omit_perchance and device_tier(gpu.get('total_gib',0),gpu.get('name',''))==8:
+            remote_selection={**(selection or {}),'model_id':perchance.MODEL_ID}
+            remote_selection.pop('all_models',None)
+            remote_report,remote_plan=perchance.preflight(self,preparation,remote_selection)
             plan={**plan,'perchance_plan':remote_plan,'perchance_report':remote_report,
                   'pending':plan['pending']+remote_plan['pending'],'complete':plan['complete']+remote_plan['complete']}
             report['plan']={**report['plan'],'pending':plan['pending'],'complete':plan['complete'],
@@ -289,6 +292,11 @@ class Controller(ModelManager):
                 if selection is not None:validate_selection(selection,self.selection_models(),load_tests(self.root/'test_specs'))
                 if kind=='run':self.requested_run_selection=selection
             else:selection=None
+            if kind=='coverage':
+                if not isinstance(payload,dict) or 'id' not in payload or set(payload)-{'id','retry_blocked'}:raise ValueError('Expected coverage id')
+                if type(payload.get('retry_blocked',False)) is not bool:raise ValueError('retry_blocked must be boolean')
+                from optimization.coverage import read_state
+                read_state(self.root,payload['id'])
             if kind=='optimization':
                 from optimization.engine import settings
                 from optimization.storage import Store
@@ -328,6 +336,10 @@ class Controller(ModelManager):
                 elif kind=='optimization':
                     from optimization.engine import dispatch
                     dispatch(self,payload)
+                elif kind=='coverage':
+                    from optimization.coverage import resume
+                    self.coverage_id=payload['id']
+                    resume(self,payload['id'],retry_blocked=payload.get('retry_blocked',False))
                 elif kind=='hub_search':self.search_hub(payload)
                 elif kind=='hub_inspect':self.inspect_hub(payload)
                 elif kind=='hub_download':self.download_selected(payload)
@@ -522,6 +534,7 @@ class Controller(ModelManager):
     def snapshot(self):
         with self.lock:
             return {'state':self.state,'busy':self.operation.locked(),'message':self.message,'report':copy.deepcopy(self.report),
+                    'coverage_id':self.coverage_id,
                     'perchance_setup_prompt':copy.deepcopy(self.perchance_setup_prompt),
                     'failure':copy.deepcopy(self.failure),
                     'models':copy.deepcopy(self.last_models),'current':copy.deepcopy(self.current),'completed_now':self.completed_now,

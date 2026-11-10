@@ -128,7 +128,13 @@ def evaluate(test,variant,values):
             result_score['state_exact_match']=state_exact
             try:
                 patch=values.get(result.get('step'))
-                if isinstance(patch,str):patch=parse(patch)
+                if representation=='ember_text_v1':
+                    from .ember_text import decode
+                    patch=decode(patch,test['source']['initial_state'],test['state_schema'])
+                elif representation=='field_value_v2':
+                    from .field_values import decode
+                    patch=decode(patch,test['source']['initial_state'],test['state_schema'])
+                elif isinstance(patch,str):patch=parse(patch)
                 actual_ops=[item.get('op') for item in patch] if isinstance(patch,list) and all(isinstance(item,dict) for item in patch) else []
                 match=actual_ops==required_ops
             except Exception:
@@ -141,7 +147,13 @@ def evaluate(test,variant,values):
             from jsonschema import Draft202012Validator
             try:
                 response=values.get(result.get('step'))
-                if isinstance(response,str):response=parse(response)
+                if representation=='ember_text_v1':
+                    from .ember_text import decode
+                    response=decode(response,test['source']['initial_state'],test['state_schema'])
+                elif representation=='field_value_v2':
+                    from .field_values import decode
+                    response=decode(response,test['source']['initial_state'],test['state_schema'])
+                elif isinstance(response,str):response=parse(response)
                 problems=sorted(e.message for e in Draft202012Validator(result['response_schema']).iter_errors(response))
             except Exception as exc:problems=[str(exc)]
             result_score['response_schema_valid']=not problems

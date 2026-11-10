@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 from reporting.report import load_evidence
-from workbench.domain import ResultStore, write_json
+from workbench.domain import ResultStore, write_json, digest
 from .catalog import registration
 from .core import VERSION, assess_record
 
@@ -49,7 +49,9 @@ def evidence_records(source, problems):
         yield from records
 
 
-def replay(source, output, test_id=None):
+def replay(source, output, test_id=None, *, validator=None):
+    if validator is not None:
+        return revalidate(source, output, test_id, validator)
     source, output = Path(source).resolve(), Path(output).resolve()
     if output == source or source in output.parents:
         raise ValueError('Assessment output must be outside the saved evidence directory.')
@@ -102,13 +104,81 @@ def replay(source, output, test_id=None):
     return summary
 
 
+def immutable_json(path, value):
+    """Never replace a different assessment or receipt at an existing identity."""
+    import json
+    if path.exists():
+        if json.loads(path.read_text(encoding='utf-8')) != value:
+            raise ValueError('Conflicting existing validation artifact: ' + str(path))
+    else:
+        write_json(path, value)
+
+
+def revalidate(source, output, test_id, validator):
+    from .validation import get_validator
+    selected = get_validator(validator)
+    source, output = Path(source).resolve(), Path(output).resolve()
+    if output == source or source in output.parents:
+        raise ValueError('Assessment output must be outside the saved evidence directory.')
+    if not source.exists():
+        raise ValueError('Evidence source does not exist: ' + str(source))
+    output = output / (selected.version + '-' + selected.fingerprint[:16])
+    immutable_json(output/'validator.json', selected.identity())
+    problems, assessed, skipped = [], [], []
+    counts, comparisons = Counter(), Counter()
+    for record in evidence_records(source, problems):
+        if test_id and record.get('test_id') != test_id:
+            continue
+        try:
+            variant = record.get('variant_definition')
+            if variant is None:
+                variants = [v for v in record['test_definition'].get('variants', [])
+                            if v['id'] == record.get('variant_id')]
+                if len(variants) != 1:
+                    raise ValueError('Captured definition must contain exactly one matching variant')
+                variant = variants[0]
+            if not selected.applicable(variant.get('result', {}).get('representation')):
+                skipped.append({'case_id': record.get('case_id'), 'source_record_checksum': record.get('sha256'),
+                                'reason': 'not_applicable'})
+                continue
+            assessment = assess_record(record, validator=validator)
+            try:
+                entry = registration(record['test_id'], record['variant_id'])
+            except ValueError:
+                entry = None
+            assessment['registration_status'] = 'registered' if entry else 'captured_contract_only'
+            if entry:
+                assessment['current_source_hash'] = entry['source_sha256']
+            # All semantic inputs come from the captured record, never the current catalog.
+            name = assessment['validation_id']
+            immutable_json(output/'assessments'/f'{name}.json', assessment)
+            assessed.append({'validation_id': name, 'case_id': record.get('case_id'),
+                             'source_record_checksum': record.get('sha256')})
+            counts[assessment['objective_outcome']] += 1
+            comparisons[assessment['score_comparison']] += 1
+        except (ValueError, TypeError, KeyError) as exc:
+            problems.append({'case_id': record.get('case_id'), 'error': str(exc)})
+    dataset = {'source': str(source), 'test_filter': test_id, 'assessments': assessed,
+               'not_applicable': skipped, 'problems': problems}
+    dataset_id = digest(dataset)
+    summary = {'evaluator_version': VERSION, 'validator': selected.identity(),
+               'dataset_id': dataset_id, 'source': str(source), 'output': str(output),
+               'outcomes': dict(counts), 'score_comparisons': dict(comparisons),
+               'assessed_records': len(assessed), 'unique_validations': len({a['validation_id'] for a in assessed}),
+               **dataset}
+    immutable_json(output/f'summary-{dataset_id}.json', summary)
+    return summary
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', default='results')
     parser.add_argument('--output', default='.local/evaluation')
     parser.add_argument('--test', help='Replay only this test definition.')
+    from .validation import VALIDATORS
+    parser.add_argument('--validator', choices=VALIDATORS, help='Versioned offline reinterpretation; preserves generation lineage and original scores.')
     args = parser.parse_args()
-    summary = replay(args.source, args.output, args.test)
+    summary = replay(args.source, args.output, args.test, validator=args.validator)
     print(f"{sum(summary['outcomes'].values())} assessments: {summary['outcomes']}; score comparison: {summary['score_comparisons']}")
     print(f"Reports: {Path(args.output).resolve()}")
     if summary['problems']:

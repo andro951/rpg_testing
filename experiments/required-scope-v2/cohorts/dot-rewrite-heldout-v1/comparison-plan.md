@@ -1,0 +1,9 @@
+# Frozen evaluation plan: restructured dot instructions
+
+Compare the preserved dot JSON baseline with the instruction-only promptcopy_v2. The latter was selected on the separate reserved-ID development cohort, where it scored 33/54 versus the baseline's 24/54. No result from this held-out cohort will be used to revise either prompt.
+
+The six predeclared fixtures are three matched plain/reserved-ID pairs: nested field update plus object append, unique-ID object removal, and a string update containing a quote and newline. Each is shown in normal JSON, ID-keyed arrays, and full-path presentations, with three repetitions. This produces 54 matched pairs (108 observations) per model and 540 observations across the five preselected local configurations. Runs use the existing parser and semantic oracle, 32K context, unchanged sampling and matching model artifacts.
+
+Before model execution, validation checks both arms' source, schema, expected state and task; validates independent reference results through both evaluators; checks rendered full paths against actual values; and checks the 36 rendered request digests. The per-model audit verifies captured request digests, exact matching keys, artifact, target, sampling, context, task state, expected state, and semantic outcomes. It preserves individual observations and reports pass, fail and inconclusive outcomes without counting timeouts as passes. Pairwise gains and regressions are reported by model, fixture and presentation; repetitions and variants are not independent tasks.
+
+No truncation, prompt editing, parser modification, provider change or held-out-driven tuning is authorized by this plan. The runner observes the conservative 22:00 desktop-clock stop boundary. Perchance is excluded while its existing browser connection remains unresolved.

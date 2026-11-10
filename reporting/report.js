@@ -133,22 +133,22 @@ const StatisticsReport = {
 
         return text;
     },
-    ExpectedText: (parent, variant = {}, test = {}) => {
-        const values = Object.entries(variant.expected_answers || {});
-        if (Object.hasOwn(variant, `expected_patch`))
-            values.push([`Expected patch`, variant.expected_patch]);
+    ExpectedText: (parent, variant = {}, reference = null) => {
+        if (reference?.kind === `reference`) {
+            StatisticsReport.Element(`p`, parent, reference.label);
+            StatisticsReport.EvidenceText(parent, reference.text, false);
+            return;
+        }
 
-        if (Object.hasOwn(test, `expected_state`))
-            values.push([`Expected final state`, test.expected_state]);
-
+        const values = Object.entries(reference?.answers || variant.expected_answers || {});
         if (!values.length)
-            StatisticsReport.Element(`p`, parent, `No expected answer or final state was captured in this record.`);
+            StatisticsReport.Element(`p`, parent, reference?.reason || `No verified expected response text is available in this snapshot.`);
 
         for (const [label, value] of values) {
             if (values.length > 1)
                 StatisticsReport.Element(`h3`, parent, label);
 
-            StatisticsReport.EvidenceText(parent, value);
+            StatisticsReport.EvidenceText(parent, typeof value === `string` ? value : JSON.stringify(value), false);
         }
     },
     ShowEvidence: (id, record, complete) => {
@@ -191,7 +191,7 @@ const StatisticsReport = {
             if (!calls.length)
                 StatisticsReport.EvidenceText(output, record.outputs ?? {});
 
-            StatisticsReport.ExpectedText(expected, record.variant_definition || {}, record.test_definition || {});
+            StatisticsReport.ExpectedText(expected, record.variant_definition || {}, summary.evaluation?.expected_response);
         }
         else {
             StatisticsReport.Element(`p`, prompt, `Complete prompt unavailable in this snapshot. Open the table through Open_Results_Table.bat to load the saved record.`);
@@ -199,7 +199,7 @@ const StatisticsReport = {
             StatisticsReport.EvidenceText(output, summary.output_preview);
             StatisticsReport.Element(`p`, expected, `Limited expected-result preview (up to 4,000 characters).`);
             try {
-                StatisticsReport.ExpectedText(expected, JSON.parse(summary.oracle_preview));
+                StatisticsReport.ExpectedText(expected, JSON.parse(summary.oracle_preview), summary.evaluation?.expected_response);
             }
             catch (error) {
                 //A truncated preview cannot be unpacked; never invent its missing answer.
@@ -208,6 +208,18 @@ const StatisticsReport = {
         }
 
         const evaluation = summary.evaluation;
+        const states = evaluation?.validation_states;
+        if (states && (complete ? Object.hasOwn(record.test_definition || {}, `expected_state`) : states.expected !== null)) {
+            const validation = StatisticsReport.EvidenceBlock(parent, `Resulting JSON states for validation`);
+            StatisticsReport.Element(`h3`, validation, `Expected resulting JSON state`);
+            StatisticsReport.EvidenceText(validation, states.expected);
+            StatisticsReport.Element(`h3`, validation, `Actual resulting JSON state`);
+            if (states.actual_available)
+                StatisticsReport.EvidenceText(validation, states.actual);
+            else
+                StatisticsReport.Element(`p`, validation, `Unavailable: no valid resulting state was captured; the submitted patch failed validation.`);
+        }
+
         const failed = summary.outcome !== `pass` || evaluation?.objective_outcome === `FAIL`;
         StatisticsReport.Element(`p`, failure, failed ? evaluation?.reason || record?.error || record?.reason || `No detailed failure reason was captured.` : `None — this result passed.`);
         if (evaluation?.score_comparison === `disagreement`)

@@ -28,6 +28,7 @@ class WorkbenchServer(ThreadingHTTPServer):
             '/':(webroot/'index.html').read_bytes(),
             '/app.js':(webroot/'app.js').read_bytes(),
             '/optimization.js':(webroot/'optimization.js').read_bytes(),
+            '/coverage.js':(webroot/'coverage.js').read_bytes(),
             '/style.css':(webroot/'style.css').read_bytes(),
         }
         for name in ('groupings.js','judgements.js','matrix.js','report.js'):
@@ -141,6 +142,12 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/optimization/sessions':
                 from optimization.storage import Store
                 return self.send(200,{'sessions':[{k:s.get(k) for k in ('id','created','status','message','generator_id')} for s in Store(app.root).list()]})
+            if path=='/api/coverage':
+                from optimization.coverage import read_state
+                return self.send(200,read_state(app.root,q['id'][0]))
+            if path=='/api/coverage/list':
+                from optimization.coverage import read_state
+                return self.send(200,{'batches':[read_state(app.root,p.parent.name) for p in sorted((app.root/'coverage_results').glob('*/state.json'))]})
             if path=='/api/optimization/session':
                 from optimization.engine import view
                 return self.send(200,view(app,q['id'][0]))
@@ -211,6 +218,16 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/unit-tests':app.start('unit_tests');return self.send(202,{'started':True})
             if path=='/api/run':app.start('run',data);return self.send(202,{'started':True})
             if path=='/api/optimization/run':app.start('optimization',data);return self.send(202,{'started':True})
+            if path=='/api/coverage/resume':
+                if 'id' not in data or set(data)-{'id','retry_blocked'}:raise ValueError('Expected coverage id')
+                app.start('coverage',data);return self.send(202,{'started':True})
+            if path=='/api/coverage/adopt':
+                if set(data)!={'batch_root'}:raise ValueError('Expected frozen batch root')
+                from optimization.coverage_adoption import adopt
+                if not app.operation.acquire(blocking=False):raise RuntimeError('Wait for the active operation')
+                try:key=adopt(app,data['batch_root'])
+                finally:app.operation.release()
+                app.start('coverage',{'id':key});return self.send(202,{'id':key})
             if path=='/api/optimization/settings':
                 from optimization.engine import update_settings
                 if set(data)!={'session_id','settings'}:raise ValueError('Expected session_id and settings')
@@ -277,6 +294,8 @@ def serve(root,demo=False,port=8765,open_browser=True):
         except Exception as exc:app.log('network','Could not restore previously approved Tailscale binding: '+str(exc))
     from .restarts import UpdateCoordinator
     server.update_coordinator=UpdateCoordinator(server).start()
+    from optimization.coverage import restore_pending
+    restore_pending(app)
     if open_browser:webbrowser.open(f'http://127.0.0.1:{server.server_port}/')
     try:server.serve_forever()
     finally:

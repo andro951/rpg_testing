@@ -9,6 +9,7 @@ from workbench.domain import digest, experiment_spec, read_json
 from workbench.judgements import review_lock
 from workbench.workflows import messages
 from .builder import ROOT, LABELS, METHODS, TASKS, TASK_TEMPLATES, compile_test, oracle
+from .normal_prompt import preview as prompt_preview
 
 REPO = ROOT.parent
 ARCHIVE = 'archives/test-suite-2026-10-14'
@@ -83,18 +84,19 @@ def build(root=REPO):
             groups[test['id']], timing[test['id']] = {}, {}
             slug = re.sub(r'[^a-z0-9]+', '-', fixture['name'].lower()).strip('-')
             for variant in test['variants']:
-                prompt = variant['steps'][0]['prompt']
+                request = messages(test,variant['steps'][0],{},variant)
+                prompt = prompt_preview(request)
                 preview = root/'prompts/patch-suite'/test['id']/(variant['id']+'.txt')
                 review = root/'prompt-review'/f"{number:02d}-{slug}-{method.replace('_','-')}-{variant['id'].replace('_','-')}.txt"
                 preview.parent.mkdir(parents=True, exist_ok=True)
                 review.parent.mkdir(parents=True, exist_ok=True)
                 preview.write_bytes(prompt.encode('utf-8'))
                 review.write_bytes(prompt.encode('utf-8'))
-                write_json(preview.with_suffix('.messages.json'), messages(test,variant['steps'][0],{},variant))
+                write_json(preview.with_suffix('.messages.json'), request)
                 manifest['prompts'].append({'test_id':test['id'], 'task':fixture['task'], 'method':method,
                     'presentation':variant['id'], 'file':preview.relative_to(root).as_posix(), 'review_file':review.relative_to(root).as_posix(),
                     'prompt_sha256':hashlib.sha256(prompt.encode()).hexdigest(), 'enabled':test['enabled'],
-                    'prompt_digest':test['prompt_builder']['prompt_digest']})
+                    'prompt_digest':test['prompt_builder']['prompt_digest'], 'message_digest':digest(request)})
                 identity = digest(experiment_spec(test,variant))
                 groups[test['id']][variant['id']] = {'ability_category':'Database operations',
                     'task_type':'Database '+TASKS[fixture['task']][0].replace('_',' ').capitalize(),
@@ -119,11 +121,11 @@ def build(root=REPO):
         write_json(root/'reporting/grouping_metadata.json',groups)
         write_json(root/'reporting/timing_expectations.json',timing)
         write_json(root/'prompts/patch-suite/manifest.json',manifest)
-        lines = ['DATABASE SUITE — PROMPT REVIEW INDEX', '',
+        lines = ['DATABASE SUITE â€” PROMPT REVIEW INDEX', '',
             f"{len(fixtures)} data cases, {len(set(TASK_TEMPLATES.values()))} task templates, {len(manifest['prompts'])} prompts.",
             'Ready for benchmark runs: all exact prompts approved.' if ready else 'Pending exact-prompt approval; unapproved cases remain disabled.',
             'No model inference is run by this builder. Both people must approve the exact prompts before running tests.',
-            'prompt-review contains only complete prompts, one text file per prompt. The system message is empty.', '']
+            'Each review file shows the complete SYSTEM MESSAGE and USER MESSAGE; messages JSON preserves exact API roles.', '']
         lines.extend(p['review_file'] for p in manifest['prompts'])
         (root/'prompts/patch-suite/INDEX.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8',newline='\n')
         from tools.build_prompt_sharing import build as sharing

@@ -4,7 +4,7 @@ import json
 import re
 import unittest
 from unittest.mock import patch
-from test_builder.builder import ROOT, LABELS, build_prompt, compile_test, oracle, presentations, prompt_parts
+from test_builder.builder import ROOT, LABELS, build_messages, build_prompt, compile_test, oracle, presentations, prompt_parts
 from test_builder.presentation import full_paths, id_keyed_arrays
 from workbench.domain import read_json
 from workbench.value_paths import from_pointer, resolve
@@ -21,8 +21,28 @@ class IdPresentationTests(unittest.TestCase):
         for fixture in self.fixtures:
             for mode in presentations(fixture):
                 with self.subTest(fixture=fixture['id'], presentation=mode):
-                    prompt = build_prompt(fixture, mode)
-                    self.assertIsNone(re.search(r'\b(index(?:es|ed|ing)?|indices|positions?|positional|zero.based)\b', prompt, re.I))
+                    request = build_messages(fixture, mode)
+                    self.assertEqual([message['role'] for message in request], ['system', 'user'])
+                    system, prompt = (message['content'] for message in request)
+                    # Check the promoted instruction behavior in the actual system role.
+                    from test_builder.normal_prompt import configuration, selected
+                    operation=compile_test(fixture)['prompt_builder']['operation']
+                    config=configuration()
+                    if operation in config.get('operation_templates',{}):
+                        candidate,_=selected(config,operation)
+                        self.assertEqual(system,candidate['system'])
+                        method=(ROOT/'methods/value_patch.txt').read_text().strip()
+                        self.assertEqual(prompt.count(method),1)
+                        self.assertIn('Strings must include their JSON quotation marks and normal JSON escaping.',prompt)
+                        self.assertIn('Each collection selection must match exactly one element.',prompt)
+                    else:
+                        self.assertIn('Never use positions, bare string selectors or an @ marker.', system)
+                        self.assertIn('Selecting a collection element contributes the JSON serialization of its designated ID', system)
+                        self.assertIn('These are two separate serialization steps.', system)
+                        self.assertIn('every string collection selector must still have its own double quotes.', system)
+                    # Retain the scan for positive positional instructions/index answers.
+                    checked_prompt = prompt.replace('never their position.', '')
+                    self.assertIsNone(re.search(r'\b(index(?:es|ed|ing)?|indices|positions?|positional|zero.based)\b', checked_prompt, re.I))
                     self.assertNotIn(' = ', prompt)
                     parts = prompt_parts(fixture, mode)
                     if mode == 'id_keyed_arrays':

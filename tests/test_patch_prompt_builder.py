@@ -62,12 +62,14 @@ class PatchPromptBuilderTests(unittest.TestCase):
                 for variant in test['variants']:
                     prompt=variant['steps'][0]['prompt']
                     request=messages(test,variant['steps'][0],{},variant)
-                    self.assertEqual(request,[{'role':'system','content':''},{'role':'user','content':prompt}])
+                    self.assertTrue(test['instructions'])
+                    self.assertEqual(request,[{'role':'system','content':test['instructions']},{'role':'user','content':prompt}])
                     self.assertEqual(prompt.count(method),1)
                     self.assertEqual(prompt.count('Current data:\n'),1)
                     self.assertEqual(prompt.count('Task:\n'),1)
                     path=REPO/'prompts/patch-suite'/test['id']/(variant['id']+'.txt')
-                    self.assertEqual(path.read_text(encoding='utf-8'),prompt)
+                    from test_builder.normal_prompt import preview
+                    self.assertEqual(path.read_text(encoding='utf-8'),preview(request))
                     self.assertEqual(read_json(path.with_suffix('.messages.json')),request)
                     self.assertEqual(variant['steps'][0]['output'],{'type':'text'})
                     values={'patch':json.dumps(answer[0])}
@@ -177,6 +179,20 @@ class PatchPromptBuilderTests(unittest.TestCase):
             self.assertIn('"count": number.',prompt)
         f=copy.deepcopy(fixture);f['schema']['properties']['items'].pop('x-id-field')
         with self.assertRaises(ValueError):build_prompt(f,'normal_json')
+
+    def test_no_change_uses_unrelated_information_in_every_presentation(self):
+        f=self.by_id['db_v3_no_change']
+        self.assertEqual(f['parameters'],{})
+        self.assertEqual(TASK_TEMPLATES['no_change'],'no_change')
+        for mode in presentations(f):
+            self.assertEqual(prompt_parts(f,mode)['new_information'],
+                'The documentation uses blue headings and a serif font.')
+        changed=copy.deepcopy(f)
+        changed['state']['items'][2]['count']=91
+        self.assertEqual(oracle(changed),([],changed['state']))
+        changed['parameters']['new_value']=2
+        with self.assertRaisesRegex(ValueError,'task parameters'):
+            compile_test(changed)
 
     def test_no_change_accepts_empty_json_with_whitespace_and_rejects_redundant_or_test_operations(self):
         f=self.by_id['db_v3_no_change'];test=compile_test(f);variant=test['variants'][0]

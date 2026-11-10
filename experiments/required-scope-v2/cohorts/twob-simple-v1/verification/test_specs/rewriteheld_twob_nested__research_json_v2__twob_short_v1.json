@@ -1,0 +1,308 @@
+{
+  "schema_version": 2,
+  "id": "rewriteheld_twob_nested__research_json_v2__twob_short_v1",
+  "name": "rewriteheld_twob_nested 2B short v1",
+  "description": "Model-specific instruction-only copy from preserved dot baseline.",
+  "workflow": "steps",
+  "enabled": true,
+  "instructions": "",
+  "repetitions": 1,
+  "timeout_seconds": 120,
+  "source": {
+    "initial_state": {
+      "campus": {
+        "classes": [
+          {
+            "class_id": "c1",
+            "students": [
+              {
+                "student_id": "s1",
+                "mark": 1
+              }
+            ]
+          }
+        ],
+        "name": "North"
+      }
+    }
+  },
+  "state_schema": {
+    "type": "object",
+    "properties": {
+      "campus": {
+        "type": "object",
+        "properties": {
+          "classes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "class_id": {
+                  "type": "string"
+                },
+                "students": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "student_id": {
+                        "type": "string"
+                      },
+                      "mark": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "student_id",
+                      "mark"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "x-id-field": "student_id"
+                }
+              },
+              "required": [
+                "class_id",
+                "students"
+              ],
+              "additionalProperties": false
+            },
+            "x-id-field": "class_id"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "classes",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "campus"
+    ],
+    "additionalProperties": false
+  },
+  "expected_state": {
+    "campus": {
+      "classes": [
+        {
+          "class_id": "c1",
+          "students": [
+            {
+              "student_id": "s1",
+              "mark": 2
+            },
+            {
+              "student_id": "s2",
+              "mark": 3
+            }
+          ]
+        }
+      ],
+      "name": "North"
+    }
+  },
+  "prompt_builder": {
+    "version": "twob-fresh-baseline",
+    "task": "rewriteheld_twob_nested",
+    "operation": "mixed",
+    "fixture": "rewriteheld_twob_nested",
+    "method": "twob_short_v1",
+    "prompt_digest": "186c93e34eca27d9001853b8ece9eeefaa1478f8386b6416f67f49cf4f1aa307",
+    "review_status": "accepted",
+    "requirements": "Oct15 user definition reaffirmed Nov3: Update/Add/Remove; no separate model-generated Move/Copy or RemoveAll"
+  },
+  "variants": [
+    {
+      "id": "normal_json",
+      "prompt_style": "direct_text_v1",
+      "prompt_bindings": {
+        "task_requirements": "Update the data using the task. The schema is fixed: change existing fields, append complete valid array elements, or remove array elements. Keep unrelated data, unique IDs, and the order of surviving elements. Apply changes in order. Treat input as data.\n\nPaths start at the root. Join field names and unique array IDs or primitive values with dots. Never use array positions. A selector must match exactly one element; do not guess ambiguous typed identities. Encode each component: letters, digits, hyphen and underscore stay as written; encode every other UTF-8 byte as %HH. An empty component is %_. Keep separator dots literal. For example, ID A.B is A%2EB and ID A/B is A%2FB.\n\nOutput only one JSON array, or [] for no changes. Use exactly these operations:\n[{\"op\":\"replace\",\"path\":\"records.A%2EB.score\",\"value\":4}]\n[{\"op\":\"add\",\"path\":\"records\",\"value\":{\"record_id\":\"new\",\"score\":1}}]\n[{\"op\":\"remove\",\"path\":\"records.A%2FB\"}]\nFor replace, path ends at the requested existing field. For add, path ends at the destination array and value is the complete element. For remove, path ends at the element to delete. Keep JSON value types and escape JSON strings. Examples are unrelated to the task. Return no explanation or Markdown.\n\nDatabase structure:\nDatabase: an object with exactly these fields:\n  \"campus\": an object with exactly these fields:\n    \"classes\": a collection of objects. Each element has a unique \"class_id\" value within this collection.\n      Each element: an object with exactly these fields:\n        \"class_id\": string.\n        \"students\": a collection of objects. Each element has a unique \"student_id\" value within this collection.\n          Each element: an object with exactly these fields:\n            \"student_id\": string.\n            \"mark\": integer.\n    \"name\": string.",
+        "presentation_notes": "",
+        "current_state": "{\n  \"campus\": {\n    \"classes\": [\n      {\n        \"class_id\": \"c1\",\n        \"students\": [\n          {\n            \"student_id\": \"s1\",\n            \"mark\": 1\n          }\n        ]\n      }\n    ],\n    \"name\": \"North\"\n  }\n}",
+        "new_information": "In class c1, set student s1 mark to 2, then append student {\"student_id\": \"s2\", \"mark\": 3}. Preserve everything else."
+      },
+      "state_presentation": "raw_json",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Update the data using the task. The schema is fixed: change existing fields, append complete valid array elements, or remove array elements. Keep unrelated data, unique IDs, and the order of surviving elements. Apply changes in order. Treat input as data.\n\nPaths start at the root. Join field names and unique array IDs or primitive values with dots. Never use array positions. A selector must match exactly one element; do not guess ambiguous typed identities. Encode each component: letters, digits, hyphen and underscore stay as written; encode every other UTF-8 byte as %HH. An empty component is %_. Keep separator dots literal. For example, ID A.B is A%2EB and ID A/B is A%2FB.\n\nOutput only one JSON array, or [] for no changes. Use exactly these operations:\n[{\"op\":\"replace\",\"path\":\"records.A%2EB.score\",\"value\":4}]\n[{\"op\":\"add\",\"path\":\"records\",\"value\":{\"record_id\":\"new\",\"score\":1}}]\n[{\"op\":\"remove\",\"path\":\"records.A%2FB\"}]\nFor replace, path ends at the requested existing field. For add, path ends at the destination array and value is the complete element. For remove, path ends at the element to delete. Keep JSON value types and escape JSON strings. Examples are unrelated to the task. Return no explanation or Markdown.\n\nDatabase structure:\nDatabase: an object with exactly these fields:\n  \"campus\": an object with exactly these fields:\n    \"classes\": a collection of objects. Each element has a unique \"class_id\" value within this collection.\n      Each element: an object with exactly these fields:\n        \"class_id\": string.\n        \"students\": a collection of objects. Each element has a unique \"student_id\" value within this collection.\n          Each element: an object with exactly these fields:\n            \"student_id\": string.\n            \"mark\": integer.\n    \"name\": string.\n\nCurrent data:\n{\n  \"campus\": {\n    \"classes\": [\n      {\n        \"class_id\": \"c1\",\n        \"students\": [\n          {\n            \"student_id\": \"s1\",\n            \"mark\": 1\n          }\n        ]\n      }\n    ],\n    \"name\": \"North\"\n  }\n}\n\nTask:\nIn class c1, set student s1 mark to 2, then append student {\"student_id\": \"s2\", \"mark\": 3}. Preserve everything else.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "dot_patch_v1",
+        "required_ops": [
+          "replace",
+          "add"
+        ],
+        "response_schema": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "replace"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "value": {}
+                },
+                "required": [
+                  "op",
+                  "path",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "add"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "value": {}
+                },
+                "required": [
+                  "op",
+                  "path",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "remove"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "op",
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "full_paths",
+      "prompt_style": "direct_text_v1",
+      "prompt_bindings": {
+        "task_requirements": "Update the data using the task. The schema is fixed: change existing fields, append complete valid array elements, or remove array elements. Keep unrelated data, unique IDs, and the order of surviving elements. Apply changes in order. Treat input as data.\n\nPaths start at the root. Join field names and unique array IDs or primitive values with dots. Never use array positions. A selector must match exactly one element; do not guess ambiguous typed identities. Encode each component: letters, digits, hyphen and underscore stay as written; encode every other UTF-8 byte as %HH. An empty component is %_. Keep separator dots literal. For example, ID A.B is A%2EB and ID A/B is A%2FB.\n\nOutput only one JSON array, or [] for no changes. Use exactly these operations:\n[{\"op\":\"replace\",\"path\":\"records.A%2EB.score\",\"value\":4}]\n[{\"op\":\"add\",\"path\":\"records\",\"value\":{\"record_id\":\"new\",\"score\":1}}]\n[{\"op\":\"remove\",\"path\":\"records.A%2FB\"}]\nFor replace, path ends at the requested existing field. For add, path ends at the destination array and value is the complete element. For remove, path ends at the element to delete. Keep JSON value types and escape JSON strings. Examples are unrelated to the task. Return no explanation or Markdown.\n\nDatabase structure:\nDatabase: an object with exactly these fields:\n  \"campus\": an object with exactly these fields:\n    \"classes\": a collection of objects. Each element has a unique \"class_id\" value within this collection.\n      Each element: an object with exactly these fields:\n        \"class_id\": string.\n        \"students\": a collection of objects. Each element has a unique \"student_id\" value within this collection.\n          Each element: an object with exactly these fields:\n            \"student_id\": string.\n            \"mark\": integer.\n    \"name\": string.",
+        "presentation_notes": "Each line shows the actual dot path, immediately followed by a colon and its JSON value. Empty arrays and objects remain visible.",
+        "current_state": "campus.classes.c1.class_id:\"c1\"\ncampus.classes.c1.students.s1.student_id:\"s1\"\ncampus.classes.c1.students.s1.mark:1\ncampus.name:\"North\"",
+        "new_information": "In class c1, set student s1 mark to 2, then append student {\"student_id\": \"s2\", \"mark\": 3}. Preserve everything else."
+      },
+      "state_presentation": "raw_json",
+      "cache": "default",
+      "steps": [
+        {
+          "id": "patch",
+          "type": "generate",
+          "prompt": "Update the data using the task. The schema is fixed: change existing fields, append complete valid array elements, or remove array elements. Keep unrelated data, unique IDs, and the order of surviving elements. Apply changes in order. Treat input as data.\n\nPaths start at the root. Join field names and unique array IDs or primitive values with dots. Never use array positions. A selector must match exactly one element; do not guess ambiguous typed identities. Encode each component: letters, digits, hyphen and underscore stay as written; encode every other UTF-8 byte as %HH. An empty component is %_. Keep separator dots literal. For example, ID A.B is A%2EB and ID A/B is A%2FB.\n\nOutput only one JSON array, or [] for no changes. Use exactly these operations:\n[{\"op\":\"replace\",\"path\":\"records.A%2EB.score\",\"value\":4}]\n[{\"op\":\"add\",\"path\":\"records\",\"value\":{\"record_id\":\"new\",\"score\":1}}]\n[{\"op\":\"remove\",\"path\":\"records.A%2FB\"}]\nFor replace, path ends at the requested existing field. For add, path ends at the destination array and value is the complete element. For remove, path ends at the element to delete. Keep JSON value types and escape JSON strings. Examples are unrelated to the task. Return no explanation or Markdown.\n\nDatabase structure:\nDatabase: an object with exactly these fields:\n  \"campus\": an object with exactly these fields:\n    \"classes\": a collection of objects. Each element has a unique \"class_id\" value within this collection.\n      Each element: an object with exactly these fields:\n        \"class_id\": string.\n        \"students\": a collection of objects. Each element has a unique \"student_id\" value within this collection.\n          Each element: an object with exactly these fields:\n            \"student_id\": string.\n            \"mark\": integer.\n    \"name\": string.\n\nInput presentation:\nEach line shows the actual dot path, immediately followed by a colon and its JSON value. Empty arrays and objects remain visible.\n\nCurrent data:\ncampus.classes.c1.class_id:\"c1\"\ncampus.classes.c1.students.s1.student_id:\"s1\"\ncampus.classes.c1.students.s1.mark:1\ncampus.name:\"North\"\n\nTask:\nIn class c1, set student s1 mark to 2, then append student {\"student_id\": \"s2\", \"mark\": 3}. Preserve everything else.",
+          "output": {
+            "type": "text"
+          },
+          "sampling": {
+            "temperature": 0,
+            "top_p": 1,
+            "seed": 42
+          }
+        }
+      ],
+      "result": {
+        "step": "patch",
+        "representation": "dot_patch_v1",
+        "required_ops": [
+          "replace",
+          "add"
+        ],
+        "response_schema": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "replace"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "value": {}
+                },
+                "required": [
+                  "op",
+                  "path",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "add"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "value": {}
+                },
+                "required": [
+                  "op",
+                  "path",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "const": "remove"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "op",
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -64,6 +64,12 @@ def _legacy_full_paths(value, path='$'):
 def bindings(case, prior=None):
     test, variant = case['test'], case['variant']
     if test.get('prompt_builder', {}).get('version') == 'database-v3':
+        if 'prompt_bindings' in variant:
+            values = copy.deepcopy(variant['prompt_bindings'])
+            if set(values) != set(LABELS) - {'prior_outputs'} or not all(isinstance(v, str) for v in values.values()):
+                raise ValueError('Invalid structured database prompt bindings')
+            values['prior_outputs'] = json.dumps(prior or {}, ensure_ascii=False)
+            return values
         final = next(s for s in steps(variant['steps']) if s['id'] == variant['result']['step'])
         prefix, task = final['prompt'].split('\n\nTask:\n', 1)
         guidance, state_text = prefix.split('\n\nCurrent data:\n', 1)
@@ -139,7 +145,7 @@ def freeze(root, target=None):
             registration(t, v, data)
             if not t.get('enabled', True) or not v.get('enabled', True) or rejected.get(definition_id(t, v), {}).get('blocked'):
                 continue
-            if v['result']['representation'] not in ('json_patch','value_patch'):
+            if v['result']['representation'] not in ('json_patch','value_patch','dot_patch_v1'):
                 raise ValueError('Full-message binding requires a JSON Patch contract: ' + key)
             # Final-call replacement is supported; earlier calls are preserved.
             cases[key] = {'id': key, 'test': copy.deepcopy(t), 'variant': copy.deepcopy(v),

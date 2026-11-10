@@ -224,8 +224,9 @@ class TargetedTests(unittest.TestCase):
 
     def test_source_sync_captures_selection_before_restart(self):
         self.app.demo = False; self.app.settings['sync_source'] = True
-        with patch('workbench.gitops.pull', return_value=True):
+        with patch('workbench.perchance_setup.prepare') as prepare, patch('workbench.gitops.pull', return_value=True):
             with self.assertRaises(RuntimeError): self.app.run(selection=self.scope)
+        prepare.assert_called_once_with(self.app,selection=self.scope,reuse=True)
         self.assertTrue(self.app.restart_required)
         self.assertEqual(self.app.requested_run_selection, self.scope)
         self.assertEqual(self.app.store.all(), [])

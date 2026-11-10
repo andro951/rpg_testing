@@ -1,0 +1,7 @@
+# 4B literal v2: retrospective regression coverage
+
+Compare the unchanged Qwen3.5 4B Q8_0 literal-line v2 recipe with saved original dot-JSON results on the existing identity-routing, array-boundaries and multiple-change cohorts. This checks whether a model-specific text candidate also handles other required operations. The cohorts were previously examined during method selection: this is a retrospective regression check, not fresh holdout evidence or prompt-tuning data.
+
+Each source cohort has six tasks, three presentations and three repetitions: 54 matched pairs each, 162 total. Generate only the literal-v2 observations and reuse the 162 original observations. Use the same model, 32K context, sampling, final-state semantics and required operations; output representation and parser intentionally differ. Array-boundaries includes unique-value primitive-array operations as well as unique-ID object arrays; report these categories separately.
+
+Before launch, check all matching original records, independent expected states and reference applications, both evaluators, actual full paths, matching input/schema/task/sampling and preserved literal instruction head, and freeze the 54 rendered request digests. Audit paired artifact identities, target, context, sampling, case keys, semantic outcomes, gains, regressions and inconclusives. Presentations/repetitions are not independent tasks. Do not tune either recipe from these results. Observe the conservative 22:00 desktop-clock boundary and do not duplicate inference.

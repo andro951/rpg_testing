@@ -9,7 +9,7 @@ from collections import Counter
 from workbench.domain import canonical, digest
 from workbench.scoring import apply, changes, equal, idx, parse, pointer
 
-VERSION = 'detailed-evaluator-v1'
+VERSION = 'detailed-evaluator-v2'
 PASS, FAIL, NOT_EVALUATED, NOT_APPLICABLE = 'passed', 'failed', 'not_evaluated', 'not_applicable'
 
 
@@ -135,16 +135,59 @@ def state_checks(report, test, actual):
     report.compare('state.final', expected, actual, 'Final state must equal the fixed oracle, including unchanged data.', scope='final_state')
 
 
-def patch_checks(report, test, variant, raw):
+def patch_checks(report, test, variant, raw, validator=None):
     representation = variant['result']['representation']
+    if representation == 'field_value_v2':
+        from workbench.field_values import decode
+        try:
+            operations = decode(raw, test['source']['initial_state'], test['state_schema'])
+        except Exception as exc:
+            report.add('text.document', FAIL, str(exc))
+            report.add('state.final', NOT_EVALUATED, 'Field/value syntax failed; no state committed.', dependencies=['text.document'])
+            return
+        report.add('text.document', PASS, 'Valid research field/value records; Dot paths, object values and actual array deletion use the unchanged canonical database evaluator.')
+        semantic_variant = copy.deepcopy(variant)
+        semantic_variant['result']['representation'] = 'dot_patch_v1'
+        semantic_report = Report()
+        patch_checks(semantic_report, test, semantic_variant, operations, validator=validator)
+        report.checks.extend(c for c in semantic_report.checks if c['code'] not in ('json.document', 'patch.array'))
+        return
+    if representation == 'ember_text_v1':
+        from workbench.ember_text import decode
+        try:
+            operations = decode(raw, test['source']['initial_state'], test['state_schema'])
+        except Exception as exc:
+            report.add('text.document', FAIL, str(exc))
+            report.add('state.final', NOT_EVALUATED, 'Text contract or database operation failed; no state committed.', dependencies=['text.document'])
+            return
+        report.add('text.document', PASS, 'Valid Ember typed-line records lowered through the unchanged database operation contract; no JSON model output required.')
+        semantic_variant = copy.deepcopy(variant)
+        semantic_variant['result']['representation'] = 'value_patch'
+        semantic_report = Report()
+        patch_checks(semantic_report, test, semantic_variant, operations, validator=validator)
+        # These describe the compiler's intermediate representation, not the
+        # model's plaintext response. All semantic/operation checks are retained.
+        report.checks.extend(c for c in semantic_report.checks if c['code'] not in ('json.document', 'patch.array'))
+        return
+    normalization = None
     try:
-        patch = parse(raw) if isinstance(raw, str) else copy.deepcopy(raw)
+        parser = getattr(validator.adapter, 'parse_response', None) if validator else None
+        if isinstance(raw, str) and parser is not None:
+            patch, normalization = parser(raw)
+        else:
+            patch = parse(raw) if isinstance(raw, str) else copy.deepcopy(raw)
         canonical(patch)
     except (ValueError, TypeError) as exc:
         report.add('json.document', FAIL, str(exc))
         report.add('state.final', NOT_EVALUATED, 'Parsing failed; no patch was applied.', dependencies=['json.document'])
         return
-    report.add('json.document', PASS, 'Valid whole JSON document; no duplicate keys or non-finite numbers.')
+    report.add('json.document', PASS, 'Valid whole JSON document; no duplicate keys or non-finite numbers.'
+               if normalization is None else 'Only outer array delimiters normalized; internal JSON is strict.')
+    if normalization is not None:
+        report.add('json.outer_array_normalization', PASS,
+                   'Approved outer brackets inserted; operation contents and semantic requirements are unchanged.',
+                   actual=normalization)
+
     if representation == 'state':
         state_checks(report, test, patch)
         return
@@ -162,10 +205,12 @@ def patch_checks(report, test, variant, raw):
     required_ops = variant['result'].get('required_ops')
     if required_ops is not None:
         names = [x.get('op') if isinstance(x, dict) else None for x in patch]
-        report.compare('patch.required_operations', required_ops, names,
-                       'This contract requires these operation names in this exact order, including any test precondition.')
-    if representation == 'value_patch':
-        value_patch_checks(report, test, patch)
+        explanation = 'This contract requires these operation names in this exact order, including any test precondition.'
+        if representation in ('value_patch','dot_patch_v1') and required_ops == [] and equal(test['source']['initial_state'], test['expected_state']):
+            explanation = 'The current data already equals the expected state. Return []; a redundant update is not needed.'
+        report.compare('patch.required_operations', required_ops, names, explanation)
+    if representation in ('value_patch','dot_patch_v1'):
+        value_patch_checks(report, test, patch, representation, validator=validator)
         return
     doc = copy.deepcopy(test['source']['initial_state'])
     blocked = None
@@ -254,8 +299,14 @@ def patch_checks(report, test, variant, raw):
                    scope='final_state', dependencies=[f'operation:{blocked}'])
 
 
-def value_patch_checks(report, test, patch):
-    from workbench.value_paths import tokens, lower_operation
+def value_patch_checks(report, test, patch, representation='value_patch', validator=None):
+    if representation == 'dot_patch_v1' and validator is not None:
+        tokens = validator.adapter.syntax_tokens
+        lower_operation = validator.adapter.lower_operation
+    elif representation == 'dot_patch_v1':
+        from workbench.dot_paths import tokens, lower_operation
+    else:
+        from workbench.value_paths import tokens, lower_operation
     doc, schema, blocked = copy.deepcopy(test['source']['initial_state']), test.get('state_schema'), None
     for number, item in enumerate(patch):
         meta = {'operation': number, 'scope': 'operation'}
@@ -269,7 +320,7 @@ def value_patch_checks(report, test, patch):
             for field in ('path','from') if item['op'] in ('move','copy') else ('path',):
                 try:
                     tokens(item[field])
-                    report.add('pointer.syntax', PASS, f'{field}: valid value-path syntax.', actual=item[field], **meta)
+                    report.add('pointer.syntax', PASS, f'{field}: path structure tokenized; typed collection selectors are checked during resolution.', actual=item[field], **meta)
                 except ValueError as exc:
                     syntax = False
                     report.add('pointer.syntax', FAIL, f'{field}: {exc}', actual=item[field], **meta)
@@ -283,11 +334,20 @@ def value_patch_checks(report, test, patch):
         try:
             lower_operation(doc, item, schema)
             report.add('pointer.target', PASS, 'Paths resolve by field names and unique typed identities; no array positions are used.', **meta)
-            doc = apply(doc, [item], 'value_patch', schema)
+            doc = (validator.adapter.apply(doc, [item], schema)
+                   if validator is not None and representation == 'dot_patch_v1'
+                   else apply(doc, [item], representation, schema))
             report.add('patch.application', PASS, 'Operation applied and database schema/unique identities validated.', **meta)
         except (ValueError, KeyError, TypeError, IndexError) as exc:
             blocked = number
-            report.add('patch.application_failed', FAIL, str(exc), actual=item, **meta)
+            explanation = str(exc)
+            try:
+                if representation == 'value_patch':
+                    from .diagnostics import value_path_hint
+                    explanation += value_path_hint(doc, schema, item)
+            except (ValueError, KeyError, TypeError, IndexError):
+                pass  # An optional hint must never replace the original validation failure.
+            report.add('patch.application_failed', FAIL, explanation, actual=item, **meta)
         except Exception as exc:
             # JSON Schema errors also need a useful deterministic explanation.
             from jsonschema.exceptions import ValidationError
@@ -323,12 +383,20 @@ def answer_checks(report, variant, values):
             report.compare('index.format', wanted, actual, 'Return only the exact requested index text, including move pair order and spacing.', step=step)
 
 
-def assess(test, variant, values, *, execution='completed', original_score=None):
+def assess(test, variant, values, *, execution='completed', original_score=None, validator=None):
     """Evaluate supplied completed values; callers must identify partial/error evidence."""
     report = Report()
     report.add('evidence.execution', PASS if execution == 'completed' else NOT_EVALUATED,
                'Completed response.' if execution == 'completed' else f'Execution is {execution}; semantic success is not established.')
     result = variant.get('result', {})
+    selected = None
+    if validator is not None:
+        from .validation import get_validator
+        from workbench.domain import local_schema
+        selected = get_validator(validator)
+        local_schema(test.get('state_schema', {}))
+        local_schema(result.get('response_schema', {}))
+    adapter = selected if selected and selected.applicable(result.get('representation')) else None
     if execution != 'completed':
         report.add('state.final', NOT_EVALUATED, 'Incomplete or unavailable response; no completed semantic verdict.')
     elif result.get('representation', 'answers') == 'answers':
@@ -339,7 +407,7 @@ def assess(test, variant, values, *, execution='completed', original_score=None)
     elif 'expected_state' not in test:
         report.add('state.oracle', NOT_APPLICABLE, 'No fixed final-state oracle.')
     else:
-        patch_checks(report, test, variant, values[result['step']])
+        patch_checks(report, test, variant, values[result['step']], validator=adapter)
     for check in variant.get('checks', []):
         actual = values.get(check['step'])
         op = check['operator']
@@ -354,10 +422,14 @@ def assess(test, variant, values, *, execution='completed', original_score=None)
     fixed_oracle = bool(variant.get('expected_answers')) if result.get('representation', 'answers') == 'answers' else 'expected_state' in test
     failed = [c for c in report.checks if c['status'] == FAIL and c.get('affects_verdict', True)]
     outcome = 'INCONCLUSIVE' if execution != 'completed' else ('UNSCORED' if not fixed_oracle else ('FAIL' if failed else 'PASS'))
-    return {'evaluator_version': VERSION, 'test_id': test['id'], 'variant_id': variant['id'],
+    assessment = {'evaluator_version': VERSION, 'test_id': test['id'], 'variant_id': variant['id'],
             'definition_hash': digest({'test': test, 'variant': variant}), 'execution_outcome': execution,
             'objective_outcome': outcome, 'primary_reason': failed[0]['explanation'] if failed else None,
             'checks': report.checks, 'original_score': copy.deepcopy(original_score)}
+    if selected is not None:
+        assessment['validator'] = selected.identity()
+        assessment['validation_applicability'] = 'applicable' if adapter else 'not_applicable'
+    return assessment
 
 
 def steps_by_id(steps):
@@ -425,13 +497,27 @@ def trace_checks(variant, calls):
     return report.checks
 
 
-def assess_record(record):
+def assess_record(record, *, validator=None):
     """Replay immutable captured evidence; never substitutes current edited definitions."""
-    test, variant = record['test_definition'], record['variant_definition']
+    test = record['test_definition']
+    variant = record.get('variant_definition')
+    if variant is None:
+        if validator is None:
+            raise KeyError('variant_definition')
+        variants = [v for v in test.get('variants', []) if v['id'] == record.get('variant_id')]
+        if len(variants) != 1:
+            raise ValueError('Captured definition must contain exactly one matching variant')
+        variant = variants[0]
+    selected = None
+    if validator is not None:
+        from .validation import get_validator
+        selected = get_validator(validator)
+    adapter = selected if selected and selected.applicable(variant.get('result', {}).get('representation')) else None
     execution = 'timeout' if record.get('timed_out') else record.get('status', 'missing')
     incomplete = any(not completed_call(c) for c in record.get('calls', []))
     if execution == 'completed' and incomplete: execution = 'incomplete'
-    assessment = assess(test, variant, record.get('outputs', {}), execution=execution, original_score=record.get('score'))
+    assessment = assess(test, variant, record.get('outputs', {}), execution=execution,
+                        original_score=record.get('score'), validator=validator)
     assessment.update({'case_id': record.get('case_id'), 'source_record_checksum': record.get('sha256'),
                        'model_id': record.get('model_id'), 'repetition': record.get('repetition'),
                        'measurement_valid': record.get('measurement_valid'), 'steps': []})
@@ -486,7 +572,7 @@ def assess_record(record):
                 r.add('workflow.output_type', FAIL, str(exc))
         elif step['id'] == variant.get('result', {}).get('step') or step.get('assign') == variant.get('result', {}).get('step'):
             if 'expected_state' in test:
-                patch_checks(r, test, variant, call.get('text'))
+                patch_checks(r, test, variant, call.get('text'), validator=adapter)
                 detail['semantic_outcome'] = 'FAIL' if any(c['status'] == FAIL for c in r.checks) else 'PASS'
         elif step['id'] in variant.get('expected_answers', {}):
             answer_checks(r, {**variant, 'expected_answers': {step['id']: variant['expected_answers'][step['id']]}}, {step['id']: call.get('text')})
@@ -497,7 +583,8 @@ def assess_record(record):
                 value = call.get('text') if schema_type == 'text' else parse(call['text'])
                 # Verify a review claim against the preceding patch, never against itself.
                 if step.get('output', {}).get('type') == 'boolean' and 'patch' in step.get('uses', []) and 'expected_state' in test:
-                    prior = assess(test, variant, {variant['result']['step']: reconstructed.get('patch')})
+                    prior = assess(test, variant, {variant['result']['step']: reconstructed.get('patch')},
+                                   validator=validator)
                     correct = prior['objective_outcome'] == 'PASS'
                     r.compare('workflow.self_review', correct, value,
                               'Self-review claim must agree with the independently evaluated preceding patch; it cannot certify success.')
@@ -529,4 +616,13 @@ def assess_record(record):
     old = record.get('score', {}).get('exact_match')
     current = assessment['objective_outcome']
     assessment['score_comparison'] = ('agrees' if (current == 'PASS') == old else 'disagreement') if type(old) is bool and current in {'PASS', 'FAIL'} else 'not_comparable'
+    if selected is not None:
+        lineage = {'generation_case_id': record.get('case_id'),
+                   'generation_workflow_fingerprint': record.get('provenance', {}).get('workflow_code'),
+                   'source_record_checksum': record.get('sha256'),
+                   'captured_record_digest': digest({k: v for k, v in record.items() if k != 'sha256'}),
+                   'captured_definition_hash': assessment['definition_hash'],
+                   'outputs_sha256': digest(record.get('outputs', {}))}
+        assessment['validation_lineage'] = lineage
+        assessment['validation_id'] = digest({'validator': selected.fingerprint, 'lineage': lineage})
     return assessment

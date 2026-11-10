@@ -18,7 +18,7 @@ from . import prompt_builder
 from workbench.execution_policy import DoesNotFit
 
 DEFAULTS = {'max_attempts': 20, 'temperature_min': .5, 'temperature_max': .9,
-            'reasoning': False}
+            'reasoning': False, 'manual_guidance': ''}
 
 
 def now():
@@ -41,6 +41,10 @@ def settings(value, allow_legacy=False):
         raise ValueError('Minimum temperature exceeds maximum.')
     if type(result['reasoning']) is not bool:
         raise ValueError('Reasoning must be a boolean.')
+    if not isinstance(result['manual_guidance'], str):
+        raise ValueError('Manual optimizer guidance must be text.')
+    if not result['manual_guidance'].strip():
+        result['manual_guidance'] = ''
     return result
 
 
@@ -145,7 +149,10 @@ def view(app, session_id):
     session = store.load(session_id)
     records = store.observations(session)
     models = session['cohort']['models']
-    return {**session, 'top_three': top_three(session, models, records),
+    from .coverage import directory, read_state
+    coverage_key = digest({'session': session_id, 'candidate': top_three(session, models, records)[0]['candidate']}) if top_three(session, models, records) else None
+    coverage = read_state(app.root, coverage_key) if coverage_key and (directory(app.root, coverage_key)/'state.json').exists() else None
+    return {**session, 'coverage': coverage, 'top_three': top_three(session, models, records),
             'baseline': score(session, None, models, records),
             'attempts': [{**a, 'score': score(session, a['candidate'], models, records) if a.get('candidate') else None} for a in session['attempts']]}
 
@@ -216,9 +223,19 @@ def generation_packet(session, models, records, store):
 def packet_messages(session, packet):
     import json
     if session.get('prompt_builder'):
-        return prompt_builder.build(session, packet)
-    return [{'role': 'system', 'content': session['optimizer_system']},
-            {'role': 'user', 'content': session['optimizer_user'].replace('{{optimization_packet_json}}', json.dumps(packet, ensure_ascii=False, indent=2))}]
+        messages = prompt_builder.build(session, packet)
+    else:
+        messages = [{'role': 'system', 'content': session['optimizer_system']},
+                    {'role': 'user', 'content': session['optimizer_user'].replace('{{optimization_packet_json}}', json.dumps(packet, ensure_ascii=False, indent=2))}]
+    guidance = session.get('settings', {}).get('manual_guidance', '')
+    if guidance:
+        # Append only after LPIL assembly. User text is literal supplemental
+        # writer context, never parsed/lowered/substituted as LPIL or supplied
+        # by CandidateBackend to the evaluated model.
+        messages[-1]['content'] += ('\n\n--- Supplemental manual guidance for the optimizer ---\n'
+            'The following user-authored context is for prompt writing only. It does not expand the selected evaluation scope, change the benchmark contract or alter grading.\n'
+            'Guidance text:\n' + guidance)
+    return messages
 
 
 def fit_packet(session, packet, token_count, limits):
@@ -410,6 +427,9 @@ class Engine:
                    'reasoning': self.session['prompt_writer']['effort'] if codex else config['reasoning'], 'generator_identity': generator['identity'], 'started': now(),
                    'timeout_seconds': None, 'timeout_policy': 'completion_or_manual_stop',
                    'load_metadata': copy.deepcopy(getattr(backend, 'load_metadata', {}))}
+        if config['manual_guidance']:
+            request.update(manual_guidance=config['manual_guidance'], manual_guidance_scope='prompt_writer_only',
+                           manual_guidance_sha256=digest(config['manual_guidance']))
         if codex:
             request.update(prompt_writer=self.session['prompt_writer'], thread_id=self.session['codex_thread']['id'],
                            unsupported_controls=['temperature', 'seed', 'local_reasoning_toggle'],
@@ -583,3 +603,5 @@ def dispatch(app, payload):
     if session_id is None:
         session_id = create(app, {k: v for k, v in payload.items() if k in ('generator_id', 'origin_model_id', 'settings', 'prompt_writer','target','source_result')})['id']
     Engine(app, session_id).run(mode)
+    from .coverage import after_success
+    after_success(app, session_id)
