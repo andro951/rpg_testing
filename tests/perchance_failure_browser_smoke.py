@@ -9,6 +9,7 @@ from playwright.sync_api import sync_playwright, expect
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
 from tests.test_perchance import fixture, FakeBackend
+from tests.helpers.perchance_environment import simulated_eight_gb_gpu
 from workbench.controller import Controller
 from workbench.domain import write_json
 from workbench.server import WorkbenchServer
@@ -40,7 +41,7 @@ def main():
         real_run=perchance.run;FakeBackend.created=[]
         def verified(owner):owner.message='Perchance connection fixture verified; no generation requests.'
         try:
-            with patch('workbench.inventory.detect_gpus',return_value=[{'name':'TEST GPU','total_gib':8}]), \
+            with simulated_eight_gb_gpu(), \
                  patch.object(perchance,'browser_executable',return_value=__file__), \
                  patch.object(perchance_setup,'health',return_value={'ready':True,'reason':''}), \
                  patch.object(perchance,'run',side_effect=lambda a,r,p,**kw:real_run(a,r,p,BlockedAfterProviderError,**{k:v for k,v in kw.items() if k!='backend_factory'})) as remote_run, \

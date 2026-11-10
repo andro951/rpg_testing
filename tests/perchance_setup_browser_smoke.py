@@ -9,6 +9,7 @@ from playwright.sync_api import sync_playwright, expect
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tests.test_perchance import fixture, FakeBackend
+from tests.helpers.perchance_environment import simulated_eight_gb_gpu
 from workbench.controller import Controller
 from workbench.domain import write_json
 from workbench.server import WorkbenchServer
@@ -28,7 +29,7 @@ def main():
             status.update(ready=True, reason='')
             return dict(status)
         try:
-            with patch('workbench.inventory.detect_gpus', return_value=[{'name': 'TEST GPU', 'total_gib': 8}]), \
+            with simulated_eight_gb_gpu(), \
                  patch.object(perchance, 'browser_executable', return_value=__file__), \
                  patch.object(perchance_setup, 'health', side_effect=lambda owner: dict(status)), \
                  patch.object(perchance_setup, 'install', side_effect=installed) as install, \

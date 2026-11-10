@@ -8,6 +8,7 @@ from unittest.mock import patch
 from playwright.sync_api import sync_playwright
 
 from tests.test_perchance import fixture, FakeBackend
+from tests.helpers.perchance_environment import simulated_eight_gb_gpu
 from workbench.controller import Controller
 from workbench.domain import write_json
 from workbench.server import WorkbenchServer
@@ -24,7 +25,7 @@ def main():
         real_run=perchance.run
         FakeBackend.created=[];FakeBackend.response='READY';FakeBackend.failure=None
         try:
-            with patch('workbench.inventory.detect_gpus',return_value=[{'name':'TEST GPU','total_gib':8}]), patch.object(perchance,'browser_executable',return_value=__file__), patch.object(perchance_setup,'health',return_value={'ready':True,'reason':''}), patch.object(perchance,'run',side_effect=lambda a,r,p,**kwargs:real_run(a,r,p,FakeBackend,**{k:v for k,v in kwargs.items() if k!='backend_factory'})), sync_playwright() as playwright:
+            with simulated_eight_gb_gpu(), patch.object(perchance,'browser_executable',return_value=__file__), patch.object(perchance_setup,'health',return_value={'ready':True,'reason':''}), patch.object(perchance,'run',side_effect=lambda a,r,p,**kwargs:real_run(a,r,p,FakeBackend,**{k:v for k,v in kwargs.items() if k!='backend_factory'})), sync_playwright() as playwright:
                 executable=os.environ.get('REPORT_BROWSER_EXECUTABLE')
                 browser=playwright.chromium.launch(headless=True,**({'executable_path':executable} if executable else {}))
                 page=browser.new_page(viewport={'width':1500,'height':1000});errors=[]
