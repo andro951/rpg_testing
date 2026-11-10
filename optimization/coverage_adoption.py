@@ -15,7 +15,11 @@ def adopt(app, batch_root):
     suite_root=root/'common-repo'
     if hashlib.sha256((root/'source.tar.gz').read_bytes()).hexdigest()!=plan['source_archive_sha256']:
         raise ValueError('Frozen source archive checksum mismatch')
-    promotion=read_json(suite_root/'test_builder/promotions'/ (manifest['promotion_id']+'.json'))
+    # Frozen external batches may still carry the original data layout.
+    promotion_file=suite_root/'archives/prompt-builder-inputs/promotions'/(manifest['promotion_id']+'.json')
+    if not promotion_file.exists():
+        promotion_file=suite_root/'test_builder/promotions'/(manifest['promotion_id']+'.json')
+    promotion=read_json(promotion_file)
     if digest(promotion['candidate'])!=manifest['candidate_sha256'] or promotion['provenance']['review_status']!='accepted':
         raise ValueError('Batch candidate differs from the accepted normal promotion')
     actual={(t['id'],v['id'],digest(messages(t,v['steps'][0],{},v)),t.get('repetitions',1))

@@ -17,10 +17,12 @@ class OperationalSourceIdentityTests(unittest.TestCase):
         self.original = self.review['canonical_workflow_fingerprint']
 
     def test_only_exact_reviewed_source_preserves_previous_experiment_identity(self):
+        # A new semantic evaluator is intentionally NOT declared equivalent.
+        reviewed = next(iter(self.review['equivalent_implementations']))
+        with patch.object(domain, 'implementation_fingerprint', return_value=reviewed):
+            self.assertEqual(domain.code_fingerprint(), self.review['equivalent_implementations'][reviewed])
         current = domain.implementation_fingerprint()
-        self.assertEqual(self.review['equivalent_implementations'][current], self.original)
-        self.assertEqual(domain.code_fingerprint(), self.original)
-        self.assertNotEqual(current, self.original)
+        self.assertEqual(domain.code_fingerprint(), self.review['equivalent_implementations'].get(current,current))
         with patch.object(domain, 'implementation_fingerprint', return_value='f' * 64):
             self.assertEqual(domain.code_fingerprint(), 'f' * 64)
 
@@ -31,14 +33,17 @@ class OperationalSourceIdentityTests(unittest.TestCase):
         target = {'vram_gb': 8}
         with patch.object(domain, 'code_fingerprint', return_value=self.original):
             original_id = domain.case_id(model, test, variant, 0, target)
-        self.assertEqual(domain.case_id(model, test, variant, 0, target), original_id)
+        # Resume stays exact within the explicitly reviewed historical runtime.
+        reviewed = next(k for k,v in self.review['equivalent_implementations'].items()if v==self.original)
         with tempfile.TemporaryDirectory() as folder:
             store = domain.ResultStore(Path(folder))
             store.save({'status': 'completed', 'model_id': model['id'], 'case_id': original_id,
                         'provenance': {'workflow_code': self.original}, 'raw': 'unchanged saved answer'})
             saved = store.path(model['id'], original_id).read_bytes()
-            plan = pending_plan([model], [test], target, store,
-                                {'model_id': model['id'], 'test_id': test['id'], 'variant_id': variant['id']})
+            with patch.object(domain, 'implementation_fingerprint', return_value=reviewed):
+                self.assertEqual(domain.case_id(model,test,variant,0,target),original_id)
+                plan = pending_plan([model], [test], target, store,
+                                    {'model_id': model['id'], 'test_id': test['id'], 'variant_id': variant['id']})
             self.assertEqual(plan['complete'], 1)
             self.assertEqual(plan['pending'], test.get('repetitions', 1) - 1)
             self.assertEqual(store.path(model['id'], original_id).read_bytes(), saved)

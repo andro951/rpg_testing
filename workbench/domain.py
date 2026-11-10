@@ -282,11 +282,13 @@ def validate_test(test: dict) -> None:
             raise ValueError('Result references missing step')
         if result.get('representation', 'json_patch') not in ('json_patch', 'value_patch', 'dot_patch_v1', 'ember_text_v1', 'field_value_v2', 'semantic', 'state', 'answers'):
             raise ValueError('Unknown result representation')
-        if result.get('representation') in ('value_patch','dot_patch_v1','ember_text_v1','field_value_v2') and not test.get('state_schema'):
+        from evaluation.hosts import selected
+        from evaluation import schema_free_intent
+        schema_free='evaluator' in result and selected(result) is schema_free_intent
+        if result.get('representation') in ('value_patch','dot_patch_v1','ember_text_v1','field_value_v2') and not test.get('state_schema') and not schema_free:
             raise ValueError('Value-based paths require a predefined state_schema')
         if 'evaluator' in result:
-            from evaluation.live_intent import validate_selection
-            validate_selection(test, variant)
+            selected(result).validate_selection(test, variant)
         required_ops=result.get('required_ops')
         if 'response_schema' in result:
             local_schema(result['response_schema'])

@@ -94,7 +94,8 @@ class ValueDiagnosticTests(unittest.TestCase):
 
     def test_fixture_reference_must_pass_captured_contract_and_does_not_invent_response(self):
         root = Path(__file__).resolve().parents[1]
-        test = json.loads((root / 'test_specs/db_v3_update_record__value_patch.json').read_text())
+        from tests.helpers.frozen_prompts import historical_suite
+        test = json.loads((historical_suite() / 'db_v3_update_record__value_patch.json').read_text())
         variant = next(v for v in test['variants'] if v['id'] == 'full_paths')
         reference = response_expectation(test, variant)
         self.assertEqual(reference['kind'], 'reference')

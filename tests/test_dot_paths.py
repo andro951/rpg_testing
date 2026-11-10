@@ -1,4 +1,4 @@
-"""Independent dot-path examples and original-baseline builder integration."""
+"""Independent dot-path examples and frozen historical prompt regressions."""
 import copy
 import json
 import tempfile
@@ -6,12 +6,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from evaluation.core import assess
-from test_builder.builder import ROOT, compile_test, build_messages, oracle
-from test_builder.original_prompt import baseline
+from tests.helpers.frozen_prompts import INPUTS as ROOT, REPO, definition, reference
+from workbench.prompt_rendering import render
+
+def baseline():
+    return read_json(ROOT / "original_prompt_v1.json")
 from workbench.domain import read_json
 from workbench.dot_paths import encode_part, normalize_operation, normalize_path, resolve, validate, from_pointer, full_paths
 from workbench.scoring import apply
-from workbench.workflows import evaluate, execute
+from workbench.workflows import evaluate, execute, messages
 
 
 def obj(properties):
@@ -23,31 +26,34 @@ class DotPathTests(unittest.TestCase):
         self.fixtures = read_json(ROOT/'fixtures.json')['fixtures']
         self.fixture = next(f for f in self.fixtures if f['id']=='db_v3_update_record')
 
-    def test_original_renderer_reconstructs_all_59_unchanged_original_requests(self):
-        count=0
-        with patch('test_builder.normal_prompt.configuration',side_effect=AssertionError('OPRO templates must not be consulted')):
-            for fixture in self.fixtures:
-                if fixture['task']=='no_change':continue
-                original=baseline()['messages'][fixture['id']+'__value_patch']
-                for mode,expected in original.items():
-                    self.assertEqual(build_messages(fixture,mode,method='original_value_patch_v1'),expected)
-                    count+=1
-        self.assertEqual(count,59)
+    def test_original_saved_definitions_reconstruct_all_59_unchanged_original_requests(self):
+        count = 0
+        for fixture in self.fixtures:
+            if fixture['task'] == 'no_change':
+                continue
+            test = definition(fixture['id'], 'original_value_patch_v1')
+            original = baseline()['messages'][fixture['id'] + '__value_patch']
+            for variant in test['variants']:
+                expected = original[variant['id']]
+                self.assertEqual(messages(test, variant['steps'][0], {}, variant), expected)
+                self.assertEqual(render(variant['prompt_bindings']), expected)
+                count += 1
+        self.assertEqual(count, 59)
 
     def test_all_62_dot_requests_have_independent_passing_references_and_no_optimized_guidance(self):
         checked=0
         for fixture in self.fixtures:
-            test=compile_test(fixture,method='dot_patch_v1')
+            test=definition(fixture['id'], 'dot_patch_v1')
             self.assertFalse(test['enabled'])
             self.assertEqual(test['instructions'],'')
             self.assertFalse(test['prompt_builder']['baseline_provenance']['opro_guidance'])
-            reference,expected=oracle(fixture,'dot_patch_v1')
-            self.assertEqual(apply(fixture['state'],reference,'dot_patch_v1',fixture['schema']),expected)
-            self.assertEqual(expected,oracle(fixture)[1])
+            response,expected=reference(fixture['id'], 'dot_patch_v1')
+            self.assertEqual(apply(fixture['state'],response,'dot_patch_v1',fixture['schema']),expected)
+            self.assertEqual(expected,reference(fixture['id'])[1])
             for variant in test['variants']:
                 text=variant['steps'][0]['prompt'];checked+=1
-                from test_builder.builder import prompt_parts
-                control=prompt_parts(fixture,variant['id'],method='original_value_patch_v1')
+                original=definition(fixture['id'], 'original_value_patch_v1')
+                control=next(v['prompt_bindings'] for v in original['variants'] if v['id']==variant['id'])
                 if variant['id'] == 'full_paths':
                     self.assertEqual(variant['prompt_bindings']['current_state'], '\n'.join(full_paths(fixture['state'], fixture['schema'])))
                     self.assertNotEqual(variant['prompt_bindings']['current_state'],control['current_state'])
@@ -59,17 +65,16 @@ class DotPathTests(unittest.TestCase):
                 self.assertNotIn('Task-specific',text);self.assertNotIn('Earlier workflow outputs',text)
                 self.assertNotIn('selector quotation',text);self.assertNotIn('Append a slash',text)
                 self.assertEqual(text.count('Only these five operations are allowed:'),1)
-                self.assertEqual(evaluate(test,variant,{'patch':json.dumps(reference)})['exact_match'],True)
-                self.assertEqual(assess(test,variant,{'patch':json.dumps(reference)})['objective_outcome'],'PASS')
+                self.assertEqual(evaluate(test,variant,{'patch':json.dumps(response)})['exact_match'],True)
+                self.assertEqual(assess(test,variant,{'patch':json.dumps(response)})['objective_outcome'],'PASS')
                 if fixture['task']=='no_change':
                     self.assertIn('The documentation uses blue headings and a serif font.',text)
                     self.assertNotEqual(text,baseline()['messages'][fixture['id']+'__value_patch'][variant['id']][-1]['content'])
         self.assertEqual(checked,62)
 
-    def test_full_paths_builder_resolves_nested_encoded_paths_and_preserves_values(self):
-        from test_builder.original_prompt import parts
+    def test_full_paths_renderer_resolves_nested_encoded_paths_and_preserves_values(self):
         fixture=copy.deepcopy(next(f for f in self.fixtures if f['task']=='update_record'))
-        # Exercise the actual builder, including nested collections, empty values,
+        # Exercise the retained renderer, including nested collections, empty values,
         # every separator-sensitive identity and typed primitive selections.
         element=obj({'id':{'type':'string'},'children':{'type':'array','uniqueItems':True,'items':{'type':'string'}},
                      'empty':obj({})})
@@ -81,8 +86,7 @@ class DotPathTests(unittest.TestCase):
                                'bools':{'type':'array','uniqueItems':True,'items':{'type':'boolean'}},
                                'nulls':{'type':'array','uniqueItems':True,'items':{'type':'null'}}})
         fixture['schema']['required'].extend(['a.b/雪','typed','bools','nulls'])
-        bindings=parts(fixture,'full_paths','dot_patch_v1',ROOT/'templates')
-        lines=bindings['current_state'].splitlines()
+        lines=full_paths(fixture['state'], fixture['schema'])
         for line in lines:
             path,value=line.split(':',1)
             self.assertEqual(resolve(fixture['state'],fixture['schema'],path)[0],json.loads(value))
@@ -105,13 +109,13 @@ class DotPathTests(unittest.TestCase):
         normalized=normalize_operation(operation)
         self.assertEqual(normalized['path'],'items');self.assertEqual(normalized['value'],value)
         self.assertEqual(operation['path'],'"items"')
-        test=compile_test(self.fixture,method='dot_patch_v1');variant=test['variants'][0]
+        test=definition(self.fixture['id'], 'dot_patch_v1');variant=test['variants'][0]
         raw=json.dumps([{'op':'replace','path':'items."item-17".count','value':9}])
         self.assertTrue(evaluate(test,variant,{'patch':raw})['exact_match'])
         self.assertEqual(assess(test,variant,{'patch':raw})['objective_outcome'],'PASS')
         with self.assertRaises(ValueError):normalize_path('items."unterminated')
         # Unused fields retain the existing method's semantics and are not data to rewrite.
-        self.assertEqual(apply(self.fixture['state'],[{'op':'replace','path':'items.item-17.count','from':None,'value':9}],'dot_patch_v1',self.fixture['schema']),oracle(self.fixture)[1])
+        self.assertEqual(apply(self.fixture['state'],[{'op':'replace','path':'items.item-17.count','from':None,'value':9}],'dot_patch_v1',self.fixture['schema']),reference(self.fixture['id'])[1])
 
     def test_reserved_characters_empty_ids_unicode_and_literal_at_round_trip(self):
         for identifier in ('a.b','a/b','a%2Eb','a"b','a\\b','@id','', 'snow \u2603',':','%_'):
@@ -158,21 +162,27 @@ class DotPathTests(unittest.TestCase):
             with self.subTest(op=op),self.assertRaises(ValueError):apply(initial,[op],'dot_patch_v1',schema)
 
     def test_mock_execution_is_repeatable_and_export_resume_is_byte_stable(self):
-        fixture=self.fixture;test=compile_test(fixture,method='dot_patch_v1');variant=test['variants'][0];calls=[]
+        fixture=self.fixture;test=definition(fixture['id'], 'dot_patch_v1');variant=test['variants'][0];calls=[]
         class Backend:
             supports_cache=False;supports_schema=False
             def generate(self,request,settings,schema,cache,cancel):
-                calls.append(request);return {'text':json.dumps(oracle(fixture,'dot_patch_v1')[0]),'finish_reason':'stop'}
+                calls.append(request);return {'text':json.dumps(reference(fixture['id'], 'dot_patch_v1')[0]),'finish_reason':'stop'}
         self.assertTrue(execute(test,variant,Backend())['score']['exact_match'])
         self.assertTrue(execute(test,variant,Backend())['score']['exact_match'])
         self.assertEqual(calls[0],calls[1])
-        from test_builder.dot_experiment import build
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);first=build(root)
-            before={p.relative_to(root):p.read_bytes()for p in root.rglob('*')if p.is_file()}
-            second=build(root)
-            self.assertEqual(first,second);self.assertEqual(first['prompts'],62)
-            self.assertEqual(before,{p.relative_to(root):p.read_bytes()for p in root.rglob('*')if p.is_file()})
+        frozen = REPO / 'experiments/dot-path-v1-output-only'
+        before = {p: p.read_bytes() for folder in ('test_specs', 'prompts', 'references')
+                  for p in (frozen / folder).rglob('*') if p.is_file()}
+        checked = 0
+        for path in sorted((frozen / 'test_specs').glob('*.json')):
+            saved = read_json(path)
+            for variant in saved['variants']:
+                expected = read_json(frozen / 'prompts' / saved['id'] / (variant['id'] + '.messages.json'))
+                self.assertEqual(messages(saved, variant['steps'][0], {}, variant), expected)
+                checked += 1
+        self.assertEqual(checked, 62)
+        self.assertTrue(all(p.read_bytes() == content for p, content in before.items()))
+
 
 
 if __name__=='__main__':unittest.main()

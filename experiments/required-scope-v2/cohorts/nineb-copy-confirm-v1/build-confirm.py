@@ -8,8 +8,8 @@ sys.path.insert(0, str(root))
 from workbench.domain import digest, validate_test
 from workbench.workflows import messages, evaluate
 from evaluation.core import assess
-from test_builder.original_prompt import render
-from test_builder.normal_prompt import preview
+from workbench.prompt_rendering import render
+from workbench.prompt_rendering import preview
 from workbench.judgements import definition_id
 
 read = lambda p: json.loads(p.read_text(encoding='utf8'))

@@ -1,6 +1,6 @@
 """Ember's exact typed-line grammar, with an explicit database-study adapter.
 
-The source parser is vendored under test_builder/reference. No JSON repair,
+The source parser is vendored under tests/fixtures/ember_source. No JSON repair,
 array indexes, invented move/copy operations, or game-specific coercions apply.
 """
 import copy

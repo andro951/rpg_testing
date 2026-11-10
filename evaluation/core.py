@@ -136,6 +136,29 @@ def state_checks(report, test, actual):
 
 
 def patch_checks(report, test, variant, raw, validator=None):
+    # Explicit new identity only. Historical strict/schema-backed diagnostics
+    # keep their existing operation/order semantics.
+    from .schema_free_intent import VERSION as SCHEMA_FREE
+    evaluator = variant.get('result', {}).get('evaluator')
+    if isinstance(evaluator, dict) and evaluator.get('version') == SCHEMA_FREE:
+        from workbench.workflows import evaluate
+        score = evaluate(test, variant, {variant['result']['step']: raw})
+        parser_gap = score.get('status') == 'parser_gap'
+        report.add('intent.normalization', NOT_EVALUATED if parser_gap else PASS if score.get('valid') else FAIL,
+                   'Response normalized using initial data only; no case schema or oracle enters normalization.'
+                   if score.get('valid') else score.get('error', 'No executable patch was established.'),
+                   scope='response', parser_gap=parser_gap, actual=score.get('evaluation', {}).get('normalized_patch'))
+        report.add('state.final', (PASS if score.get('exact_match') else FAIL) if score.get('valid') else NOT_EVALUATED,
+                   'Final state matches the oracle with array order ignored.' if score.get('exact_match') else
+                   'Resulting state does not match the oracle.' if score.get('valid') else
+                   'No valid complete resulting state was established; prose meaning was not inferred.',
+                   scope='final_state', expected=test['expected_state'], actual=score.get('actual_state'))
+        match = score.get('expected_patch_match')
+        report.add('patch.expected_match', NOT_EVALUATED if match is None else PASS if match else FAIL,
+                   score.get('expected_patch_diagnostic', 'Patch comparison is unavailable.'),
+                   affects_verdict=False, expected=score.get('expected_normalized_patch'),
+                   actual=score.get('evaluation', {}).get('normalized_patch'))
+        return
     representation = variant['result']['representation']
     if representation == 'field_value_v2':
         from workbench.field_values import decode
@@ -421,7 +444,8 @@ def assess(test, variant, values, *, execution='completed', original_score=None,
                        step=check['step'], affects_verdict=False, expected=check['value'], actual=actual)
     fixed_oracle = bool(variant.get('expected_answers')) if result.get('representation', 'answers') == 'answers' else 'expected_state' in test
     failed = [c for c in report.checks if c['status'] == FAIL and c.get('affects_verdict', True)]
-    outcome = 'INCONCLUSIVE' if execution != 'completed' else ('UNSCORED' if not fixed_oracle else ('FAIL' if failed else 'PASS'))
+    parser_gap = any(check.get('parser_gap') for check in report.checks)
+    outcome = 'INCONCLUSIVE' if execution != 'completed' else ('UNSCORED' if not fixed_oracle or parser_gap else ('FAIL' if failed else 'PASS'))
     assessment = {'evaluator_version': VERSION, 'test_id': test['id'], 'variant_id': variant['id'],
             'definition_hash': digest({'test': test, 'variant': variant}), 'execution_outcome': execution,
             'objective_outcome': outcome, 'primary_reason': failed[0]['explanation'] if failed else None,
@@ -573,7 +597,8 @@ def assess_record(record, *, validator=None):
         elif step['id'] == variant.get('result', {}).get('step') or step.get('assign') == variant.get('result', {}).get('step'):
             if 'expected_state' in test:
                 patch_checks(r, test, variant, call.get('text'), validator=adapter)
-                detail['semantic_outcome'] = 'FAIL' if any(c['status'] == FAIL for c in r.checks) else 'PASS'
+                detail['semantic_outcome'] = ('UNSCORED' if any(c.get('parser_gap') for c in r.checks) else
+                    'FAIL' if any(c['status'] == FAIL and c.get('affects_verdict', True) for c in r.checks) else 'PASS')
         elif step['id'] in variant.get('expected_answers', {}):
             answer_checks(r, {**variant, 'expected_answers': {step['id']: variant['expected_answers'][step['id']]}}, {step['id']: call.get('text')})
         else:

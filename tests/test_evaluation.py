@@ -26,12 +26,51 @@ def failed_codes(assessment):
     return {c['code'] for c in assessment['checks'] if c['status'] == 'failed'}
 
 
+def schema_free(variant):
+    return variant.get('result', {}).get('evaluator', {}).get('version') == 'schema-free-intent-v1'
+
+
+def unrequested_schema_free_change(state):
+    """Construct a valid extra edit for a final-state mismatch, not a parser error."""
+    from evaluation.schema_free_intent import from_pointer
+    empty_arrays = []
+    def walk(value, parts):
+        if isinstance(value, dict):
+            for field, child in value.items():
+                child_parts = parts + [field]
+                if not isinstance(child, (dict, list)):
+                    return {'op': 'replace', 'path': from_pointer(state, child_parts),
+                            'value': '__unrequested_extra_change__'}
+                result = walk(child, child_parts)
+                if result is not None:
+                    return result
+        elif isinstance(value, list):
+            if not value:
+                empty_arrays.append(parts)
+            for index, child in enumerate(value):
+                if not isinstance(child, (dict, list)):
+                    # Primitive membership changes remain valid operations.
+                    return {'op': 'add', 'path': from_pointer(state, parts),
+                            'value': '__unrequested_extra_element__'}
+                result = walk(child, parts + [str(index)])
+                if result is not None:
+                    return result
+        return None
+    result = walk(state, [])
+    if result is not None:
+        return result
+    if empty_arrays:
+        return {'op': 'add', 'path': from_pointer(state, empty_arrays[0]),
+                'value': '__unrequested_extra_element__'}
+    raise AssertionError('The fixture needs an explicit unrequested-change probe')
+
+
 class CoverageTests(unittest.TestCase):
     def test_every_current_definition_and_variant_registered(self):
         entries = catalog()['definitions']
         paths = {e['path'] for e in entries}
         expected = {p.relative_to(ROOT).as_posix() for base in
-                    ['test_specs', 'examples/test_specs', 'archives/test-suite-2026-10-14/test_specs',
+                    ['test_specs', 'examples/test_specs', 'archives/pre-template-builder/test_specs', 'archives/test-suite-2026-10-14/test_specs',
                      'archives/test-suite-2026-10-14/examples/test_specs'] for p in (ROOT/base).glob('*.json')}
         self.assertEqual(paths, expected)
         objective = set()
@@ -75,10 +114,25 @@ class CoverageTests(unittest.TestCase):
                     good = values[key]
                     values[key] = '```json\n' + good + '\n```'
                     result = assess(test, variant, values)
-                    self.assertIn('json.document', failed_codes(result))
-                    self.assertEqual(result['objective_outcome'], 'FAIL')
-                    values[key] = good[:-1]
-                    self.assertIn('json.document', failed_codes(assess(test, variant, values)))
+                    if schema_free(variant):
+                        # This explicitly selected host normalizes fences. The
+                        # old strict JSON contracts below must still reject them.
+                        self.assertEqual(result['objective_outcome'], 'PASS')
+                        self.assertTrue(evaluate(test, variant, values)['exact_match'])
+                        self.assertEqual(next(c['status'] for c in result['checks']
+                                              if c['code'] == 'intent.normalization'), 'passed')
+                        values[key] = '[{"op":"replace","path":'
+                        result = assess(test, variant, values)
+                        self.assertEqual(result['objective_outcome'], 'FAIL')
+                        self.assertIn('intent.normalization', failed_codes(result))
+                        self.assertFalse(evaluate(test, variant, values)['valid'])
+                        self.assertEqual(next(c['status'] for c in result['checks']
+                                              if c['code'] == 'state.final'), 'not_evaluated')
+                    else:
+                        self.assertIn('json.document', failed_codes(result))
+                        self.assertEqual(result['objective_outcome'], 'FAIL')
+                        values[key] = good[:-1]
+                        self.assertIn('json.document', failed_codes(assess(test, variant, values)))
 
     def test_each_patch_variant_missing_fields_bad_pointer_and_extra_changes(self):
         for fixture, test, variant in contracts():
@@ -86,6 +140,35 @@ class CoverageTests(unittest.TestCase):
             with self.subTest(test=test['id'], variant=variant['id']):
                 values = copy.deepcopy(fixture['outputs']); key = variant['result']['step']
                 patch = json.loads(values[key])
+                if schema_free(variant):
+                    # Dot paths have a different syntax and failure taxonomy.
+                    # Exercise malformed structure, invalid escapes and a valid
+                    # but unresolved path without imposing RFC pointer rules.
+                    probe = patch or [{'op':'replace', 'path':'__unused__', 'value':None}]
+                    for kind in ('missing_path', 'invalid_escape', 'missing_target'):
+                        bad = copy.deepcopy(probe)
+                        if kind == 'missing_path':
+                            del bad[0]['path']
+                        else:
+                            bad[0]['path'] = '%' if kind == 'invalid_escape' else '__absent_target__'
+                        values[key] = json.dumps(bad)
+                        result = assess(test, variant, values)
+                        with self.subTest(probe=kind):
+                            self.assertEqual(result['objective_outcome'], 'FAIL')
+                            self.assertIn('intent.normalization', failed_codes(result))
+                            self.assertFalse(evaluate(test, variant, values)['valid'])
+                            self.assertEqual(next(c['status'] for c in result['checks']
+                                                  if c['code'] == 'state.final'), 'not_evaluated')
+                    extra = unrequested_schema_free_change(test['expected_state'])
+                    values[key] = json.dumps(patch + [extra])
+                    result = assess(test, variant, values)
+                    score = evaluate(test, variant, values)
+                    self.assertTrue(score['valid'], score.get('error'))
+                    self.assertFalse(score['exact_match'])
+                    self.assertEqual(result['objective_outcome'], 'FAIL')
+                    self.assertIn('state.final', failed_codes(result))
+                    self.assertNotIn('intent.normalization', failed_codes(result))
+                    continue
                 probe = patch or [{'op':'replace', 'path':'/unused', 'value':None}]
                 bad = copy.deepcopy(probe); del bad[0]['path']; values[key] = json.dumps(bad)
                 result = assess(test, variant, values)

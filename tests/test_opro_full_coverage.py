@@ -11,7 +11,8 @@ from workbench.domain import read_json, write_json, digest
 from optimization.storage import Store
 from optimization import coverage
 from optimization.engine import trial_key
-from test_builder.automatic_promotion import compiled
+from optimization.promotion import compiled
+from tests.helpers.frozen_prompts import historical_suite, INPUTS
 
 REPO=Path(__file__).resolve().parents[1]
 
@@ -19,13 +20,12 @@ REPO=Path(__file__).resolve().parents[1]
 class CoverageTests(unittest.TestCase):
     def setUp(self):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);self.root=Path(temp.name)
-        shutil.copytree(REPO/'test_specs',self.root/'test_specs')
-        shutil.copytree(REPO/'test_builder',self.root/'test_builder',ignore=shutil.ignore_patterns('__pycache__','active_opro_promotions.json'))
+        shutil.copytree(historical_suite(),self.root/'test_specs')
         self.app=Controller(self.root);self.app.catalog=lambda:[{'id':'native-a','files':['a.gguf'],'required_vram_gb':8}]
         tests=[read_json(p) for p in (self.root/'test_specs').glob('*.json')]
         tests=[t for t in tests if t['prompt_builder']['operation']=='move']
         cases={t['id']+'/'+v['id']:{'test':t,'variant':v} for t in tests for v in t['variants']}
-        candidate=read_json(REPO/'test_builder/promotions/dot-root-prefix-move-v1.json')['candidate']
+        candidate=read_json(INPUTS/'promotions/dot-root-prefix-move-v1.json')['candidate']
         candidate=copy.deepcopy(candidate);candidate['system']+='\nSynthetic validation marker.'
         self.model={'id':'native-a','identity':'a','provider':'native'}
         self.session={'id':'synthetic-session','status':'perfect','scope':{'cases':cases,'layers':[{'members':list(cases)}],
@@ -43,10 +43,8 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(state['status'],'pending')
         self.assertEqual(state['workers'][0]['models'],['native-a','perchance-text-generator'])
         self.assertEqual(state['workers'][1]['models'],['unity-a'])
-        fixtures=read_json(self.root/'test_builder/fixtures.json')['fixtures']
         for tid,test in state['promotion']['after'].items():
-            fixture=next(f for f in fixtures if f['id']==test['prompt_builder']['fixture'])
-            self.assertEqual(compiled(self.root,fixture,test['prompt_builder']['method']),test)
+            self.assertEqual(compiled(self.root,tid),test)
             before=state['promotion']['before'][tid]
             for field in ('source','expected_state','state_schema','repetitions','timeout_seconds'):
                 self.assertEqual(test[field],before[field])
@@ -60,7 +58,7 @@ class CoverageTests(unittest.TestCase):
             else:session[field]=value
             Store(self.root).save(session)
             self.assertIsNone(coverage.promote(self.app,session['id']))
-            self.assertFalse((self.root/'test_builder/active_opro_promotions.json').exists())
+            self.assertFalse((self.root/'optimization/active_promotions.json').exists())
 
     def test_structural_review_rejects_fixture_specific_winner(self):
         candidate=self.session['attempts'][0]['candidate']
@@ -75,7 +73,7 @@ class CoverageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'literal fixture element ID'):coverage.promote(self.app,self.session['id'])
 
     def test_crash_mid_promotion_replays_without_overwriting_conflicts(self):
-        from test_builder import automatic_promotion
+        from optimization import promotion as automatic_promotion
         rebuild=automatic_promotion.rebuild
         with patch.object(automatic_promotion,'rebuild',side_effect=OSError('interrupted write')):
             with self.assertRaises(OSError):coverage.promote(self.app,self.session['id'])
@@ -96,7 +94,9 @@ class CoverageTests(unittest.TestCase):
 
     def test_normal_promotion_refreshes_definition_bound_sidecars(self):
         for folder in ('reporting','evaluation','optimization','prompts','prompt-review'):
-            shutil.copytree(REPO/folder,self.root/folder,dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
+            archived=REPO/'archives/pre-template-builder'/folder
+            source=archived if archived.exists() else REPO/folder
+            shutil.copytree(source,self.root/folder,dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__'))
         key=coverage.promote(self.app,self.session['id'])
         from optimization.catalog import validate
         result=validate(self.root,read_json(self.root/'optimization/sharing.json'))
@@ -110,6 +110,50 @@ class CoverageTests(unittest.TestCase):
         write_json(p,case['test']);key=coverage.promote(self.app,self.session['id'])
         t=read_json(p);t['instructions']+='changed';write_json(p,t)
         self.assertEqual(coverage.advance_once(self.app,key)['status'],'blocked')
+
+    def test_saved_recipe_digest_and_replay_conflicts_fail_without_overwrite(self):
+        from optimization.promotion import apply, rebuild
+        key = coverage.promote(self.app, self.session['id'])
+        state = coverage.read_state(self.root, key)
+        recipe = next(iter(state['promotion']['recipes'].values()))
+        changed = copy.deepcopy(recipe['base_test'])
+        changed['instructions'] += 'changed'
+        with self.assertRaisesRegex(ValueError, 'Base definition changed'):
+            apply(changed, recipe)
+        path = self.root / 'test_specs' / (changed['id'] + '.json')
+        write_json(path, changed)
+        before = path.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'Conflicting or inactive'):
+            rebuild(self.root)
+        self.assertEqual(path.read_bytes(), before)
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'Conflicting or inactive'):
+            rebuild(self.root)
+        self.assertFalse(path.exists())
+
+    def test_schema_free_promotion_preserves_contract_and_rejects_literal_ids(self):
+        from evaluation.schema_free_intent import configuration
+        from optimization.promotion import apply
+        from tests.helpers.frozen_prompts import definition
+        test = definition('db_v3_update_record', 'dot_patch_v1')
+        del test['state_schema']
+        for variant in test['variants']:
+            variant['result'] = {'step': 'patch', 'representation': 'dot_patch_v1',
+                                 'evaluator': configuration(), 'output_format': 'json_dot'}
+        candidate = {'system': 'General instructions: ${task_requirements}',
+                     'user': '${presentation_notes}\n${current_state}\n${new_information}\n${prior_outputs}'}
+        recipe = {'candidate': candidate, 'candidate_digest': digest(candidate),
+                  'base_definition_digest': digest(test), 'review_status': 'accepted',
+                  'validation': {'complete': True, 'required': 9, 'passes': 9},
+                  'session_id': 'synthetic', 'approval_basis': 'Unit-test fixture only'}
+        promoted = apply(test, recipe)
+        self.assertNotIn('state_schema', promoted)
+        self.assertEqual([v['result'] for v in promoted['variants']], [v['result'] for v in test['variants']])
+        self.assertEqual(promoted['expected_state'], test['expected_state'])
+        candidate['system'] += ' Select item-17.'
+        recipe['candidate_digest'] = digest(candidate)
+        with self.assertRaisesRegex(ValueError, 'literal fixture element ID'):
+            apply(test, recipe)
 
     def test_missing_model_and_provider_are_honestly_blocked(self):
         with patch.object(self.app,'build_preflight',return_value=({'issues':[]},{'groups':[]})):

@@ -4,7 +4,7 @@ Isaac requested this experiment on 16 October 2026. It uses original pre-optimiz
 
 ## Prompt origin
 
-`test_builder/original_prompt_v1.json` retains the 62 original role/content requests reconstructed from `selector-quote-revision/definitions-before.json`. The original930 evidence manifest SHA256 is `9c17ff3243415ce6fc427b40871d4672e321b7ff357f517b0aef2bf07d584a95`; source definition and method byte hashes are recorded alongside the requests. The original system message is empty. The original method text is retained in `methods/original_value_patch_v1.txt`.
+`archives/prompt-builder-inputs/original_prompt_v1.json` retains the 62 original role/content requests reconstructed from `selector-quote-revision/definitions-before.json`. The original930 evidence manifest SHA256 is `9c17ff3243415ce6fc427b40871d4672e321b7ff357f517b0aef2bf07d584a95`; source definition and method byte hashes are recorded alongside the requests. The original system message is empty. The original method text is retained in `archives/prompt-builder-inputs/methods/original_value_patch_v1.txt`.
 
 The reusable renderer reproduces 59 original requests byte for byte at the message-content level. The remaining three requests use the subsequently corrected unrelated-information NOOP task. They do not restore the flawed request to set an already-equal field while requiring an empty patch. Report those three cases separately from notation-only comparisons.
 
@@ -28,7 +28,7 @@ The response schema retains the five operation-object shapes and string path/fro
 
 ## Export and approval
 
-Run `python -m test_builder.dot_experiment --output experiments/dot-path-v1-output-only` to create separate disabled definitions, all 62 exact prompts, reference responses, original controls, a manifest and a complete prompt diff. This does not rebuild active `test_specs`, alter existing approvals or run inference. Exact new prompt digests need review before execution. No new OPRO is part of this experiment.
+The retired exporter produced the preserved definitions, all 62 exact prompts, reference responses, original controls, manifest and complete prompt diff in `experiments/dot-path-v1-output-only`. Those saved definitions remain runnable without the old builder. `workbench/prompt_rendering.py` retains only pure rendering helpers for historical scripts. New test construction uses `prompt_builder`; it does not regenerate or silently revise these controls. No new OPRO is part of this experiment.
 
 Compare to original930 only where the model/worker and original case exist; exclude the corrected NOOP from a notation-only attribution. Original930 has no Q4_K_S or Unity cohort. Preserve the later optimized results as a separate control, and record runtime/hardware changes rather than attributing every difference to notation.
 

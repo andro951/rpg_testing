@@ -3,6 +3,7 @@ import hashlib
 import unittest
 from pathlib import Path
 from optimization.storage import Store
+from tests.helpers.frozen_prompts import historical_suite, INPUTS
 from workbench.domain import load_tests as load_catalog, read_json
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -28,18 +29,20 @@ class SuiteActivationTests(unittest.TestCase):
                 for chunk in iter(lambda:handle.read(1024*1024),b''):checksum.update(chunk)
             self.assertEqual(checksum.hexdigest(),entry['sha256'],entry['file'])
 
-    def test_default_catalog_contains_only_finalized_new_cases(self):
-        tests=load_catalog(ROOT/'test_specs')
+    def test_historical_suite_keeps_its_finalized_reviews(self):
+        tests=load_catalog(historical_suite())
         self.assertEqual(len(tests),21)
         self.assertEqual(sum(len(t['variants'])*t['repetitions'] for t in tests),186)
-        reviews=read_json(ROOT/'test_builder/reviews.json')
+        reviews=read_json(INPUTS/'reviews.json')
         for test in tests:
             self.assertEqual(test['prompt_builder']['method'],'value_patch')
             self.assertEqual(test['prompt_builder']['review_status'],'accepted')
             for role in ('assistant','isaac'):
                 self.assertEqual(reviews[test['id']][role]['status'],'accepted')
                 self.assertEqual(reviews[test['id']][role]['prompt_digest'],test['prompt_builder']['prompt_digest'])
-        self.assertEqual(read_json(ROOT/'prompts/patch-suite/manifest.json')['status'],'ready')
+        archive=ROOT/'archives/pre-template-builder/prompts/patch-suite/manifest.json'
+        manifest=archive if archive.exists() else ROOT/'prompts/patch-suite/manifest.json'
+        self.assertEqual(read_json(manifest)['status'],'ready')
 
     def test_archived_optimization_sessions_are_readable_but_not_in_active_store(self):
         archived=Store(ARCHIVE).list()

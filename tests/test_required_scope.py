@@ -1,7 +1,7 @@
+"""Historical fixed-schema scope remains an immutable evaluator regression."""
 import copy,json,unittest
 from pathlib import Path
-from test_builder.builder import ROOT,oracle
-from test_builder.required_scope import fixtures,compile_test,METHODS
+from tests.helpers.frozen_prompts import INPUTS, definition, reference, snapshots
 from workbench.domain import read_json
 from workbench.field_values import apply,decode
 from workbench.workflows import evaluate
@@ -9,11 +9,11 @@ from evaluation.core import assess
 
 class RequiredScopeTests(unittest.TestCase):
  def test_fixture_coverage_and_existing_oracles(self):
-  selected,outside=fixtures();self.assertEqual((len(selected),len(outside)),(13,8));count=0
+  selected=list(snapshots()['methods']['research_json_v2']);outside=set(snapshots()['methods']['dot_patch_v1'])-set(selected);self.assertEqual((len(selected),len(outside)),(13,8));count=0
   for f in selected:
-   ops,expected=oracle(f,'dot_patch_v1')
-   for method in METHODS:
-    t=compile_test(f,method);self.assertEqual(t['expected_state'],expected)
+   ops,expected=reference(f,'dot_patch_v1')
+   for method in ('research_json_v2',):
+    t=definition(f,method);self.assertEqual(t['expected_state'],expected)
     if method=='research_json_v2':raw=json.dumps(ops)
     else:
      from workbench.field_values import encode
@@ -31,8 +31,8 @@ class RequiredScopeTests(unittest.TestCase):
    with self.subTest(raw=raw),self.assertRaises(Exception):apply(state,raw,schema)
   self.assertEqual(state,before);self.assertEqual(decode('none'),[])
  def test_dot_paths_presentations(self):
-  for f in fixtures()[0]:
-   test=compile_test(f,'research_json_v2')
+  for f in snapshots()['methods']['research_json_v2']:
+   test=definition(f,'research_json_v2')
    for variant in test['variants']:
     self.assertIn('Separate path parts with dots',variant['prompt_bindings']['task_requirements'])
     if variant['id']=='full_paths':self.assertTrue(all(not line.startswith('/') for line in variant['prompt_bindings']['current_state'].splitlines()))

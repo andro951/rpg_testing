@@ -111,13 +111,12 @@ class ManualGuidanceTests(unittest.TestCase):
 class DotOptimizerScopeTests(unittest.TestCase):
     def test_versioned_dot_contract_is_registered_selected_and_frozen_without_relaxation(self):
         import json
-        from test_builder.builder import compile_test, ROOT as BUILDER_ROOT
+        from tests.helpers.frozen_prompts import definition
         from tools.build_prompt_sharing import build
         from optimization.templates import freeze
         from optimization.selection import targets
         from workbench.judgements import definition_id
-        fixture = next(f for f in json.loads((BUILDER_ROOT/'fixtures.json').read_text())['fixtures'] if f['id']=='db_v3_move_value_empty')
-        test = compile_test(fixture, method='dot_patch_v1')
+        test = definition('db_v3_move_value_empty', 'dot_patch_v1')
         test['enabled'] = True
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

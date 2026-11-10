@@ -4,7 +4,7 @@ import unittest
 from collections import Counter
 from pathlib import Path
 from optimization.catalog import catalog, expansion, locate, registration, rendered, steps, validate
-from workbench.domain import code_fingerprint, read_json
+from workbench.domain import code_fingerprint, digest, experiment_spec, read_json
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -107,9 +107,12 @@ class PromptSharingTests(unittest.TestCase):
 
     def test_timeout_change_keeps_compatibility_and_native_identity(self):
         test, variant = definition('array_patch_move_007')
+        workflow = code_fingerprint()
+        identity = digest(experiment_spec(test, variant))
         test['timeout_seconds'] += 100
         registration(test, variant, self.data)
-        self.assertEqual(code_fingerprint(), '56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787')
+        self.assertEqual(digest(experiment_spec(test, variant)), identity)
+        self.assertEqual(code_fingerprint(), workflow)
 
     def test_dialogue_and_inactive_examples_cannot_expand(self):
         test, variant = definition('dialogue_test')

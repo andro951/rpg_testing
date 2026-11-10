@@ -1,3 +1,12 @@
+## Current template-builder contract (2026-11-10, supersedes older builder/schema instructions)
+
+- Editable sources: prompt_builder/templates/{common,input_format,output_format,test_cases}. Old test_builder was removed at the user’s request; do not restore it.
+- Current root suite is 13 cases / 38 input variants / 114 observations at three reps, schema-free-intent-v1. Historical five-operation root suite is archives/pre-template-builder, not current coverage.
+- Do not require or insert per-case schemas. General array ID/uniqueness/unordered restrictions apply. No expected values or patches enter prompt assembly/normalization.
+- Expected patches are diagnostic only; pass/fail is final-state equality with unordered database arrays. Operation arrays remain ordered. Preserve frozen historic grading.
+- Edit text in files once, rebuild with python -m prompt_builder --output build/prompt-suite; --install activates after archiving old definitions. No automatic inference.
+- Legacy byte-parity evidence is archives/prompt-builder-parity; final schema-free prompts intentionally differ.
+
 # Development rules
 
 - November 3 current user-defined research scope: fixed-schema updates to existing fields and unique-ID/value array-element additions and removals; no RemoveAll, and no separate model-generated Move or Copy is required. Programmatic composition may implement Move. This user clarification supersedes the earlier five-operation coverage requirements below. Historical five-operation and 33-observation source-contract runs remain immutable diagnostics, not current required coverage. Compare the 13 in-scope fixtures (114 observations per method and model) across reviewed methods. Dot paths remain the requested notation; do not conflate JSON string delimiters with quoted path components. Preserve ambiguous typed-ID rejection as a stated limitation.

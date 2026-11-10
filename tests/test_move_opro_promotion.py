@@ -1,9 +1,8 @@
-"""Move OPRO promotion retains operation-specific source construction."""
+"""Frozen Move OPRO prompts retain operation-specific source construction."""
 import copy
 import json
 import unittest
-from test_builder.builder import ROOT, compile_test, oracle, prompt_parts
-from test_builder.normal_prompt import configuration, selected
+from tests.helpers.frozen_prompts import INPUTS as ROOT, definition, reference
 from workbench.domain import read_json
 from workbench.workflows import evaluate, messages
 
@@ -15,7 +14,7 @@ class MoveOproPromotionTests(unittest.TestCase):
 
     def test_element_construction_applies_only_to_the_corresponding_operations(self):
         for f in self.fixtures:
-            t=compile_test(f)
+            t=definition(f['id'])
             kind=t['prompt_builder']['operation']
             for v in t['variants']:
                 guide=v['prompt_bindings']['task_requirements']
@@ -31,11 +30,11 @@ class MoveOproPromotionTests(unittest.TestCase):
     def test_two_serialization_steps_are_shared_by_all_actual_requests(self):
         systems=set()
         for f in self.fixtures:
-            t=compile_test(f)
+            t=definition(f['id'])
             for v in t['variants']:
                 request=messages(t,v['steps'][0],{},v)
-                if t['prompt_builder']['operation'] in configuration().get('operation_templates',{}):
-                    candidate,_=selected(configuration(),t['prompt_builder']['operation'])
+                if t['prompt_builder']['operation'] in read_json(ROOT/'normal_prompt.json').get('operation_templates',{}):
+                    candidate=read_json(ROOT/'normal_prompt.json')['operation_templates'][t['prompt_builder']['operation']]['candidate']
                     self.assertEqual(request[0]['content'],candidate['system'])
                     continue
                 systems.add(request[0]['content'])
@@ -46,11 +45,11 @@ class MoveOproPromotionTests(unittest.TestCase):
 
     def test_unquoted_string_selectors_still_fail_without_relaxed_grading(self):
         for f in self.fixtures:
-            t=compile_test(f)
+            t=definition(f['id'])
             kind=t['prompt_builder']['operation']
             if kind not in ('remove','move','copy'):
                 continue
-            valid=oracle(f)[0]
+            valid=reference(f['id'])[0]
             malformed=copy.deepcopy(valid)
             field='path' if kind=='remove' else 'from'
             self.assertIn('"',malformed[0][field])
@@ -62,10 +61,10 @@ class MoveOproPromotionTests(unittest.TestCase):
 
     def test_unrelated_information_no_change_has_no_element_construction(self):
         f=next(f for f in self.fixtures if f['task']=='no_change')
-        self.assertEqual(oracle(f)[0],[])
-        p=prompt_parts(f,'normal_json')
+        self.assertEqual(reference(f['id'])[0],[])
+        p=definition(f['id'])['variants'][0]['prompt_bindings']
         self.assertEqual(p['new_information'],'The documentation uses blue headings and a serif font.')
         self.assertNotIn('Task-specific element path construction:',p['task_requirements'])
-        for value in (configuration()['collection_transfer_guidance'],configuration()['collection_remove_guidance']):
+        for value in (read_json(ROOT/'normal_prompt.json')['collection_transfer_guidance'],read_json(ROOT/'normal_prompt.json')['collection_remove_guidance']):
             self.assertNotIn('item-17',value)
             self.assertNotIn('town-a',value)

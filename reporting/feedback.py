@@ -20,6 +20,17 @@ def response_expectation(test, variant):
     if representation == 'answers':
         return {'kind': 'exact_answers', 'answers': copy.deepcopy(variant.get('expected_answers', {}))}
     step = result.get('step')
+    from evaluation import schema_free_intent
+    selected = result.get('evaluator')
+    if isinstance(selected, dict) and selected.get('version') == schema_free_intent.VERSION:
+        try:
+            reference = schema_free_intent.apply_patch(test['source']['initial_state'], variant['expected_patch'])
+            if schema_free_intent.equal(schema_free_intent.unordered(reference['final_state']), schema_free_intent.unordered(test['expected_state'])):
+                return {'kind': 'reference', 'text': json.dumps(reference['normalized_patch'], ensure_ascii=False),
+                        'label': 'Reference normalized patch; equivalent valid responses are accepted by final state, ignoring array order.'}
+        except (ValueError, KeyError, TypeError):
+            pass
+        return {'kind': 'unavailable', 'reason': 'No valid reference normalized patch is available.'}
     candidates = []
     if 'expected_patch' in variant:
         value = variant['expected_patch']
@@ -55,7 +66,11 @@ def summarize(record):
     relevant = [check for check in checks if check['status'] == FAIL and check.get('affects_verdict', True)]
     verdict = assessment['objective_outcome']
     if verdict == 'PASS':
-        reason = 'Matches the required answer or final state and operation contract.'
+        reason = ('Matches the expected final state; array order and reference-patch equality do not affect pass/fail.'
+                  if record.get('score', {}).get('array_order') == 'irrelevant' else
+                  'Matches the required answer or final state and operation contract.')
+    elif record.get('score', {}).get('status') == 'parser_gap':
+        reason = 'Parser gap: free-format prose could not be normalized; semantic correctness is unassessed, not a model failure.'
     elif verdict == 'FAIL':
         reason = assessment.get('primary_reason') or (relevant[0]['explanation'] if relevant else 'The required answer did not pass.')
     elif relevant:
@@ -72,6 +87,9 @@ def summarize(record):
             'execution_outcome': assessment['execution_outcome'], 'reason': reason,
             'score_comparison': assessment['score_comparison'], 'checks': checks,
             'steps': assessment.get('steps', []),
+            **{key: copy.deepcopy(record.get('score', {})[key]) for key in
+               ('expected_patch_match', 'expected_patch_mismatch', 'expected_patch_diagnostic', 'expected_normalized_patch')
+               if key in record.get('score', {})},
             'expected_response': response_expectation(test, variant),
             'validation_states': {
                 'expected': copy.deepcopy(test.get('expected_state')),

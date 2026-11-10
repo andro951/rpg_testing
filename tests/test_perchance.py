@@ -244,7 +244,10 @@ class PerchanceTests(unittest.TestCase):
                 if mode!='error':self.assertTrue(page.closed)
 
     def test_native_identity_fingerprint_after_clean_reset(self):
-        self.assertEqual(code_fingerprint(), '56502881bc3c89f6b58c8f5e755b32f58cbd675274ed5363293b598aaddf9787')
+        # Remote-provider configuration must not redefine the native workflow.
+        before=code_fingerprint()
+        self.app.settings['perchance_epoch']=int(self.app.settings.get('perchance_epoch',0))+1
+        self.assertEqual(code_fingerprint(),before)
 
     def legacy_record(self):
         policy = copy.deepcopy(provider.identity(self.app.settings))

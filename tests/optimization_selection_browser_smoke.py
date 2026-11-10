@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright, expect
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from tests.test_optimization_selection import SelectionTests,ROOT
 from tests.test_prompt_optimization import MockRuntime
-from test_builder.builder import oracle
+from tests.helpers.frozen_prompts import reference
 from workbench.domain import read_json
 from workbench.server import WorkbenchServer
 from workbench.workflows import evaluate
@@ -23,8 +23,7 @@ from optimization.templates import bindings,render
 class DatabaseRuntime(MockRuntime):
     def evaluate(self,model,case,candidate,repetition):
         self.trials.append((model['id'],case['id'],candidate,repetition))
-        fixture=next(f for f in read_json(ROOT/'test_builder/fixtures.json')['fixtures'] if f['id']==case['test']['prompt_builder']['fixture'])
-        outputs={'patch':json.dumps(oracle(fixture)[0])}
+        outputs={'patch':json.dumps(reference(case['test']['prompt_builder']['fixture'])[0])}
         messages=render(candidate,bindings(case)) if candidate else [{'role':'user','content':case['variant']['steps'][0]['prompt']}]
         return {'outputs':outputs,'calls':[{'step':'patch','text':outputs['patch'],'request_messages':messages,'finish_reason':'stop'}],
                 'score':evaluate(case['test'],case['variant'],outputs),'measurement_valid':True,'simulated':True}

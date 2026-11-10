@@ -9,9 +9,14 @@ repetitions and evaluator. Unsupported multi-step/legacy promotion is blocked.
 
 The durable transaction is saved under `coverage_results/<id>/state.json` before
 normal definitions change. It retains the before/after definitions and accepted
-candidate recipe. The normal builder reads `test_builder/active_opro_promotions.json`;
-`python -m test_builder.automatic_promotion` is not a CLI. Python callers can use
-`test_builder.automatic_promotion.rebuild(root)` to replay the saved recipes.
+candidate recipe. Accepted recipes are saved in `optimization/active_promotions.json`.
+Python callers can use `optimization.promotion.rebuild(root)` to replay them from
+the exact saved base definitions and literal prompt bindings. The base-definition
+digest is checked before replay; the obsolete fixture builder is not needed.
+Compiling unchanged source templates retains accepted guidance. Changed templates,
+data, controls or evaluator settings block stale recipes instead of overriding
+user edits. Replays also refresh the current previews and their manifest under
+`prompts/current-suite/`.
 An interrupted promotion resumes only if every destination is still either its
 saved before or after definition. Conflicts block without overwriting them.
 

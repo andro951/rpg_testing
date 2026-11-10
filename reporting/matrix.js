@@ -24,7 +24,7 @@ const ResultsMatrix = {
     Counts: cells => {
         const records = StatisticsReport.Data.matrix.records;
         const ids = new Set(cells.flatMap(cell => cell.primary_ids));
-        const counts = { pass: 0, fail: 0, timeout: 0, error: 0, aborted: 0, skipped: 0, invalid: 0, unscored: 0,
+        const counts = { pass: 0, fail: 0, timeout: 0, error: 0, aborted: 0, skipped: 0, invalid: 0, unscored: 0, parser_gap: 0,
             observations: ids.size, references: cells.reduce((count, cell) => count + cell.reference_ids.length, 0), not_run: cells.filter(cell => !cell.ids.length).length };
         for (const id of ids) {
             const state = records[id].outcome;
@@ -35,7 +35,7 @@ const ResultsMatrix = {
     },
     CountsText: counts => {
         const scored = counts.pass + counts.fail + counts.timeout;
-        const extras = [["timeout", "timeout"], ["error", "error"], ["aborted", "aborted"], ["skipped", "skipped"], ["invalid", "invalid"], ["unscored", "unscored"], ["not_run", "not recorded"]];
+        const extras = [["parser_gap", "parser gap (unassessed)"], ["timeout", "timeout"], ["error", "error"], ["aborted", "aborted"], ["skipped", "skipped"], ["invalid", "invalid"], ["unscored", "unscored"], ["not_run", "not recorded"]];
         const text = `${counts.pass} PASS / ${counts.fail} FAIL${scored ? ` · ${(counts.pass / scored * 100).toFixed(1)}%` : " · unscored"}`;
         return text + extras.filter(([key]) => counts[key]).map(([key, label]) => `\n${counts[key]} ${label}`).join("");
     },
@@ -108,6 +108,18 @@ const ResultsMatrix = {
         cell.title += timedOut ? "\nRed corner: includes an actual timeout, regardless of current settings." : "\nGreen-to-amber corner: a completed run exceeded its static expectation or peer threshold.";
     },
     //#endregion
+    PatchMarker: (cell, ids) => {
+        const mismatches = ids.filter(id => StatisticsReport.Data.matrix.records[id]?.metadata?.score?.expected_patch_mismatch === true);
+        if (!mismatches.length)
+            return;
+
+        cell.style.position = "relative";
+        cell.dataset.patchMismatch = "true";
+        const marker = StatisticsReport.Element("span", cell, "≠");
+        marker.dataset.patchMismatchMarker = "true";
+        Object.assign(marker.style, {position: "absolute", left: "0", bottom: "0", color: "#4338ca", fontWeight: "bold", fontSize: "10px", pointerEvents: "none"});
+        cell.title += `\n≠ ${mismatches.length} normalized patch${mismatches.length === 1 ? "" : "es"} differed from the reference. Diagnostic only: pass/fail is based on final state.`;
+    },
     Cell: (row, cells, heading, individual = false, total = false) => {
         const cell = StatisticsReport.Cell(row, "");
         const ids = [...new Set(cells.flatMap(item => item.ids))];
@@ -135,6 +147,7 @@ const ResultsMatrix = {
             cell.title += `\n${reasons}`;
 
         ResultsMatrix.TimingMarker(cell, ids);
+        ResultsMatrix.PatchMarker(cell, ids);
 
         if (!ids.length) {
             cell.textContent = text;
@@ -172,7 +185,7 @@ const ResultsMatrix = {
             ResultsMatrix.RenderTable(details, selected, status, state);
         }
 
-        const key = StatisticsReport.Element("small", StatisticsReport.Content, "Red 0% → yellow 50% → green 100% · — No scored result · Triangle: green→amber slow; red timed out · Hover for details; click scores for evidence.");
+        const key = StatisticsReport.Element("small", StatisticsReport.Content, "Red 0% → yellow 50% → green 100% · — No scored result · Triangle: green→amber slow; red timed out · ≠ Reference patch mismatch (diagnostic only) · Hover for details; click scores for evidence.");
         key.id = "matrix-key";
         key.style.display = "block";
         key.style.marginTop = "12px";

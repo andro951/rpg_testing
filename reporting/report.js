@@ -208,6 +208,16 @@ const StatisticsReport = {
         }
 
         const evaluation = summary.evaluation;
+        if (evaluation?.expected_patch_match !== undefined) {
+            const comparison = StatisticsReport.EvidenceBlock(parent, `Reference patch comparison (diagnostic only)`);
+            StatisticsReport.Element(`p`, comparison, evaluation.expected_patch_diagnostic || `Patch comparison unavailable.`);
+            StatisticsReport.Element(`p`, comparison, `This comparison does not change the saved pass/fail result.`);
+            const patch = record.score?.evaluation?.normalized_patch || summary.metadata?.score?.evaluation?.normalized_patch;
+            if (patch) {
+                StatisticsReport.Element(`h3`, comparison, `Actual normalized patch`);
+                StatisticsReport.EvidenceText(comparison, patch);
+            }
+        }
         const states = evaluation?.validation_states;
         if (states && (complete ? Object.hasOwn(record.test_definition || {}, `expected_state`) : states.expected !== null)) {
             const validation = StatisticsReport.EvidenceBlock(parent, `Resulting JSON states for validation`);

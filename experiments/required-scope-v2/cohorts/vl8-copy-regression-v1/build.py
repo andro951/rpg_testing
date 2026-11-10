@@ -5,8 +5,8 @@ b=Path(__file__).resolve().parent;workspace=b.parent;root=workspace/'dot-rewrite
 from workbench.domain import digest,validate_test
 from workbench.workflows import messages,evaluate
 from evaluation.core import assess
-from test_builder.original_prompt import render
-from test_builder.normal_prompt import preview
+from workbench.prompt_rendering import render
+from workbench.prompt_rendering import preview
 from workbench.judgements import definition_id
 read=lambda p:json.loads(p.read_text(encoding='utf8'))
 def save(p,x):p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(x,ensure_ascii=False,indent=2)+'\n',encoding='utf8')

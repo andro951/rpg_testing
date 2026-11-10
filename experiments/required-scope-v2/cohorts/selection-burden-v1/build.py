@@ -6,10 +6,10 @@ from workbench.path_list import encode as list_encode,apply as list_apply
 from workbench.domain import digest,validate_test
 from workbench.workflows import messages,evaluate
 from evaluation.core import assess
-from test_builder.builder import structure_text
-from test_builder.presentation import id_keyed_arrays,full_paths as slash_full_paths
-from test_builder.original_prompt import render
-from test_builder.normal_prompt import preview
+from workbench.prompt_rendering import structure_text
+from workbench.prompt_rendering import id_keyed_arrays,full_paths as slash_full_paths
+from workbench.prompt_rendering import render
+from workbench.prompt_rendering import preview
 from workbench.presentation import render_source_text
 from workbench.judgements import definition_id
 out=base/'selection-burden-v1';repo=Path(r'E:\Source\Repos\rpg_testing\experiments\required-scope-v2\runs'); dot=repo/'unity-work-20261103';pl=repo/'unity-path-list-20261103';slash=repo/'unity-slash-id-20261103'

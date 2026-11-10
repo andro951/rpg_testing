@@ -22,6 +22,7 @@ from workbench.domain import ResultStore, code_fingerprint, digest, read_json, w
 from workbench.judgements import JudgementStore
 from workbench.server import WorkbenchServer
 from tests.test_prompt_optimization import native
+from tests.helpers.frozen_prompts import historical_suite
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -31,7 +32,13 @@ class SelectionTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)
         for folder in ('test_specs','optimization/definitions','docs/prompt-optimization'):
-            shutil.copytree(ROOT/folder,self.root/folder)
+            source=historical_suite() if folder=='test_specs' else ROOT/folder
+            shutil.copytree(source,self.root/folder)
+        from tools.build_prompt_sharing import build
+        shutil.copytree(historical_suite().parent/'reporting', self.root/'reporting')
+        sharing=build(self.root)
+        catalog_patch=patch('optimization.templates.catalog', return_value=sharing)
+        catalog_patch.start();self.addCleanup(catalog_patch.stop)
         self.app=Controller(self.root,demo=True)
         # Exercise the normal study-results routes using only synthetic records.
         self.app.store=ResultStore(self.root/'results')

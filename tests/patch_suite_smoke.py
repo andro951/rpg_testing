@@ -1,4 +1,4 @@
-"""Run the new suite twice in an isolated workbench using explicit oracle mocks."""
+"""Run the frozen historical suite twice in an isolated workbench using explicit oracle mocks."""
 import json
 import sys
 import tempfile
@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from test_builder.builder import ROOT, compile_test, oracle
+from tests.helpers.frozen_prompts import INPUTS, definition, reference, snapshots
 from workbench.controller import Controller
 from workbench.demo_native import DemoNative
 from workbench.domain import read_json, write_json
@@ -18,16 +18,16 @@ def main():
     expected = 0
     with tempfile.TemporaryDirectory(prefix='patch-suite-smoke-') as folder:
         root = Path(folder)
-        for fixture in read_json(ROOT/'fixtures.json')['fixtures']:
-            draft = compile_test(fixture)
-            review = {'status':'accepted', 'prompt_digest':draft['prompt_builder']['prompt_digest']}
+        for fixture_id in snapshots()['methods']['value_patch']:
+            test = definition(fixture_id)
             # Synthetic approvals exist only in this temporary mock project.
-            test = compile_test(fixture, {draft['id']:{'assistant':review, 'isaac':review}})
+            test['enabled'] = True
+            test['prompt_builder']['review_status'] = 'accepted'
             write_json(root/'test_specs'/(test['id']+'.json'), test)
             expected += len(test['variants']) * test['repetitions']
-            answer = oracle(fixture)
+            answer = reference(fixture_id)[0]
             for variant in test['variants']:
-                responses[variant['steps'][0]['prompt']] = answer if isinstance(answer,str) else json.dumps(answer[0])
+                responses[variant['steps'][0]['prompt']] = answer if isinstance(answer, str) else json.dumps(answer)
         requests = []
         class OracleMock(DemoNative):
             def generate(self, messages, settings, schema, cache='default', cancel=None):

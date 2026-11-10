@@ -106,7 +106,7 @@ def bundle(app, state, worker):
     manifest = {'id': state['id'], 'suite_digest': state['suite_digest'], 'scope': state['scope'],
                 'model_id': worker['model_id'], 'seed_results_roots': worker.get('seed_results_roots', [])}
     manifest['source_files']={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
-        for folder in ('workbench','optimization','test_builder') for p in (root/folder).rglob('*')
+        for folder in ('workbench','optimization','prompt_builder','evaluation','intent_parser') for p in (root/folder).rglob('*')
         if p.is_file() and not p.is_symlink() and '__pycache__' not in p.parts}
     manifest['source_digest']=digest(manifest['source_files'])
     manifest['settings_digest']=digest(settings)
@@ -121,7 +121,7 @@ def bundle(app, state, worker):
         shlex.quote(worker['python'])+' -B -m workbench.coverage_worker', ''])
     output=io.BytesIO()
     with tarfile.open(fileobj=output,mode='w:gz') as tar:
-        for folder in ('workbench','optimization','test_builder','test_specs','evaluation','reporting','fixtures','prompts','docs','tools'):
+        for folder in ('workbench','optimization','prompt_builder','intent_parser','test_specs','evaluation','reporting','fixtures','prompts','docs','tools'):
             for path in sorted((root/folder).rglob('*')):
                 if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts:
                     tar.add(path,arcname=path.relative_to(root).as_posix())

@@ -5,8 +5,8 @@ invented shorthand inferred from a voice description. The authoritative checkout
 is `E:\Users\Isaac\EmberQuest`, commit
 `ceb01d2c2898576fdefec7ee4790ad0bcdb85497`. `SOURCE_BUILD.md` identifies `src/`
 as authoritative. The exact `src/contracts/ai-response-text.js` is retained in
-`test_builder/reference/ember_ai_response_text_v1.js`; its provenance JSON records
-the byte hash. The Python parser is checked against that JavaScript implementation.
+`tests/fixtures/ember_source/ember_ai_response_text_v1.js`; its provenance JSON records
+the original CRLF byte hash; Git stores the same source with LF line endings. The Python parser is checked against that JavaScript implementation.
 The general consumer is `src/scripts/app/11a-state-text-contract.js`, which calls
 `parseCompactAiPatch` in `26-objective-suggestions.js`. The specialized participant
 blocks in `11b-focused-state-text.js` are a separate, domain-specific contract and
@@ -64,10 +64,13 @@ line, not a set of unsupported element selectors. The data and semantic oracle
 are unchanged. This presentation difference must be reported; an end-to-end method
 comparison is not evidence that the output delimiter alone caused a difference.
 
-`python -m test_builder.ember_experiment --output experiments/ember-text-v1` exports
-four separate definitions, eleven requests, synthetic references, provenance and
-the unsupported ledger. Export alone never runs inference. Normal method defaults,
-active definitions and valid earlier results are not replaced.
+The retired exporter produced four separate definitions, eleven requests, synthetic
+references, provenance and the unsupported ledger. Its frozen definitions and
+references are preserved in `archives/prompt-builder-inputs/frozen_definitions.json`;
+the executed experiment retains its exact requests under
+`experiments/ember-text-v1/runs/unity-revised-20261103`. Saved definitions run without
+the old builder. New test construction uses `prompt_builder`; earlier results and
+source-contract evidence remain unchanged.
 
 ## Review and comparison
 

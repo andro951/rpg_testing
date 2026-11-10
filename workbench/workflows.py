@@ -121,22 +121,34 @@ def evaluate(test,variant,values):
         checks={k:equal(values.get(k),v) and k in values for k,v in expected.items()}
         result_score={'valid':True,'exact_match':all(checks.values()) if checks else None,'answer_checks':checks}
     elif 'expected_state' in test:
-        normalized_response=None;normalization_error=None
+        normalized_response=None;normalization_error=None;schema_free=False
         if 'evaluator' in result:
-            from evaluation.live_intent import validate_selection, normalize_response
+            from evaluation.hosts import selected
+            from evaluation import schema_free_intent
+            host=selected(result)
+            schema_free=host is schema_free_intent
             requested=result['evaluator'] if isinstance(result['evaluator'],dict) else {'requested':result['evaluator']}
             try:
-                validate_selection(test, variant)
-                normalized=normalize_response(values.get(result.get('step')),
-                    test['source']['initial_state'], test['state_schema'])
+                host.validate_selection(test, variant)
+                normalized=host.normalize_response(values.get(result.get('step')),
+                    test['source']['initial_state'], result.get('output_format','json_dot') if schema_free else test['state_schema'])
                 normalized_response=normalized['normalized_patch']
-                result_score=score_state(test,normalized['final_state'],'state')
+                result_score=(host.score_final(test,normalized['final_state']) if schema_free else
+                    score_state(test,normalized['final_state'],'state'))
+                if schema_free:
+                    result_score.update(host.expected_patch_diagnostic(test,variant,normalized_response))
                 result_score['evaluation']={**requested, 'accepted':True,
                     **{k:v for k,v in normalized.items() if k!='final_state'}}
             except Exception as exc:
                 normalization_error=str(exc)
                 result_score={'valid':False,'exact_match':False,'error':normalization_error,
                     'evaluation':{**requested,'accepted':False,'error':normalization_error}}
+                if schema_free:
+                    result_score['evaluation'].update(failure_stage='normalization',semantic_status='not_evaluated')
+                    result_score.update(expected_patch_match=None,expected_patch_mismatch=None)
+                    if isinstance(exc,host.ParserGap):
+                        result_score.update(status='parser_gap',exact_match=None)
+                        result_score['evaluation'].update(failure_stage='parsing',semantic_status='unknown')
         else:
             result_score=score_state(test,values.get(result.get('step')),representation)
         required_ops=result.get('required_ops')
@@ -160,8 +172,8 @@ def evaluate(test,variant,values):
             result_score['required_patch_ops']=required_ops
             result_score['actual_patch_ops']=actual_ops
             result_score['patch_ops_match']=match
-            result_score['exact_match']=bool(state_exact and match)
-        if 'response_schema' in result:
+            if not schema_free:result_score['exact_match']=bool(state_exact and match)
+        if 'response_schema' in result and not schema_free:
             from jsonschema import Draft202012Validator
             try:
                 if normalization_error is not None:raise ValueError(normalization_error)
@@ -196,8 +208,8 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progr
     from jsonschema import Draft202012Validator
     from jsonschema.exceptions import ValidationError
     if 'evaluator' in variant.get('result', {}):
-        from evaluation.live_intent import validate_selection
-        validate_selection(test, variant)
+        from evaluation.hosts import selected
+        selected(variant['result']).validate_selection(test, variant)
     values={};calls=[];events=[];cache=variant.get('cache','default');cache_valid=True
     def units(items):
         total=0

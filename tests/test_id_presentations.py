@@ -1,11 +1,12 @@
-"""Inspect every assembled prompt and exercise reusable ID-based renderers."""
+"""Replay archived exact prompts and exercise maintained ID-based renderers."""
 import copy
 import json
 import re
 import unittest
 from unittest.mock import patch
-from test_builder.builder import ROOT, LABELS, build_messages, build_prompt, compile_test, oracle, presentations, prompt_parts
-from test_builder.presentation import full_paths, id_keyed_arrays
+from tests.helpers.frozen_prompts import INPUTS as ROOT, definition, reference
+from workbench.prompt_rendering import full_paths, id_keyed_arrays
+from workbench.workflows import messages
 from workbench.domain import read_json
 from workbench.value_paths import from_pointer, resolve
 from optimization.templates import bindings
@@ -19,17 +20,18 @@ class IdPresentationTests(unittest.TestCase):
     def test_every_actual_prompt_has_no_positional_instructions_or_index_answers(self):
         checked = 0
         for fixture in self.fixtures:
-            for mode in presentations(fixture):
+            test = definition(fixture['id'])
+            for variant in test['variants']:
+                mode = variant['id']
                 with self.subTest(fixture=fixture['id'], presentation=mode):
-                    request = build_messages(fixture, mode)
+                    request = messages(test, variant['steps'][0], {}, variant)
                     self.assertEqual([message['role'] for message in request], ['system', 'user'])
                     system, prompt = (message['content'] for message in request)
                     # Check the promoted instruction behavior in the actual system role.
-                    from test_builder.normal_prompt import configuration, selected
-                    operation=compile_test(fixture)['prompt_builder']['operation']
-                    config=configuration()
+                    operation=test['prompt_builder']['operation']
+                    config=read_json(ROOT/'normal_prompt.json')
                     if operation in config.get('operation_templates',{}):
-                        candidate,_=selected(config,operation)
+                        candidate=config['operation_templates'][operation]['candidate']
                         self.assertEqual(system,candidate['system'])
                         method=(ROOT/'methods/value_patch.txt').read_text().strip()
                         self.assertEqual(prompt.count(method),1)
@@ -44,7 +46,7 @@ class IdPresentationTests(unittest.TestCase):
                     checked_prompt = prompt.replace('never their position.', '')
                     self.assertIsNone(re.search(r'\b(index(?:es|ed|ing)?|indices|positions?|positional|zero.based)\b', checked_prompt, re.I))
                     self.assertNotIn(' = ', prompt)
-                    parts = prompt_parts(fixture, mode)
+                    parts = variant['prompt_bindings']
                     if mode == 'id_keyed_arrays':
                         self.check_dictionary(fixture['state'], fixture['schema'], json.loads(parts['current_state']))
                     elif mode == 'full_paths':
@@ -87,10 +89,10 @@ class IdPresentationTests(unittest.TestCase):
 
     def test_full_path_matches_update_answer_literally_and_uses_compact_colon(self):
         f = self.by_id['db_v3_update_record']
-        patch_value, _ = oracle(f)
+        patch_value, _ = reference(f['id'])
         path = patch_value[0]['path']
         selected, _, _ = resolve(f['state'], f['schema'], path)
-        lines = prompt_parts(f, 'full_paths')['current_state'].splitlines()
+        lines = full_paths(f['state'], f['schema'])
         self.assertIn(path + ':' + json.dumps(selected), lines)
         self.assertIn('/items/"item-17"/count:8', lines)
         self.assertNotIn('"/items/', '\n'.join(lines))
@@ -135,11 +137,11 @@ class IdPresentationTests(unittest.TestCase):
         f['schema'] = {'type':'object', 'properties':{'groups':{'type':'array', 'x-id-field':'group_key', 'items':group_schema}},
                        'required':['groups'], 'additionalProperties':False}
         f['parameters']['array_path'] = '/groups/0/inventory/items'
-        displayed = json.loads(prompt_parts(f, 'id_keyed_arrays')['current_state'])
+        displayed = id_keyed_arrays(f['state'], f['schema'])
         self.assertEqual(displayed['groups']['group/a']['group_key'], 'group/a')
         self.assertEqual(displayed['groups']['group/a']['inventory']['items']['item-17']['item_id'], 'item-17')
         self.check_dictionary(f['state'], f['schema'], displayed)
-        lines = prompt_parts(f, 'full_paths')['current_state'].splitlines()
+        lines = full_paths(f['state'], f['schema'])
         self.assertIn('/groups/"group/a"/inventory/items/"item-17"/count:8', lines)
         self.check_paths(f['state'], f['schema'], lines)
 
@@ -151,11 +153,11 @@ class IdPresentationTests(unittest.TestCase):
 
     def test_optimizer_uses_exact_new_prompt_views_without_legacy_rendering(self):
         for f in self.fixtures:
-            test = compile_test(f)
+            test = definition(f['id'])
             for variant in test['variants']:
-                case = {'test':test, 'variant':variant, 'presentation':LABELS[variant['id']]}
+                case = {'test':test, 'variant':variant, 'presentation':variant['id']}
                 with patch('optimization.templates._legacy_full_paths', side_effect=AssertionError('legacy view used')):
                     actual = bindings(case)
-                expected = prompt_parts(f, variant['id'])
+                expected = variant['prompt_bindings']
                 for key in expected:
                     self.assertEqual(actual[key], expected[key])

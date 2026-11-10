@@ -12,6 +12,18 @@ LABELS = ('current_state', 'new_information', 'task_requirements', 'presentation
 MARKER = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
 
 
+def validate_lpil_candidate(candidate):
+    """Validate the shared reviewed-template contract used by promotion."""
+    from collections import Counter
+    from . import lpil
+    if not isinstance(candidate, dict) or candidate.get('template_format') != 'lpil':
+        raise ValueError('Normal prompt requires a reviewed LPIL system/user template')
+    if not all(isinstance(candidate.get(role), str) and candidate[role].strip() for role in ('system', 'user')):
+        raise ValueError('Normal prompt needs nonempty system and user messages')
+    if Counter(lpil.replacements(candidate['system'] + '\n' + candidate['user'])) != Counter(LABELS):
+        raise ValueError('Normal template must bind each supported label exactly once')
+
+
 def split_candidate(text):
     if not isinstance(text, str):
         raise ValueError('Candidate response must be text.')
@@ -63,7 +75,7 @@ def _legacy_full_paths(value, path='$'):
 
 def bindings(case, prior=None):
     test, variant = case['test'], case['variant']
-    if test.get('prompt_builder', {}).get('version') == 'database-v3':
+    if 'prompt_bindings' in variant or test.get('prompt_builder', {}).get('version') == 'database-v3':
         if 'prompt_bindings' in variant:
             values = copy.deepcopy(variant['prompt_bindings'])
             if set(values) != set(LABELS) - {'prior_outputs'} or not all(isinstance(v, str) for v in values.values()):
@@ -123,6 +135,9 @@ def freeze(root, target=None):
             if origin not in data['variants']:
                 origin=next((key for key,entry in data['variants'].items() if entry['objective_optimization_eligible']
                              and entry['constraints'].get('required_ops')==['move']),None)
+                if origin is None:
+                    origin=next((key for key,entry in data['variants'].items()
+                                 if entry['objective_optimization_eligible']),None)
     if origin is None or not data['variants'][origin]['objective_optimization_eligible']:
         raise ValueError('No reviewed starting test is available. Select an enabled test before starting optimization.')
     anchor = data['variants'][origin]

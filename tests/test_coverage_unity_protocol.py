@@ -1,8 +1,11 @@
 """Execute the real remote submission protocol against simulated Slurm responses."""
 import base64
+import hashlib
 import io
 import json
 import os
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -105,6 +108,37 @@ class SubmissionProtocolTests(unittest.TestCase):
             settings=json.load(archive.extractfile('.local/workbench/settings.json'))
             models=json.load(archive.extractfile('models.json'))
             script=archive.extractfile('coverage.sbatch').read().decode()
+            for name in ('intent_parser/__init__.py', 'intent_parser/parse.py', 'intent_parser/grammar-spec.json',
+                         'evaluation/hosts.py', 'evaluation/schema_free_intent.py', 'evaluation/output_formats.py'):
+                self.assertIn(name, packet['manifest']['source_files'])
+                self.assertEqual(hashlib.sha256(archive.extractfile(name).read()).hexdigest(),
+                                 packet['manifest']['source_files'][name])
+            with tempfile.TemporaryDirectory() as directory:
+                isolated=Path(directory)/'isolated';isolated.mkdir()
+                archive.extractall(isolated)
+                # Only the extracted archive is on PYTHONPATH; imports must not
+                # accidentally succeed by using this source checkout.
+                code='''import json, pathlib, sys
+root=pathlib.Path(sys.argv[1]).resolve()
+import workbench.coverage_worker, workbench.domain
+import intent_parser, evaluation.hosts, evaluation.output_formats
+from evaluation import schema_free_intent
+from workbench.domain import validate_test
+for name,module in list(sys.modules.items()):
+    if name.split('.')[0] in ('workbench','optimization','evaluation','intent_parser','prompt_builder') and getattr(module,'__file__',None):
+        assert pathlib.Path(module.__file__).resolve().is_relative_to(root), (name,module.__file__)
+assert (root/'intent_parser/grammar-spec.json').is_file()
+score=schema_free_intent.normalize_response('[{"op":"replace","path":"value","value":2}]', {'value':1})
+assert score['final_state']=={'value':2}
+test={'schema_version':2,'id':'isolated','workflow':'steps','timeout_seconds':120,'source':{'initial_state':{'value':1}},'expected_state':{'value':2},'variants':[{'id':'json','steps':[{'id':'patch','type':'generate','prompt':'Synthetic isolated import test','output':{'type':'text'}}],'result':{'step':'patch','representation':'dot_patch_v1','evaluator':schema_free_intent.configuration(),'output_format':'json_dot'}}]}
+validate_test(test)
+print('isolated bundle import and evaluator passed')
+'''
+                env={**os.environ,'PYTHONPATH':str(isolated),'PYTHONNOUSERSITE':'1'}
+                checked=subprocess.run([sys.executable,'-B','-c',code,str(isolated)],cwd=isolated,env=env,
+                                       text=True,capture_output=True,check=False)
+                self.assertEqual(checked.returncode,0,checked.stdout+checked.stderr)
+                self.assertIn('isolated bundle import and evaluator passed',checked.stdout)
         self.assertEqual(len(models),1);self.assertEqual(settings['inference_port'],24321)
         self.assertFalse(settings['publish_results']);self.assertFalse(settings['sync_source'])
         self.assertEqual(script.count('#SBATCH --gpus=1'),1)

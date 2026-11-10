@@ -25,11 +25,11 @@ class ValueIntentTests(unittest.TestCase):
         self.assertEqual((self.state, self.schema), before)
         return result
 
-    def test_every_active_approved_fixture_matches_test_only_oracle(self):
+    def test_every_historical_approved_fixture_matches_test_only_oracle(self):
         fixtures = json.loads((ROOT/'evaluation/fixtures.json').read_text())['fixtures']
         seen, count = set(), 0
         for fixture in fixtures:
-            if not fixture['source_path'].startswith('test_specs/'):
+            if not fixture['source_path'].startswith('archives/pre-template-builder/test_specs/'):
                 continue
             definition = json.loads((ROOT/fixture['source_path']).read_text())
             if not definition.get('enabled'):

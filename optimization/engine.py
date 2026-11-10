@@ -74,7 +74,28 @@ def create(app, payload, cohort=None):
     scope = freeze(app.root,payload.get('target'))
     definition = read_json(app.root / 'optimization/definitions/array_move_patch.json')
     origin=scope['cases'][scope['layers'][0]['members'][0]]
-    if origin['test'].get('prompt_builder',{}).get('version')=='database-v3':
+    if origin['test'].get('prompt_builder',{}).get('version')=='file-templates-v1':
+        definition['id']='file_template_prompt_optimization'
+        definition['target']={**scope['target'],'step_id':origin['variant']['result']['step']}
+        definition['candidate_control']='complete_system_and_user_messages_for_final_generation_call'
+        definition['selected_output_format']=origin['variant']['result']['output_format']
+        definition['scope_plan'].update(task_type=scope['task_type'],
+            reference_component='supplied_output_format_instructions',
+            output_formats=sorted({case['variant']['result']['output_format'] for case in scope['cases'].values()}),
+            full_template_bindings='Literal starting data, requested change, shared constraints, output-format and presentation instructions; preserve earlier workflow calls.')
+        definition['required_labels']={
+            'current_state':{'description':"The unchanged starting data in this member's input presentation.",
+                'binding':'member.variant.prompt_bindings.current_state','may_be_empty':False},
+            'new_information':{'description':'The exact requested change, with no reference answer.',
+                'binding':'member.variant.prompt_bindings.new_information','may_be_empty':False},
+            'task_requirements':{'description':"The shared database constraints and this member's selected output-format instructions. No per-case schema hints or expected answers.",
+                'binding':'member.variant.prompt_bindings.task_requirements','may_be_empty':False},
+            'presentation_notes':{'description':"How to interpret this member's input presentation independently of its output format.",
+                'binding':'member.variant.prompt_bindings.presentation_notes','may_be_empty':True},
+            'prior_outputs':{'description':'Actual earlier outputs required by the workflow; empty for a direct call.',
+                'binding':'original dependencies and recorded earlier output','may_be_empty':True}}
+        definition['prompt_files']['task_definition']='schema-free-task.txt'
+    elif origin['test'].get('prompt_builder',{}).get('version')=='database-v3':
         definition['id']='database_prompt_optimization'
         definition['target']={**scope['target'],'step_id':origin['variant']['result']['step']}
         definition['scope_plan']['task_type']=scope['task_type']
@@ -211,6 +232,9 @@ def generation_packet(session, models, records, store):
               'reference_evidence': baseline, 'top_three': top, 'history': history,
               'prompts': evidence_packet.prompts,
               'pruned_attempts': [], 'attempt_limit': session['settings']['max_attempts']}
+    if 'selected_output_format' in session['definition']:
+        packet['scope']['starting_output_format'] = session['definition']['selected_output_format']
+        packet['scope']['output_formats'] = session['definition']['scope_plan']['output_formats']
     if session.get('source_result_evidence') and session['source_result']['model_id'] in ids:
         source=copy.deepcopy(store.get_evidence(session['id'],session['source_result_evidence']))
         source['evaluation']=assess_record(source)

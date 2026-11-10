@@ -70,7 +70,7 @@ def promote(app, session_id):
     Persist the entire transaction before replacing definitions; replay is idempotent.
     """
     from .engine import top_three
-    from test_builder.automatic_promotion import apply
+    from .promotion import apply
     session = Store(app.root).load(session_id)
     if session.get('status') != 'perfect':
         return None
@@ -90,7 +90,6 @@ def promote(app, session_id):
             return key
         cases = session['scope']['cases']
         bases = {c['test']['id']: c['test'] for c in cases.values()}
-        fixtures = {f['id']: f for f in read_json(app.root / 'test_builder/fixtures.json')['fixtures']}
         updates = {}; recipes = {}
         for test_id, base in bases.items():
             current = read_json(app.root / 'test_specs' / (test_id + '.json'))
@@ -98,21 +97,22 @@ def promote(app, session_id):
                 raise ValueError('OPRO base definition changed; promotion blocked')
             enabled = {v['id'] for v in base['variants'] if v.get('enabled', True)}
             covered = {c['variant']['id'] for c in cases.values() if c['test']['id'] == test_id}
-            if not enabled <= covered or base['prompt_builder']['version'] != 'database-v3':
+            if not enabled <= covered or any('prompt_bindings' not in v for v in base['variants']):
                 raise ValueError('Automatic promotion requires complete database presentation coverage')
             recipe = {'session_id': session_id, 'candidate': winner['candidate'], 'candidate_digest': digest(winner['candidate']),
                       'review_status': 'accepted', 'validation': {k: winner[k] for k in ('complete', 'required', 'recorded', 'passes')},
                       'approval_basis': APPROVAL, 'base_test': base,
-                      'fixture_digest': digest(fixtures[base['prompt_builder']['fixture']])}
+                      'base_definition_digest': digest(base),
+                      'template_definition_digest': base.get('prompt_builder', {}).get('automatic_promotion', {}).get('template_definition_digest', digest(base))}
             promoted = apply(base, recipe)
             for c in cases.values():
                 if c['test']['id'] == test_id:
                     v = next(v for v in promoted['variants'] if v['id'] == c['variant']['id'])
                     from .templates import render, bindings
                     if messages(promoted, v['steps'][0], {}, v) != render(winner['candidate'], bindings(c)):
-                        raise ValueError('Normal builder differs from the validated candidate')
+                        raise ValueError('Saved-definition renderer differs from the validated candidate')
             updates[test_id] = promoted
-            recipes[base['prompt_builder']['method'] + '/' + base['prompt_builder']['fixture']] = recipe
+            recipes[test_id] = recipe
         state = {'id': key, 'session_id': session_id, 'candidate_digest': digest(winner['candidate']),
                  'status': 'promoting', 'promotion': {'before': bases, 'after': updates, 'recipes': recipes},
                  'workers': configured(app), 'approval_basis': APPROVAL}
@@ -133,14 +133,14 @@ def finish_promotion(root, state):
         p = root / 'test_specs' / (tid + '.json')
         if read_json(p) not in (state['promotion']['before'][tid], after):
             raise ValueError('Conflicting definition during promotion recovery')
-    path = root / 'test_builder/active_opro_promotions.json'
+    path = root / 'optimization/active_promotions.json'
     registry = read_json(path) if path.exists() else {'version': 1, 'recipes': {}}
     registry['recipes'].update(state['promotion']['recipes'])
     write_json(path, registry)
-    from test_builder.automatic_promotion import rebuild
+    from .promotion import rebuild
     rebuild(root)
     state['scope'] = scope(root); state['suite_digest'] = digest(state['scope'])
-    state.update(status='pending', message='Promoted through the normal builder. Full configured-model coverage pending.')
+    state.update(status='pending', message='Promoted from the saved base definitions. Full configured-model coverage pending.')
     save(root, state)
 
 

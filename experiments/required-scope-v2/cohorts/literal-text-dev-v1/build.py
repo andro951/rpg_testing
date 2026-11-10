@@ -1,6 +1,6 @@
 import copy,json,sys
 from pathlib import Path
-base=Path(r'C:\Users\Isaac\Documents\Codex\2026-11-02\task');src=base/'literal-text-dev-baseline-v1';b=base/'literal-text-dev-v1';b.mkdir(exist_ok=True);root=base/'literal-text-branch-v1'/'runtime';sys.path.insert(0,str(root));from workbench.domain import digest,validate_test;from workbench.workflows import messages,evaluate;from workbench.literal_line import encode;from evaluation.core import assess;from test_builder.original_prompt import render;from test_builder.normal_prompt import preview;from workbench.judgements import definition_id
+base=Path(r'C:\Users\Isaac\Documents\Codex\2026-11-02\task');src=base/'literal-text-dev-baseline-v1';b=base/'literal-text-dev-v1';b.mkdir(exist_ok=True);root=base/'literal-text-branch-v1'/'runtime';sys.path.insert(0,str(root));from workbench.domain import digest,validate_test;from workbench.workflows import messages,evaluate;from workbench.literal_line import encode;from evaluation.core import assess;from workbench.prompt_rendering import render;from workbench.prompt_rendering import preview;from workbench.judgements import definition_id
 read=lambda p:json.loads(p.read_text(encoding='utf8'));save=lambda p,x:p.write_text(json.dumps(x,ensure_ascii=False,indent=2)+'\n',encoding='utf8');oldrefs=read(src/'references.json');entries={};reqs=[];refs=[];(b/'test_specs').mkdir(exist_ok=True)
 output='''Output format:
 Return only update lines, without explanation or Markdown. Return exactly none if no change is needed. Each complete update occupies one physical line.

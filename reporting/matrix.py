@@ -16,13 +16,15 @@ def outcome(record):
         return 'invalid'
     if record.get('timed_out'):
         return 'timeout'
+    if record.get('score', {}).get('status') == 'parser_gap':
+        return 'parser_gap'
     exact = record.get('score', {}).get('exact_match')
     return 'pass' if exact is True else 'fail' if exact is False else 'unscored'
 
 
 def totals(cells, records):
     ids = {cid for cell in cells for cid in cell['primary_ids']}
-    result = {key: 0 for key in ('pass', 'fail', 'timeout', 'error', 'aborted', 'skipped', 'invalid', 'unscored')}
+    result = {key: 0 for key in ('pass', 'fail', 'timeout', 'error', 'aborted', 'skipped', 'invalid', 'unscored', 'parser_gap')}
     for cid in ids:
         state = records[cid]['outcome']
         result[state if state in result else 'unscored'] += 1
