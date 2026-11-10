@@ -1,7 +1,7 @@
 # Native Python intent parser
 
 A dependency-free Python 3 implementation of the JavaScript intent-parser prototype,
-with the same two grammar stages, JSON-shaped intermediate representation, options,
+with the same grammar-owned program structure, JSON-shaped intermediate representation, options,
 state-aware conversion and atomic application stages. The C# port uses the same
 contract. It does not invoke Node, a model, a provider, or the desktop.
 
@@ -12,6 +12,18 @@ The current dot-path research host is now selectable in the real Workbench
 runner as `dot-intent-v1`; strict baseline scoring remains the default.
 See [live integration and immutable validation](../docs/live-intent-evaluation.md).
 No approved prompt or saved benchmark score is changed by selecting a new run.
+
+## Grammar ownership
+
+`intent.grammar` defines complete programs and recursive operation groups.
+`operation.grammar` defines complete operation signatures and component capture
+rules. `tokens.grammar` is only the structural token-tree adapter used by semantic
+conversion. Python interprets their generated `grammar-spec.json` with ordered
+choice, greedy repetition and rollback; production rules and token priority are
+not maintained separately in Python. Regenerate the shared artifact with
+`node intent-parser-js/build-grammar-spec.cjs` from the repository root after
+changing grammar sources. The bounded newline partition search only rejects
+ambiguous interpretations; it does not supply the program grammar.
 
 ## API
 

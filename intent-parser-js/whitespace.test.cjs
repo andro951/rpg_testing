@@ -16,5 +16,5 @@ for(const key of ['a b','a\tb','a\nb','a.b/c','op:remove','']){
  assert.equal(applyPatch(input,convertIntent(parseIntent(text),input))[key],1);passed++;
 }
 for(const control of ['\n','\r','\t']){assert.throws(()=>parseIntent('op:update path:a value:"x'+control+'y"'));passed++;}
-assert.throws(()=>parseIntent('remove\na\nb\nc\nremove'),/Ambiguous/);passed++;
+assert.throws(()=>parseIntent('remove\na\nb\nc\nremove'),/Ambiguous|No complete operation sequence/);passed++;
 console.log(JSON.stringify({passed,failed:0,scope:'actual bundled GrammarForge whitespace priority, line boundaries and quoted values'}));

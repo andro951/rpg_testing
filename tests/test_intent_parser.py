@@ -1,5 +1,6 @@
 """Shared JS/C#/Python conformance corpus plus native boundary regressions."""
 import copy
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -37,6 +38,40 @@ class IntentParserTests(unittest.TestCase):
                                 self.assertTrue(equal(record[key], actual), (key, actual, record[key]))
                     self.assertTrue(equal(before, record['input']))
         self.assertEqual(count, 2678)
+
+    def test_generated_grammar_spec_source_identity(self):
+        root = Path(__file__).resolve().parents[1]
+        specs = [(root / directory / 'grammar-spec.json').read_bytes()
+                 for directory in ('intent_parser', 'intent-parser-js', 'intent-parser-csharp')]
+        self.assertEqual(specs[0], specs[1])
+        self.assertEqual(specs[0], specs[2])
+        spec = json.loads(specs[0])
+        for name, digest in spec['sourceHashes'].items():
+            source = (root / 'intent_parser' / (name + '.grammar')).read_bytes()
+            self.assertEqual(hashlib.sha256(source).hexdigest(), digest)
+
+    def test_grammar_multiline_json_and_grouped_paths(self):
+        text = 'update path:[\n"x"\n] value:{\n"operations": [\n"remove",\n"copy"\n]\n}'
+        self.assertEqual(parse_intent(text), [{'op': 'update', 'path': ['x'],
+                         'value': {'operations': ['remove', 'copy']}}])
+
+    def test_grammar_program_recursion_and_keyword_values(self):
+        text = '((remove path:a)) [{update path:b value:{"operation":"remove","copy":["move"]}}]'
+        self.assertEqual(parse_intent(text), [
+            {'op': 'remove', 'path': ['a']},
+            {'op': 'update', 'path': ['b'], 'value': {'operation': 'remove', 'copy': ['move']}},
+        ])
+        self.assertEqual(parse_intent('(' * 64 + 'remove path:a' + ')' * 64),
+                         [{'op': 'remove', 'path': ['a']}])
+        for text in ('remove path:a remove path:b', 'remove path:a value:1',
+                     'update path:a', 'copy from:a', 'remove path:a path:b'):
+            with self.subTest(text=text), self.assertRaises(IntentError):
+                parse_intent(text)
+
+    def test_grammar_long_program_boundaries(self):
+        self.assertEqual(len(parse_intent(';'.join(['remove path:a'] * 256))), 256)
+        with self.assertRaisesRegex(IntentError, 'Operation count limit exceeded'):
+            parse_intent(';'.join(['remove path:a'] * 1000))
 
     def test_limits(self):
         for text, options in [('remove path:x', {'maxChars': 2}),

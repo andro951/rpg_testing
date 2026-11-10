@@ -28,6 +28,7 @@ SOURCES = (
     'evaluation/live_intent.py', 'evaluation/dot_separators_v2.py',
     'intent_parser/__init__.py', 'intent_parser/parse.py',
     'intent_parser/patch.py', 'intent_parser/json_contract.py',
+    'intent_parser/grammar-spec.json',
     'workbench/domain.py', 'workbench/workflows.py', 'workbench/scoring.py', 'workbench/live.py',
     'workbench/dot_paths.py', 'workbench/value_paths.py',
 )

@@ -1,3 +1,13 @@
+# Grammar-first revision, November 10
+
+This section supersedes the historical status below. `intent.grammar` now drives the complete program: operation signatures, optional labels and field order, recursive operation groups, typed paths, and recursive JSON values. JavaScript uses GrammarForge; C# and Python use the specification exported from its parsed grammar. See `GRAMMAR-DESIGN.md` for every retained procedural check and the build workflow.
+
+The previous generic structural grammar remains only as the conversion adapter `tokens.grammar`. The compiler now rejects incomplete operations and extra fields before IR conversion. Grammar changes are included in the live evaluator fingerprint and require a separately prepared configuration; frozen experiments and old results are not changed.
+
+The revision also adds portable grammar validation and fixes the new C# evaluator's independently reproduced long-input stack overflow. Its evaluator and AST traversal now use explicit stacks. No changes were made to the upstream GrammarForge source, model prompts, model inference settings, or saved research results.
+
+## Historical implementation checkpoints
+
 # JavaScript implementation status
 
 ## Implemented and exercised

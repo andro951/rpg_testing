@@ -63,6 +63,14 @@ class CurrentLiveIntentTests(unittest.TestCase):
         self.assertEqual(len(backend.calls),1)
         return result['score']
 
+    def test_grammar_spec_is_pinned_in_live_evaluator_identity(self):
+        from evaluation.live_intent import identity
+        import hashlib
+        info = identity()
+        source = Path(__file__).resolve().parents[1] / 'intent_parser' / 'grammar-spec.json'
+        expected = hashlib.sha256(source.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+        self.assertEqual(info['source_hashes']['intent_parser/grammar-spec.json'], expected)
+
     def test_strict_default_remains_strict_and_selected_live_runner_uses_parser_once(self):
         raw='update path:"items.a.b.count" value:2'
         self.assertFalse(self.run_response(raw,self.strict)['valid'])

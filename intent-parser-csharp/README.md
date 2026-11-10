@@ -1,6 +1,6 @@
 # Native C# intent parser
 
-A dependency-free .NET 8 port of the JavaScript GrammarForge intent-parser prototype. The native structural lexer and ordered component parser implement the two included grammar files; no Node.js, JavaScript engine, network service, or live model is needed at runtime.
+A dependency-free .NET 8 port of the JavaScript GrammarForge intent-parser prototype. The native ordered-expression interpreter consumes the embedded `grammar-spec.json`, generated from the included program, operation, and lexical-tree grammars; no Node.js, JavaScript engine, network service, or live model is needed at runtime.
 
 ## Run
 
@@ -42,7 +42,7 @@ Default normalization returns only custom ID-addressed patches. `JsonPatch=true`
 
 Normalization accepts the documented intent grammar only. RFC6902 remains an output format; no RFC input importer or automatic input-dialect bridge is provided.
 
-One exact enclosing bare/JSON Markdown fence can be removed with `MARKDOWN_FENCE_REMOVED` diagnostics. Prefix/suffix prose is not stripped. Values that resemble operation objects are considered as values and as operation groups, accepting exactly one complete interpretation.
+One exact enclosing bare/JSON Markdown fence can be removed with `MARKDOWN_FENCE_REMOVED` diagnostics. Prefix/suffix prose is not stripped. The complete program AST determines operation groups and strict JSON values. A bounded newline-partition check rejects ambiguous operation boundaries without discovering or repairing operations.
 
 ## Safety and limits
 
@@ -66,3 +66,7 @@ PYTHON_REFERENCE=../rpg_testing DOTNET=dotnet python3 cross-language-test.py
 ```
 
 These compare acceptance, diagnostics, intent IR, both patch formats, offline replay, hashes, prompt strings, typed host paths, and numeric/Unicode edge cases. Diagnostic/error wording is not a stable cross-language API.
+
+## Grammar source
+
+Edit the authoritative grammar files in `intent-parser-js`, then run `node intent-parser-js/build-grammar-spec.cjs` from the repository root to regenerate all three ports. The generated specification preserves token priority, ordered alternatives, greedy quantifiers, and source hashes. C# interprets these productions directly with capture rollback and zero-progress guards; it does not maintain separate handwritten production methods.

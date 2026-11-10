@@ -74,7 +74,7 @@ path now recognizes an explicit result evaluator object:
 ```
 
 Use the preparer/API to generate the fingerprint; do not copy a placeholder.
-It pins parser/host/scorer sources plus Python and jsonschema versions. Unknown,
+It pins parser/host/scorer sources, the generated grammar specification, and Python and jsonschema versions. Unknown,
 stale, malformed, non-dot or constrained-final-output selections fail before a
 normal live backend call. Selection changes experimental definition and case
 identity; an old strict observation cannot fulfill an intent-mode case.

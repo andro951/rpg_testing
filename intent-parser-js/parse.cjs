@@ -5,6 +5,7 @@ const GF=require('./load-forge.cjs');
 const safety=require('./json-contract.cjs');
 const grammar=fs.readFileSync(path.join(__dirname,'intent.grammar'),'utf8');
 const forge=new GF(grammar);
+const tokenForge=new GF(fs.readFileSync(path.join(__dirname,'tokens.grammar'),'utf8'));
 const operationForge=new GF(fs.readFileSync(path.join(__dirname,'operation.grammar'),'utf8'));
 const operations=Object.assign(Object.create(null),{add:'append',append:'append',insert:'append',update:'update',remove:'remove',delete:'remove',copy:'copy',move:'move'});
 const labels=Object.assign(Object.create(null),{op:'op',operation:'op',type:'op',path:'path',from:'from',source:'from',to:'to',destination:'to',value:'value'});
@@ -17,7 +18,7 @@ function simplify(x){
  return {kind:'token',type:x.type,text:x.value};
 }
 function flatten(x){return Array.isArray(x)?x.flatMap(flatten):[x];}
-function lexParse(text){const tree=flatten(simplify(forge.parse(text)));function check(x){if(x.kind==='group')flatten(x.children).forEach(check);else if(x.type==='STRING')safety.unicode(JSON.parse(x.text));else if(x.type==='WORD')safety.unicode(x.text);else if(x.type==='NUMBER')safety.number(x.text);}tree.forEach(check);return tree;}
+function lexParse(text){const tree=flatten(simplify(tokenForge.parse(text)));function check(x){if(x.kind==='group')flatten(x.children).forEach(check);else if(x.type==='STRING')safety.unicode(JSON.parse(x.text));else if(x.type==='WORD')safety.unicode(x.text);else if(x.type==='NUMBER')safety.number(x.text);}tree.forEach(check);return tree;}
 function isSep(x){return x.kind==='token'&&['SEP_COMMA','NEWLINE'].includes(x.type);}
 function tokenValue(x){return x.type==='STRING'?JSON.parse(x.text):x.text;}
 function render(x){if(x.kind==='group')return x.open+x.children.map(render).join(' ')+opens[x.open];return x.text;}
@@ -58,10 +59,13 @@ function parseRecord(xs){
  let ast;
  const previous=GF.makeFullAST;GF.makeFullAST=true;
  try{ast=operationForge.parse(xs.map(render).join(' '));}finally{GF.makeFullAST=previous;}
+ return convertOperation(ast);
+}
+function convertOperation(ast){
  const components=[];
  function collect(node){
   if(Array.isArray(node)){
-   if(node[0]==='RULE'&&node[2]==='component'){components.push(node);return;}
+   if(node[0]==='RULE'&&['remove_component','add_component','update_component','cm_component','target_component','array_target_component','value_component','source_component','destination_component'].includes(node[2])){components.push(node);return;}
    node.forEach(collect);
   }else if(node&&typeof node==='object'&&node.nodes)collect(node.nodes);
  }
@@ -73,7 +77,7 @@ function parseRecord(xs){
  collect(ast);
  const fields={};const unlabeled=[];
  for(const component of components){
-  const items=lexParse(leaves(component).join(' '));
+  const items=lexParse(leaves(component).join(' ')).filter(x=>!isSep(x));
   const key=items[0]?.kind==='token'?labels[String(tokenValue(items[0])).toLowerCase()]:undefined;
   if(key&&items[1]?.type==='DELIMITER'){
    if(Object.hasOwn(fields,key))throw Error('Duplicate '+key+' label');
@@ -155,9 +159,6 @@ function repairOuterWrapper(text,{maxDepth=64}={}){
  if(stack.length||unmatched.length)throw Error('Unbalanced inner grouping cannot be safely recovered');
  return {text,repair:null};
 }
-function hasOperation(node){const children=flatten(node.children);return children.some((x,i)=>x.kind==='group'?hasOperation(x):
- (['WORD','STRING'].includes(x.type)&&Object.hasOwn(operations,String(tokenValue(x)).toLowerCase()))||
- (labels[String(tokenValue(x)).toLowerCase()]==='op'&&children[i+1]?.type==='DELIMITER'));}
 function parseIntent(text,options){return parseIntentWithDiagnostics(text,options).operations;}
 function parseSequence(nodes,{maxBoundaryAttempts=4096,maxOperations=256}={}){
  nodes=flatten(nodes);while(nodes.length&&isSep(nodes[0]))nodes.shift();while(nodes.length&&isSep(nodes.at(-1)))nodes.pop();
@@ -202,19 +203,41 @@ function unwrapFence(text){const m=/^\s*```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n``
 function parseIntentWithDiagnostics(text,options={}){
  if(typeof text!=='string')throw Error('Intent text must be a string');
  if(text.length>(options.maxChars??65536))throw Error('Intent text size limit exceeded');
- const unwrapped=unwrapFence(text),repaired=repairOuterWrapper(unwrapped.text,options),tree=lexParse(repaired.text);
+ const unwrapped=unwrapFence(text),repaired=repairOuterWrapper(unwrapped.text,options);
  const diagnostics=[...unwrapped.diagnostics,...(repaired.repair?[{code:'OUTER_GROUP_RECOVERED',detail:repaired.repair}]:[])];
- const meaningful=tree.filter(x=>!isSep(x));
- if(meaningful.length===1&&meaningful[0].kind==='group'&&flatten(meaningful[0].children).every(isSep))return {operations:[],diagnostics};
- const candidates=new Map();const accept=r=>{if(r.length>(options.maxOperations??256))throw Error('Operation count limit exceeded');candidates.set(JSON.stringify(r),r);};
- const retain=e=>{if(/limit exceeded|Ambiguous/.test(e.message))throw e;};
- try{accept(parseSequence(tree,options));}catch(e){retain(e);}
- try{const records=[];let current=[];const flush=()=>{if(current.some(x=>!isSep(x)))records.push(...parseSequence(current,options));current=[];};
- for(const node of tree){
- if(node.kind==='token'&&node.type==='SEMICOLON'){flush();continue;}
- if(node.kind==='group'&&current.every(isSep)&&hasOperation(node)){flush();const inner=flatten(node.children).filter(x=>!isSep(x));if(inner.length&&inner.every(x=>x.kind==='group'))for(const child of inner)records.push(parseRecord(child.children));else records.push(...parseSequence(node.children,options));}else current.push(node);
- }flush();accept(records);}catch(e){retain(e);}
- if(candidates.size!==1)throw Error(candidates.size?'Ambiguous complete operation interpretations':'No complete operation sequence');
- return {operations:[...candidates.values()][0],diagnostics};
+ let ast;const previous=GF.makeFullAST;GF.makeFullAST=true;
+ try{ast=forge.parse(repaired.text);}catch(error){throw Error('No complete operation sequence: '+error.message);}finally{GF.makeFullAST=previous;}
+ function children(node){return Array.isArray(node)?node:node&&typeof node==='object'&&node.nodes?[node.nodes]:[];}
+ function leaves(node){const result=[],stack=[node];while(stack.length){const n=stack.pop();if(n&&typeof n==='object'&&n.type&&Object.hasOwn(n,'value'))result.push(n.value);else stack.push(...children(n).slice().reverse());}return result;}
+ function operations(node){
+  const result=[],stack=[node];
+  while(stack.length){const current=stack.pop();
+   if(Array.isArray(current)&&current[0]==='RULE'&&current[2]==='operation'){
+    result.push(convertOperation(current));
+    if(result.length>(options.maxOperations??256))throw Error('Operation count limit exceeded');
+   }else stack.push(...children(current).slice().reverse());
+  }
+  return result;
+ }
+ const result=operations(ast);
+ if(result.length>(options.maxOperations??256))throw Error('Operation count limit exceeded');
+ // GrammarForge is ordered-choice, not an ambiguity-enumerating parser. Keep
+ // this bounded proof for newline partitions: accepting the first parse alone
+ // could silently choose a different operation list. It never repairs input.
+ function checkLists(node){
+  const stack=[node];while(stack.length){const current=stack.pop();
+   if(Array.isArray(current)&&current[0]==='RULE'&&current[2]==='op_list'){
+    const nodes=lexParse(leaves(current).join(' '));
+    try{
+     const alternate=parseSequence(nodes,options),expected=operations(current);
+     if(JSON.stringify(alternate)!==JSON.stringify(expected))throw Error('Ambiguous complete operation interpretations');
+    }catch(error){if(/limit exceeded|Ambiguous/.test(error.message))throw error;}
+   }
+   stack.push(...children(current).slice().reverse());
+  }
+ }
+ checkLists(ast);
+ return {operations:result,diagnostics};
 }
+
 module.exports={parseIntent,parseIntentWithDiagnostics,parseRecord,parseSequence,lexParse,pathTokens,grammar};

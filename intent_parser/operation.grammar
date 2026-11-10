@@ -1,28 +1,75 @@
-operation : component+
-component : operation_field | path_field | value_field | operation_type | json_value | path
-operation_field : OP_LABEL delimiter operation_type
-path_field : PATH_LABEL delimiter path
-value_field : VALUE_LABEL delimiter json_value
-delimiter : COLON | DELIMITER
-separator : SLASH | PATH_SEPARATOR
-path_delimiter : SLASH | PATH_SEPARATOR | SEP_COMMA
-operation_type : OPERATION | STRING
+operation : remove | write | move_copy
+remove : remove_component field_gap target_component | target_component field_gap remove_component
+write : add | update
+add : add_component field_gap array_target_component field_gap value_component | add_component field_gap value_component field_gap array_target_component | array_target_component field_gap add_component field_gap value_component | array_target_component field_gap value_component field_gap add_component | value_component field_gap add_component field_gap array_target_component | value_component field_gap array_target_component field_gap add_component
+update : update_component field_gap target_component field_gap value_component | update_component field_gap value_component field_gap target_component | target_component field_gap update_component field_gap value_component | target_component field_gap value_component field_gap update_component | value_component field_gap update_component field_gap target_component | value_component field_gap target_component field_gap update_component
+move_copy : cm_component field_gap source_component field_gap destination_component | cm_component field_gap destination_component field_gap source_component | source_component field_gap cm_component field_gap destination_component | source_component field_gap destination_component field_gap cm_component | destination_component field_gap cm_component field_gap source_component | destination_component field_gap source_component field_gap cm_component
+remove_component : (op_label json_space delimiter field_gap)? remove_name
+add_component : (op_label json_space delimiter field_gap)? add_name
+update_component : (op_label json_space delimiter field_gap)? update_name
+cm_component : (op_label json_space delimiter field_gap)? cm_name
+target_component : (path_label json_space delimiter field_gap)? path
+array_target_component : (path_label json_space delimiter field_gap)? arr_path
+value_component : (value_label json_space delimiter field_gap)? json_value
+source_component : from_label json_space delimiter field_gap path | path_label json_space delimiter field_gap path | explicit_path
+destination_component : to_label json_space delimiter field_gap arr_path | path_label json_space delimiter field_gap arr_path | explicit_arr_path
+op_label : OP_LABEL | Q_OP_LABEL
+path_label : PATH_LABEL | Q_PATH_LABEL
+from_label : FROM_LABEL | Q_FROM_LABEL
+to_label : TO_LABEL | Q_TO_LABEL
+value_label : VALUE_LABEL | Q_VALUE_LABEL
+remove_name : REMOVE | Q_REMOVE
+add_name : ADD_UPDATE | ADD | Q_ADD_UPDATE | Q_ADD
+update_name : UPDATE | Q_UPDATE | ADD_UPDATE | Q_ADD_UPDATE
+cm_name : MOVE | COPY | Q_MOVE | Q_COPY
+// These names preserve destination requirements in the AST. Whether a path
+// actually selects an array depends on the input document, not its spelling.
+arr_path : path
+explicit_arr_path : explicit_path
 path : grouped_path | scalar_path
+explicit_path : grouped_path | json_string
 scalar_path : SLASH? path_part (separator path_part)*
-grouped_path : LPAREN path_parts RPAREN | LBRACKET path_parts RBRACKET | LBRACE path_parts RBRACE
-path_parts : (path_part path_delimiter?)*
-path_part : STRING | NUMBER | WORD | OPERATION | BOOLEAN | NULL
-json_value : json_object | json_array | STRING | NUMBER | BOOLEAN | NULL
-json_object : LBRACE members? RBRACE
-members : member (SEP_COMMA member)*
-member : json_key COLON json_value
-json_key : STRING | OP_LABEL | PATH_LABEL | VALUE_LABEL
-json_array : LBRACKET elements? RBRACKET
-elements : json_value (SEP_COMMA json_value)*
-OP_LABEL : /(?:"(?:op|operation|type)"|(?:op|operation|type)\b)(?=\s*(?::|=|->))/i (KEEP)
-PATH_LABEL : /(?:"(?:path|from|source|to|destination)"|(?:path|from|source|to|destination)\b)(?=\s*(?::|=|->))/i (KEEP)
-VALUE_LABEL : /(?:"(?:value)"|(?:value)\b)(?=\s*(?::|=|->))/i (KEEP)
-OPERATION : /(?:add|append|insert|update|remove|delete|copy|move)\b/i (KEEP)
+grouped_path : LPAREN json_space path_parts RPAREN | LBRACKET json_space path_parts RBRACKET | LBRACE json_space path_parts RBRACE
+path_parts : (path_part json_space (path_delimiter json_space)?)*
+path_part : json_string | NUMBER | WORD | ADD_UPDATE | ADD | UPDATE | REMOVE | MOVE | COPY | BOOLEAN | NULL
+path_delimiter : SLASH | PATH_SEPARATOR | SEP_COMMA
+separator : SLASH | PATH_SEPARATOR
+delimiter : COLON | DELIMITER
+field_gap : (SEP_COMMA | NEWLINE)*
+json_value : json_object | json_array | json_string | NUMBER | BOOLEAN | NULL
+json_object : LBRACE json_space members? RBRACE
+members : member (SEP_COMMA json_space member)*
+member : json_key json_space COLON json_space json_value json_space
+json_key : json_string | Q_OP_LABEL | Q_PATH_LABEL | Q_FROM_LABEL | Q_TO_LABEL | Q_VALUE_LABEL
+json_array : LBRACKET json_space elements? RBRACKET
+elements : json_value json_space (SEP_COMMA json_space json_value json_space)*
+json_space : NEWLINE*
+json_string : STRING | Q_ADD_UPDATE | Q_ADD | Q_UPDATE | Q_REMOVE | Q_MOVE | Q_COPY
+FENCE_OPEN : /```(?:json)?[ \t]*\r?\n/i (KEEP)
+FENCE_CLOSE : /```/ (KEEP)
+SEMICOLON : /;/ (KEEP)
+Q_OP_LABEL : /"(?:op|operation|type)"(?=\s*(?::|=|->))/i (KEEP)
+OP_LABEL : /(?:op|operation|type)\b(?=\s*(?::|=|->))/i (KEEP)
+Q_PATH_LABEL : /"(?:path)"(?=\s*(?::|=|->))/i (KEEP)
+PATH_LABEL : /(?:path)\b(?=\s*(?::|=|->))/i (KEEP)
+Q_FROM_LABEL : /"(?:from|source)"(?=\s*(?::|=|->))/i (KEEP)
+FROM_LABEL : /(?:from|source)\b(?=\s*(?::|=|->))/i (KEEP)
+Q_TO_LABEL : /"(?:to|destination)"(?=\s*(?::|=|->))/i (KEEP)
+TO_LABEL : /(?:to|destination)\b(?=\s*(?::|=|->))/i (KEEP)
+Q_VALUE_LABEL : /"(?:value)"(?=\s*(?::|=|->))/i (KEEP)
+VALUE_LABEL : /(?:value)\b(?=\s*(?::|=|->))/i (KEEP)
+Q_ADD_UPDATE : /"add"/i (KEEP)
+Q_ADD : /"(?:append|insert)"/i (KEEP)
+Q_UPDATE : /"update"/i (KEEP)
+Q_REMOVE : /"(?:remove|delete)"/i (KEEP)
+Q_MOVE : /"move"/i (KEEP)
+Q_COPY : /"copy"/i (KEEP)
+ADD_UPDATE : /add\b/i (KEEP)
+ADD : /(?:append|insert)\b/i (KEEP)
+UPDATE : /update\b/i (KEEP)
+REMOVE : /(?:remove|delete)\b/i (KEEP)
+MOVE : /move\b/i (KEEP)
+COPY : /copy\b/i (KEEP)
 STRING : /"(?:[^"\\\r\n]|\\.)*"/ (KEEP)
 NUMBER : /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/ (KEEP)
 BOOLEAN : /(?:true|false)\b/ (KEEP)
@@ -39,3 +86,5 @@ RBRACE : /\}/ (KEEP)
 LBRACKET : /\[/ (KEEP)
 RBRACKET : /\]/ (KEEP)
 SEP_COMMA : /,/ (KEEP)
+HORIZONTAL_SPACE : /[^\S\r\n\u2028\u2029]+/ (IGNORE)
+NEWLINE : /\r\n|[\r\n\u2028\u2029]/ (KEEP)

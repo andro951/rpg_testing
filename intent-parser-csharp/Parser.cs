@@ -5,9 +5,9 @@ using System.Text.RegularExpressions;
 namespace Csc592.IntentParser;
 
 /// <summary>
-/// Native implementation of the two published GrammarForge intent grammars.
-/// The stages intentionally mirror parse.cjs: structural lexing, component grammar,
-/// semantic intent, unique newline partitioning, and conservative outer recovery.
+/// Native interpreter of the generated GrammarForge expression specification.
+/// Complete program and operation ASTs drive conversion; bounded newline
+/// partitioning is only an ambiguity check after conservative outer recovery.
 /// No JavaScript runtime or model inference is involved.
 /// </summary>
 public static partial class IntentParser
@@ -25,42 +25,151 @@ public static partial class IntentParser
     private static readonly Dictionary<char, char> Opens = new() { ['(']=')', ['[']=']', ['{']='}' };
     // ECMAScript's whitespace set, including BOM but excluding U+0085.
     private const string Ws = @"\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
-    private const string StringPattern = "\"(?:[^\"\\\\\\r\\n]|\\\\.)*\"";
     private const string NumberPattern = @"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?";
-    private static readonly string WordPattern = @"(?:(?!->)[^" + Ws + @"""(){}\[\],;:=/\.>])+";
     private sealed record LexRule(string Type, Regex Pattern, bool Ignore=false);
     private sealed record Token(string Type, string Text);
     private sealed record Node(string Type, string Text, char Open='\0', List<Node>? Children=null)
     {
         public bool IsGroup => Children is not null;
     }
-    private static LexRule Rule(string type, string pattern, bool ignore=false, bool insensitive=false)
-        => new(type, new Regex(@"\G(?:" + pattern + ")", RegexOptions.CultureInvariant | (insensitive ? RegexOptions.IgnoreCase : RegexOptions.None)), ignore);
-    private static readonly List<LexRule> StructuralRules = new()
+    private sealed record GrammarNode(string Name, int Start, int End, List<GrammarNode> Children);
+    private sealed record GrammarTree(List<Token> Tokens, GrammarNode Root);
+    private static readonly JsonDocument GrammarSpec = LoadGrammarSpec();
+    private static JsonDocument LoadGrammarSpec()
     {
-        Rule("STRING", StringPattern), Rule("NUMBER", NumberPattern), Rule("DELIMITER", @"=>|->|:|="),
-        Rule("WORD", WordPattern), Rule("PATH_SEPARATOR", @"\.|/"),
-        Rule("LPAREN", @"\("), Rule("RPAREN", @"\)"), Rule("LBRACE", @"\{"), Rule("RBRACE", @"\}"),
-        Rule("LBRACKET", @"\["), Rule("RBRACKET", @"\]"), Rule("SEP_COMMA", ","), Rule("SEMICOLON", ";"),
-        Rule("HORIZONTAL_SPACE", @"[\u0009\u000b\u000c\u0020\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]+", true),
-        Rule("NEWLINE", @"\r\n|[\r\n\u2028\u2029]")
-    };
-    private static string LabelPattern(string names) => "(?:\"(?:"+names+")\"|(?:"+names+")(?![A-Za-z0-9_]))(?=["+Ws+"]*(?::|=|->))";
-    private static readonly List<LexRule> ComponentRules = new()
+        using var stream=typeof(IntentParser).Assembly.GetManifestResourceStream("Csc592.IntentParser.grammar-spec.json")
+            ?? throw new InvalidOperationException("Missing generated grammar specification");
+        return JsonDocument.Parse(stream);
+    }
+    private static string NativePattern(string source)
     {
-        Rule("OP_LABEL", LabelPattern("op|operation|type"), insensitive:true),
-        Rule("PATH_LABEL", LabelPattern("path|from|source|to|destination"), insensitive:true),
-        Rule("VALUE_LABEL", LabelPattern("value"), insensitive:true),
-        Rule("OPERATION", @"(?:add|append|insert|update|remove|delete|copy|move)(?![A-Za-z0-9_])", insensitive:true),
-        Rule("STRING", StringPattern), Rule("NUMBER", NumberPattern),
-        Rule("BOOLEAN", @"(?:true|false)(?![A-Za-z0-9_])"), Rule("NULL", @"null(?![A-Za-z0-9_])"),
-        Rule("DELIMITER", "=>|->|="), Rule("COLON", ":"), Rule("SLASH", "/"), Rule("PATH_SEPARATOR", @"\."),
-        Rule("WORD", WordPattern), Rule("LPAREN", @"\("), Rule("RPAREN", @"\)"), Rule("LBRACE", @"\{"),
-        Rule("RBRACE", @"\}"), Rule("LBRACKET", @"\["), Rule("RBRACKET", @"\]"), Rule("SEP_COMMA", ","),
-        Rule("WHITESPACE", "["+Ws+"]+", true)
-    };
-    private static readonly List<LexRule> ValuePatchComponentRules = ComponentRules
-        .Select(rule=>rule.Type=="OPERATION" ? Rule("OPERATION", @"(?:add|append|insert|update|replace|remove|delete|copy|move)(?![A-Za-z0-9_])", insensitive:true) : rule).ToList();
+        // Preserve ECMAScript whitespace rather than .NET's Unicode class.
+        source=source.Replace(@"[^\S\r\n\u2028\u2029]", @"[\u0009\u000b\u000c\u0020\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]");
+        var result=new System.Text.StringBuilder(); bool inClass=false;
+        for(int i=0;i<source.Length;i++)
+        {
+            char c=source[i];
+            if(c=='\\' && i+1<source.Length)
+            {
+                char next=source[++i];
+                if(next=='s') result.Append(inClass?Ws:"["+Ws+"]");
+                else if(next=='S') result.Append("[^"+Ws+"]");
+                else if(next=='/') result.Append('/');
+                else { result.Append('\\'); result.Append(next); }
+            }
+            else { if(c=='[') inClass=true; else if(c==']') inClass=false; result.Append(c); }
+        }
+        return result.ToString();
+    }
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string,List<LexRule>> GrammarLexerCache=new();
+    private static List<LexRule> GrammarLexRules(string name,IntentOptions options)
+        => GrammarLexerCache.GetOrAdd(name+":"+options.PathSyntax,_=>BuildGrammarLexRules(name,options));
+    private static List<LexRule> BuildGrammarLexRules(string name,IntentOptions options)
+    {
+        List<LexRule> result=new();
+        foreach(var token in GrammarSpec.RootElement.GetProperty("grammars").GetProperty(name).GetProperty("tokens").EnumerateArray())
+        {
+            string type=token.GetProperty("type").GetString()!,source=token.GetProperty("source").GetString()!;
+            if(options.PathSyntax=="value_patch")
+            {
+                if(type=="UPDATE") source=@"(?:update|replace)\b";
+                if(type=="Q_UPDATE") source="\"(?:update|replace)\"";
+            }
+            var flags=RegexOptions.CultureInvariant|RegexOptions.ECMAScript;
+            if(token.GetProperty("flags").GetString()!.Contains('i')) flags|=RegexOptions.IgnoreCase;
+            result.Add(new LexRule(type,new Regex(@"\G(?:"+NativePattern(source)+")",flags),token.GetProperty("tag").GetString()=="IGNORE"));
+        }
+        return result;
+    }
+    private static GrammarTree ParseGrammar(string name,string text,IntentOptions options)
+    {
+        var grammar=GrammarSpec.RootElement.GetProperty("grammars").GetProperty(name);
+        var rules=grammar.GetProperty("rules"); var tokens=Lex(text,GrammarLexRules(name,options));
+        // Both descent and continuation return run on this explicit work stack.
+        // Right-recursive programs cannot consume the CLR call stack before limits.
+        Stack<Action> work=new();
+        void Schedule(JsonElement expression,int at,List<GrammarNode> output,Action<int?> done)
+        {
+            work.Push(()=>
+            {
+                int mark=output.Count;
+                void Finish(int? result)
+                {
+                    if(result is null && output.Count>mark) output.RemoveRange(mark,output.Count-mark);
+                    work.Push(()=>done(result));
+                }
+                if(expression.ValueKind==JsonValueKind.String)
+                {
+                    string reference=expression.GetString()!;
+                    if(rules.TryGetProperty(reference,out var rule))
+                    {
+                        List<GrammarNode> children=new();
+                        Schedule(rule,at,children,end=>
+                        {
+                            if(end is not null) output.Add(new GrammarNode(reference,at,end.Value,children));
+                            Finish(end);
+                        });
+                    }
+                    else Finish(at<tokens.Count && tokens[at].Type==reference ? at+1 : null);
+                    return;
+                }
+                string kind=expression[0].GetString()!; var inner=expression[1];
+                if(kind=="|")
+                {
+                    int alternative=0;
+                    void Next()
+                    {
+                        if(alternative==inner.GetArrayLength()) { Finish(null); return; }
+                        Schedule(inner[alternative++],at,output,end=> { if(end is not null) Finish(end); else Next(); });
+                    }
+                    Next(); return;
+                }
+                if(kind==",")
+                {
+                    int part=0,index=at;
+                    void Next()
+                    {
+                        if(part==inner.GetArrayLength()) { Finish(index); return; }
+                        Schedule(inner[part++],index,output,end=> { if(end is null) Finish(null); else { index=end.Value; Next(); } });
+                    }
+                    Next(); return;
+                }
+                int current=at;
+                void Repeat()
+                {
+                    int before=output.Count;
+                    Schedule(inner,current,output,end=>
+                    {
+                        if(end is null || end==current)
+                        {
+                            if(output.Count>before) output.RemoveRange(before,output.Count-before);
+                            Finish(kind=="+" && current==at ? null : current); return;
+                        }
+                        current=end.Value;
+                        if(kind=="?") Finish(current); else Repeat();
+                    });
+                }
+                Repeat();
+            });
+        }
+        string start=grammar.GetProperty("start").GetString()!;
+        List<GrammarNode> children=new(); int? end=null;
+        Schedule(rules.GetProperty(start),0,children,result=>end=result);
+        while(work.Count>0) work.Pop()();
+        if(end!=tokens.Count) throw new InvalidOperationException("No complete "+name+" grammar parse");
+        return new GrammarTree(tokens,new GrammarNode(start,0,end.Value,children));
+    }
+    private static IEnumerable<GrammarNode> GrammarDescendants(GrammarNode root)
+    {
+        Stack<GrammarNode> pending=new(); pending.Push(root);
+        while(pending.Count>0)
+        {
+            var node=pending.Pop(); yield return node;
+            for(int i=node.Children.Count-1;i>=0;i--) pending.Push(node.Children[i]);
+        }
+    }
+    private static string GrammarText(GrammarTree tree,GrammarNode node)
+        => string.Join(" ",tree.Tokens.Skip(node.Start).Take(node.End-node.Start).Select(t=>t.Text));
     private static List<Token> Lex(string text, List<LexRule> rules)
     {
         List<Token> result = new();
@@ -70,7 +179,7 @@ public static partial class IntentParser
             foreach (var rule in rules)
             {
                 Match match=rule.Pattern.Match(text,offset);
-                if (!match.Success) continue;
+                if (!match.Success || match.Length==0) continue;
                 offset+=match.Length; found=true;
                 if (!rule.Ignore) result.Add(new Token(rule.Type,match.Value));
                 break;
@@ -81,30 +190,19 @@ public static partial class IntentParser
     }
     private static List<Node> LexParse(string text)
     {
-        var tokens=Lex(text,StructuralRules); int at=0;
-        List<Node> Read(char? closer=null)
+        var tree=ParseGrammar("tokens",text,new IntentOptions());
+        List<Node> Convert(GrammarNode node)
         {
-            List<Node> nodes=new();
-            while (at<tokens.Count)
+            if(node.Name=="group") return new(){new Node("GROUP","",tree.Tokens[node.Start].Text[0],node.Children.SelectMany(Convert).ToList())};
+            if(node.Name=="atom")
             {
-                Token token=tokens[at++];
-                if (token.Text.Length==1 && Opens.TryGetValue(token.Text[0],out char close))
-                    nodes.Add(new Node("GROUP","",token.Text[0],Read(close)));
-                else if (token.Type is "RPAREN" or "RBRACE" or "RBRACKET")
-                {
-                    if (closer!=token.Text[0]) throw new InvalidOperationException("Mismatched grouping");
-                    return nodes;
-                }
-                else
-                {
-                    if (token.Type is "NUMBER" or "STRING") ParseStrictJson(token.Text);
-                    nodes.Add(new Node(token.Type,token.Text));
-                }
+                var token=tree.Tokens[node.Start];
+                if(token.Type is "NUMBER" or "STRING") ParseStrictJson(token.Text);
+                return new(){new Node(token.Type,token.Text)};
             }
-            if (closer is not null) throw new InvalidOperationException("Unbalanced grouping");
-            return nodes;
+            return node.Children.SelectMany(Convert).ToList();
         }
-        return Read();
+        return Convert(tree.Root);
     }
     private static bool IsSep(Node x) => !x.IsGroup && x.Type is "SEP_COMMA" or "NEWLINE";
     private static string Render(Node x) => x.IsGroup ? x.Open+string.Join(" ",x.Children!.Select(Render))+Opens[x.Open] : x.Text;
@@ -216,83 +314,26 @@ public static partial class IntentParser
         if (xs.Count==0) throw new InvalidOperationException("Missing value");
         return ParseStrictJson(string.Join(" ",xs.Select(Render)));
     }
-    // The component grammar is ordered-choice, like the upstream GrammarForge parser.
-    private sealed class ComponentParser
+    private static List<List<Node>> Components(GrammarTree tree,GrammarNode root)
     {
-        private readonly List<Token> tokens;
-        private int at;
-        public ComponentParser(string text,IntentOptions options) { tokens=Lex(text,options.PathSyntax=="value_patch"?ValuePatchComponentRules:ComponentRules); }
-        private bool Eat(params string[] types)
+        List<List<Node>> result=new();
+        void Collect(GrammarNode node)
         {
-            if (at>=tokens.Count || !types.Contains(tokens[at].Type)) return false;
-            at++; return true;
+            if(node.Name.EndsWith("_component",StringComparison.Ordinal))
+            { result.Add(LexParse(GrammarText(tree,node)).Where(x=>!IsSep(x)).ToList()); return; }
+            foreach(var child in node.Children) Collect(child);
         }
-        private bool Attempt(Func<bool> parse)
-        {
-            int start=at;
-            if (parse()) return true;
-            at=start; return false;
-        }
-        private bool OperationType() => Eat("OPERATION","STRING");
-        private bool Delimiter() => Eat("COLON","DELIMITER");
-        private bool PathPart() => Eat("STRING","NUMBER","WORD","OPERATION","BOOLEAN","NULL");
-        private bool GroupedPath()
-        {
-            if (at>=tokens.Count) return false;
-            string? close=tokens[at].Type switch { "LPAREN"=>"RPAREN", "LBRACKET"=>"RBRACKET", "LBRACE"=>"RBRACE", _=>null };
-            if (close is null) return false;
-            at++;
-            while (PathPart()) Eat("SLASH","PATH_SEPARATOR","SEP_COMMA");
-            return Eat(close);
-        }
-        private bool ScalarPath()
-        {
-            Eat("SLASH");
-            if (!PathPart()) return false;
-            while (Attempt(()=>Eat("SLASH","PATH_SEPARATOR") && PathPart())) { }
-            return true;
-        }
-        private bool Path() => Attempt(GroupedPath) || Attempt(ScalarPath);
-        private bool JsonObject()
-        {
-            if (!Eat("LBRACE")) return false;
-            if (Eat("RBRACE")) return true;
-            if (!Member()) return false;
-            while (Attempt(()=>Eat("SEP_COMMA") && Member())) { }
-            return Eat("RBRACE");
-        }
-        private bool Member() => Eat("STRING","OP_LABEL","PATH_LABEL","VALUE_LABEL") && Eat("COLON") && JsonValueRule();
-        private bool JsonArrayRule()
-        {
-            if (!Eat("LBRACKET")) return false;
-            if (Eat("RBRACKET")) return true;
-            if (!JsonValueRule()) return false;
-            while (Attempt(()=>Eat("SEP_COMMA") && JsonValueRule())) { }
-            return Eat("RBRACKET");
-        }
-        private bool JsonValueRule() => Attempt(JsonObject) || Attempt(JsonArrayRule) || Eat("STRING","NUMBER","BOOLEAN","NULL");
-        private bool Component()
-            => Attempt(()=>Eat("OP_LABEL") && Delimiter() && OperationType())
-            || Attempt(()=>Eat("PATH_LABEL") && Delimiter() && Path())
-            || Attempt(()=>Eat("VALUE_LABEL") && Delimiter() && JsonValueRule())
-            || Attempt(OperationType) || Attempt(JsonValueRule) || Attempt(Path);
-        public List<List<Node>> Parse()
-        {
-            List<List<Node>> components=new();
-            while (at<tokens.Count)
-            {
-                int start=at;
-                if (!Component()) throw new InvalidOperationException("Invalid operation component");
-                components.Add(LexParse(string.Join(" ",tokens.Skip(start).Take(at-start).Select(t=>t.Text))));
-            }
-            if (components.Count==0) throw new InvalidOperationException("Missing operation components");
-            return components;
-        }
+        Collect(root); return result;
     }
     private static JsonObject ParseRecord(List<Node> source,IntentOptions options)
     {
         var xs=source.Where(x=>!IsSep(x)).ToList();
-        var components=new ComponentParser(string.Join(" ",xs.Select(Render)),options).Parse();
+        var tree=ParseGrammar("operation",string.Join(" ",xs.Select(Render)),options);
+        return ConvertOperation(tree,tree.Root,options);
+    }
+    private static JsonObject ConvertOperation(GrammarTree tree,GrammarNode root,IntentOptions options)
+    {
+        var components=Components(tree,root);
         Dictionary<string,List<Node>> fields=new(StringComparer.Ordinal); List<Node> unlabeled=new();
         foreach (var items in components)
         {
@@ -406,8 +447,6 @@ public static partial class IntentParser
         if (stack.Count>0 || unmatched.Count>0) throw new InvalidOperationException("Unbalanced inner grouping cannot be safely recovered");
         return (text,null);
     }
-    private static bool HasOperation(Node node,IntentOptions options)
-        => node.Children!.Select((x,i)=>x.IsGroup ? HasOperation(x,options) : IsOperation(x,options) || x.Type=="STRING" && CanonicalOperation(TokenValue(x),options) is not null || Label(x)=="op" && i+1<node.Children!.Count && node.Children[i+1].Type=="DELIMITER").Any(x=>x);
     private static List<JsonObject> ParseSequence(List<Node> xs,IntentOptions options)
     {
         int first=xs.FindIndex(x=>!IsSep(x)); if(first<0) return new();
@@ -468,37 +507,30 @@ public static partial class IntentParser
         JsonArray diagnostics=new();
         if(fence.Success) { text=fence.Groups[1].Value; diagnostics.Add(new JsonObject(){["code"]="MARKDOWN_FENCE_REMOVED",["detail"]="single enclosing JSON code fence"}); }
         var repaired=RepairOuterWrapper(text,options);
-        var tree=LexParse(repaired.text); var meaningful=tree.Where(x=>!IsSep(x)).ToList();
         if(repaired.repair is not null) diagnostics.Add(new JsonObject(){["code"]="OUTER_GROUP_RECOVERED",["detail"]=repaired.repair});
-        if(meaningful.Count==1 && meaningful[0].IsGroup && meaningful[0].Children!.All(IsSep)) return new JsonObject(){["operations"]=new JsonArray(),["diagnostics"]=diagnostics};
-        Dictionary<string,List<JsonObject>> candidates=new(StringComparer.Ordinal);
-        void Accept(List<JsonObject> records)
+        var tree=ParseGrammar("intent",repaired.text,options);
+        List<JsonObject> OperationsIn(GrammarNode node)
         {
-            if(records.Count>options.MaxOperations) throw new InvalidOperationException("Operation count limit exceeded");
-            candidates[JsonSerializer.Serialize(records)]=records;
-        }
-        static bool Recoverable(Exception e) => (e is InvalidOperationException or JsonException or ArgumentException) && !e.Message.Contains("limit exceeded") && !e.Message.Contains("Ambiguous");
-        try { Accept(ParseSequence(tree,options)); } catch(Exception e) when(Recoverable(e)) { }
-        try
-        {
-            List<JsonObject> records=new(); List<Node> current=new();
-            void Flush() { if(current.Any(x=>!IsSep(x))) records.AddRange(ParseSequence(current,options)); current=new(); }
-            foreach(var node in tree)
+            List<JsonObject> result=new();
+            foreach(var operation in GrammarDescendants(node).Where(n=>n.Name=="operation"))
             {
-                if(node.Type=="SEMICOLON") { Flush(); continue; }
-                if(node.IsGroup && current.All(IsSep) && HasOperation(node,options))
-                {
-                    Flush(); var inner=node.Children!.Where(x=>!IsSep(x)).ToList();
-                    if(inner.Count>0 && inner.All(x=>x.IsGroup)) foreach(var child in inner) records.Add(ParseRecord(child.Children!,options));
-                    else records.AddRange(ParseSequence(node.Children!,options));
-                }
-                else current.Add(node);
+                if(result.Count>=options.MaxOperations) throw new InvalidOperationException("Operation count limit exceeded");
+                result.Add(ConvertOperation(tree,operation,options));
             }
-            Flush(); Accept(records);
+            return result;
         }
-        catch(Exception e) when(Recoverable(e)) { }
-        if(candidates.Count!=1) throw new InvalidOperationException(candidates.Count>0?"Ambiguous complete operation interpretations":"No complete operation sequence");
-        return new JsonObject(){["operations"]=new JsonArray(candidates.Values.First().Select(x=>(JsonNode)x).ToArray()),["diagnostics"]=diagnostics};
+        var records=OperationsIn(tree.Root);
+        foreach(var node in GrammarDescendants(tree.Root).Where(n=>n.Name=="op_list"))
+        {
+            var nodes=LexParse(GrammarText(tree,node));
+            try
+            {
+                var alternate=ParseSequence(nodes,options); var expected=OperationsIn(node);
+                if(JsonSerializer.Serialize(alternate)!=JsonSerializer.Serialize(expected)) throw new InvalidOperationException("Ambiguous complete operation interpretations");
+            }
+            catch(Exception e) when((e is InvalidOperationException or JsonException or ArgumentException) && !e.Message.Contains("limit exceeded") && !e.Message.Contains("Ambiguous")) { }
+        }
+        return new JsonObject(){["operations"]=new JsonArray(records.Select(x=>(JsonNode)x).ToArray()),["diagnostics"]=diagnostics};
     }
 
     public static JsonArray NormalizeIntent(string text,JsonNode? document,IntentOptions? options=null)

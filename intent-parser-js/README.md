@@ -1,6 +1,6 @@
 # JavaScript intent-parser prototype
 
-A standalone, no-install prototype using the actual GrammarForge 2.1.4 runtime. It is not wired into the research acceptor, approved model prompts, or benchmark scoring.
+A standalone, no-install library using the actual GrammarForge 2.1.4 runtime. The Python port has a versioned CSC592 host adapter; this JavaScript library also remains independently usable. Existing research prompts and the separately frozen experiment are unchanged by the grammar revision.
 
 Public entry point: `require("./index.cjs")`. `normalizeIntent(text, document, options)` returns only the selected patch format. Offline replay: `node replay.cjs parity-fixtures.json` (append `--json-patch` for RFC output).
 
@@ -9,7 +9,7 @@ Run all checks with `node run-all.cjs` (or `npm test`). Run `node demo.cjs` for 
 ## Independent stages
 
 1. `buildPrompt({request,document,idKey})`: constructs model instructions without expected answers.
-2. `parseIntent(text)`: actual GrammarForge structural and operation grammars produce a separate intent IR. `parseIntentWithDiagnostics` also reports recovered outer wrappers.
+2. `parseIntent(text)`: the complete GrammarForge program grammar produces an AST, which is converted to a separate intent IR. `parseIntentWithDiagnostics` also reports recovered outer wrappers.
 3. `convertIntent(ir, document, {json_patch:false,idKey:'id'})`: resolves ambiguous roles only when unique, checks current state, and returns custom patches by default.
 4. `applyPatch(document, customPatch)`: applies custom operations atomically to a clone.
 
@@ -46,3 +46,7 @@ These are deterministic software tests with simulated model responses, **not liv
 ## Upstream provenance
 
 Runtime: `andro951/GrammarForge`, commit `4bbdff99f6e7224cfca0788b0d34772a1949230c`, version 2.1.4. Its source files are unchanged. `load-forge.cjs` loads the public runtime in a separate Node VM using the upstream bundle order. The author's ZON/test grammars were inspected privately but are not redistributed here. See instructions in `GrammarForge/grammarForge/grammarForge.js`.
+
+## Grammar-first revision
+
+See [GRAMMAR-DESIGN.md](GRAMMAR-DESIGN.md) for the canonical grammar, generated C#/Python specification, new structure checks, and the explicit reasons for keeping state semantics, ambiguity proof, recovery and resource limits in code. Run `node build-grammar-spec.cjs` after grammar changes; `--check` detects stale generated files. The additional 52 grammar-focused checks do not represent model observations.

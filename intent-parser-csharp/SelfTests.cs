@@ -34,11 +34,41 @@ internal static class SelfTests
         foreach(var control in new[]{"\n","\r","\t"}) Check("raw control",()=>Reject(()=>IntentParser.ParseIntent("update path:a value:\"x"+control+"y\"")));
         Check("unpaired surrogate",()=>Reject(()=>IntentParser.ParseIntent("update path:a value:\"\\ud800\"")));
         Check("valid escaped surrogate pair",()=>Equal(Apply("update path:a value:\"\\ud83d\\ude00\"",JsonNode.Parse("{\"a\":0}")),new JsonObject(){["a"]="😀"}));
+        Check("multiline JSON and grouped path",()=>Equal(Apply("update path:[\n\"x\"\n] value:{\n\"operations\": [\n\"remove\",\n\"copy\"\n]\n}",JsonNode.Parse("{\"x\":0}")),JsonNode.Parse("{\"x\":{\"operations\":[\"remove\",\"copy\"]}}")));
+        Check("recursive grammar groups",()=>Equal(Apply("({[remove path:a]; ((update path:b value:3))})",JsonNode.Parse("{\"a\":1,\"b\":2}")),JsonNode.Parse("{\"b\":3}")));
+        Check("JSON operation words are data",()=>Equal(Apply("update path:a value:{\"op\":\"remove\",\"path\":[\"b\"]}",JsonNode.Parse("{\"a\":0,\"b\":2}")),JsonNode.Parse("{\"a\":{\"op\":\"remove\",\"path\":[\"b\"]},\"b\":2}")));
+        Check("signature missing value",()=>Reject(()=>IntentParser.ParseIntent("update path:a")));
+        Check("signature extra value",()=>Reject(()=>IntentParser.ParseIntent("remove path:a value:1")));
+        Check("duplicate role",()=>Reject(()=>IntentParser.ParseIntent("update path:a path:b value:1")));
+        Check("generic replace excluded",()=>Reject(()=>IntentParser.ParseIntent("replace path:a value:1")));
+        Check("host replace alias",()=>Equal(Apply("replace path:a value:1",JsonNode.Parse("{\"a\":0}"),new IntentOptions(PathSyntax:"value_patch")),JsonNode.Parse("{\"a\":1}")));
         Check("ambiguous newline",()=>Reject(()=>IntentParser.ParseIntent("remove\na\nb\nc\nremove")));
         Check("depth bound",()=>Reject(()=>IntentParser.ParseIntent(new string('(',65)+"remove path:a"+new string(')',65))));
         Check("char bound",()=>Reject(()=>IntentParser.ParseIntent("remove path:a",new IntentOptions(MaxChars:2))));
         Check("UTF16 char bound",()=>Reject(()=>IntentParser.ParseIntent("remove path:\"😀\"",new IntentOptions(MaxChars:15))));
         Check("boundary bound",()=>Reject(()=>IntentParser.ParseIntent("remove path:a\nremove path:b",new IntentOptions(MaxBoundaryAttempts:0))));
+        Check("maximum ordinary operation count",()=>
+        {
+            var result=IntentParser.ParseIntent(string.Join(";",Enumerable.Repeat("remove a",256)));
+            if(result.Count!=256) throw new Exception("Valid operation list was truncated");
+        });
+        Check("large valid JSON value",()=>
+        {
+            var result=IntentParser.ParseIntent("update path:a value:["+string.Join(",",Enumerable.Repeat("0",10000))+"]");
+            if(result[0]!["value"]!.AsArray().Count!=10000) throw new Exception("Valid JSON value was truncated");
+        });
+        Check("explicit larger operation limit",()=>
+        {
+            var result=IntentParser.ParseIntent(string.Join(";",Enumerable.Repeat("remove a",4000)),new IntentOptions(MaxOperations:4000));
+            if(result.Count!=4000) throw new Exception("Explicit operation limit was not honored");
+        });
+        foreach(var separator in new[]{";","\n"})
+            Check("large program bounded rejection",()=>
+            {
+                try { IntentParser.ParseIntent(string.Join(separator,Enumerable.Repeat("remove a",4000))); }
+                catch(InvalidOperationException error) when(error.Message=="Operation count limit exceeded") { return; }
+                throw new Exception("Expected ordinary operation count limit rejection");
+            });
         Check("operation bound",()=>Reject(()=>IntentParser.ParseIntent("(remove path:a)(remove path:b)",new IntentOptions(MaxOperations:1))));
         Check("empty output",()=>Equal(IntentParser.NormalizeIntent("",new JsonObject()),new JsonArray()));
         foreach(var empty in new[]{"[]","()","{}","[\n]"}) Check("explicit empty",()=>Equal(IntentParser.NormalizeIntent(empty,new JsonObject()),new JsonArray()));

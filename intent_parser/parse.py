@@ -1,4 +1,4 @@
-"""Native port of parse.cjs and both GrammarForge grammars.
+"""Native interpreter of the generated GrammarForge grammar specification.
 
 Token priority, ordered grammar alternatives, greedy repetition, component ranges,
 IR construction and unique newline partitioning follow the reference in that order.
@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from pathlib import Path
+from functools import lru_cache
 import re
 from dataclasses import dataclass, field
 from .patch import IntentError, assert_json
@@ -19,9 +21,7 @@ LABELS = dict(op='op', operation='op', type='op', path='path', **{'from': 'from'
 OPENS = {'(': ')', '[': ']', '{': '}'}
 # ECMAScript whitespace, rather than Python's larger Unicode whitespace class.
 WS = r'\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff'
-STRING = r'"(?:[^"\\\r\n]|\\.)*"'
 NUMBER = r'-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?'
-WORD = r'(?:(?!->)[^' + WS + r'"(){}\[\],;:=/\.>])+'
 
 
 @dataclass
@@ -36,34 +36,107 @@ class Node:
         return bool(self.open)
 
 
-def _compile_rules(operation=False, value_patch=False):
+# This generated artifact is exported from GrammarForge, not a second grammar.
+SPEC = json.loads(Path(__file__).with_name('grammar-spec.json').read_text())['grammars']
+
+
+def _js_whitespace(source):
+    result, in_class, index = [], False, 0
+    while index < len(source):
+        char = source[index]
+        if char == '\\' and index + 1 < len(source):
+            escape = source[index + 1]
+            result.append((WS if in_class else '[' + WS + ']') if escape == 's' else source[index:index + 2])
+            index += 2
+            continue
+        if char == '[':
+            in_class = True
+        elif char == ']':
+            in_class = False
+        result.append(char)
+        index += 1
+    return ''.join(result)
+
+
+@lru_cache(maxsize=None)
+def _compile_rules(grammar, value_patch=False):
     rules = []
-    if operation:
-        for name, words in [('OP_LABEL', 'op|operation|type'),
-                            ('PATH_LABEL', 'path|from|source|to|destination'), ('VALUE_LABEL', 'value')]:
-            rules.append((name, r'(?:"(?:' + words + r')"|(?:' + words + r')\b)(?=[' + WS + r']*(?::|=|->))', re.I | re.A))
-        aliases = 'add|append|insert|update|remove|delete|copy|move'
-        if value_patch:
-            aliases += '|replace'
-        rules.append(('OPERATION', r'(?:' + aliases + r')\b', re.I | re.A))
-    rules += [('STRING', STRING, 0), ('NUMBER', NUMBER, 0)]
-    if operation:
-        rules += [('BOOLEAN', r'(?:true|false)\b', re.A), ('NULL', r'null\b', re.A),
-                  ('DELIMITER', r'=>|->|=', 0), ('COLON', ':', 0), ('SLASH', '/', 0), ('PATH_SEPARATOR', r'\.', 0), ('WORD', WORD, 0)]
-    else:
-        rules += [('DELIMITER', r'=>|->|:|=', 0), ('WORD', WORD, 0), ('PATH_SEPARATOR', r'\.|/', 0)]
-    rules += [(name, re.escape(char), 0) for name, char in [
-        ('LPAREN', '('), ('RPAREN', ')'), ('LBRACE', '{'), ('RBRACE', '}'),
-        ('LBRACKET', '['), ('RBRACKET', ']'), ('SEP_COMMA', ',')]]
-    if not operation:
-        rules += [('SEMICOLON', ';', 0), ('IGNORE', '[' + WS.replace(r'\n', '').replace(r'\r', '').replace(r'\u2028', '').replace(r'\u2029', '') + ']+', 0),
-                  ('NEWLINE', r'\r\n|[\r\n\u2028\u2029]', 0)]
-    rules.append(('IGNORE', '[' + WS + ']+', 0))
-    return [(name, re.compile(pattern, flags)) for name, pattern, flags in rules]
+    for token in SPEC[grammar]['tokens']:
+        source = token['source']
+        if value_patch and token['type'] in ('UPDATE', 'Q_UPDATE'):
+            source = source.replace('update', '(?:update|replace)')
+        # Preserve ECMAScript whitespace and ASCII word boundaries in Python.
+        source = source.replace(r'[^\S\r\n\u2028\u2029]', '[' + WS.replace(r'\n', '').replace(r'\r', '').replace(r'\u2028', '').replace(r'\u2029', '') + ']')
+        source = _js_whitespace(source)
+        source = source.replace(r'\\.', r'\\[^\r\n\u2028\u2029]')
+        flags = re.A | (re.I if 'i' in token.get('flags', '') else 0)
+        rules.append((token['type'], re.compile(source, flags), token.get('tag') == 'IGNORE'))
+    return rules
 
 
-STRUCTURAL_RULES, OPERATION_RULES = _compile_rules(), _compile_rules(True)
-VALUE_PATCH_OPERATION_RULES = _compile_rules(True, value_patch=True)
+@dataclass
+class GrammarNode:
+    type: str
+    start: int
+    end: int
+    children: list
+
+
+def _grammar_parse(text, grammar, options=None):
+    tokens = _tokenize(text, grammar=grammar, options=options)
+    rules = SPEC[grammar]['rules']
+    def parse(expression, index):
+        if isinstance(expression, str):
+            if expression in rules:
+                found = yield rules[expression], index
+                if found is None:
+                    return None
+                end, children = found
+                return end, [GrammarNode(expression, index, end, children)]
+            if index < len(tokens) and tokens[index].type == expression:
+                return index + 1, []
+            return None
+        kind, inner = expression
+        if kind == '|':
+            for alternative in inner:
+                result = yield alternative, index
+                if result is not None:
+                    return result
+            return None
+        children = []
+        if kind == ',':
+            for part in inner:
+                found = yield part, index
+                if found is None:
+                    return None
+                index, child = found
+                children.extend(child)
+            return index, children
+        start = index
+        while True:
+            found = yield inner, index
+            if found is None or found[0] == index:
+                break
+            index, child = found
+            children.extend(child)
+            if kind == '?':
+                break
+        return None if kind == '+' and start == index else (index, children)
+    # Explicit interpreter stack avoids Python's recursion limit for long
+    # statement lists without changing process-global recursion settings.
+    stack = [parse(SPEC[grammar]['start'], 0)]
+    result = None
+    while stack:
+        try:
+            expression, index = stack[-1].send(result)
+            stack.append(parse(expression, index))
+            result = None
+        except StopIteration as completed:
+            stack.pop()
+            result = completed.value
+    if result is None or result[0] != len(tokens):
+        raise IntentError('No complete operation sequence')
+    return tokens, result[1][0]
 
 
 def _operations(options=None):
@@ -72,14 +145,14 @@ def _operations(options=None):
     return {**OPERATIONS, 'replace': 'update'} if (options or {}).get('pathSyntax') == 'value_patch' else OPERATIONS
 
 
-def _tokenize(text, operation=False, options=None):
+def _tokenize(text, operation=False, options=None, grammar=None):
     result, index = [], 0
-    rules = (VALUE_PATCH_OPERATION_RULES if (options or {}).get('pathSyntax') == 'value_patch' else OPERATION_RULES) if operation else STRUCTURAL_RULES
+    rules = _compile_rules(grammar or ('operation' if operation else 'tokens'), (options or {}).get('pathSyntax') == 'value_patch')
     while index < len(text):
-        for kind, pattern in rules:
+        for kind, pattern, ignore in rules:
             match = pattern.match(text, index)
-            if match:
-                if kind != 'IGNORE':
+            if match and match.end() > index:
+                if not ignore:
                     result.append(Node(kind, match[0]))
                 index = match.end()
                 break
@@ -89,33 +162,17 @@ def _tokenize(text, operation=False, options=None):
 
 
 def lex_parse(text):
-    tokens, index = _tokenize(text), 0
-    def sequence(closer=None):
-        nonlocal index
-        result = []
-        while index < len(tokens):
-            token = tokens[index]
-            index += 1
-            if token.text in OPENS and token.type != 'STRING':
-                result.append(Node(open=token.text, children=sequence(OPENS[token.text])))
-            elif token.type in ('RPAREN', 'RBRACE', 'RBRACKET'):
-                if token.text != closer:
-                    raise IntentError('Mismatched grouping')
-                return result
-            else:
-                result.append(token)
-        if closer:
-            raise IntentError('Unbalanced grouping')
-        return result
-    result = sequence()
-    def check(nodes):
-        for node in nodes:
-            if node.group:
-                check(node.children)
-            elif node.type in ('NUMBER', 'STRING'):
-                _json(node.text)
-    check(result)
-    return result
+    tokens, ast = _grammar_parse(text, 'tokens')
+    def convert(node):
+        if node.type == 'group':
+            return [Node(open=tokens[node.start].text, children=[item for child in node.children for item in convert(child)])]
+        if node.type == 'atom':
+            token = tokens[node.start]
+            if token.type in ('NUMBER', 'STRING'):
+                _json(token.text)
+            return [token]
+        return [item for child in node.children for item in convert(child)]
+    return convert(ast)
 
 
 def _sep(node):
@@ -238,84 +295,31 @@ def _value_of(nodes, options=None):
     return decoder(raw) if decoder is not None else value
 
 
-# Declarative counterpart of operation.grammar. An expression is either a token,
-# ordered alternative ('|'), sequence (','), or greedy repetition ('*', '+', '?').
-def _seq(*parts):
-    return (',', parts)
-def _alt(*parts):
-    return ('|', parts)
-def _repeat(part, quantifier='*'):
-    return (quantifier, part)
-
-RULES = {
-    'component': _alt('operation_field', 'path_field', 'value_field', 'operation_type', 'json_value', 'path'),
-    'operation_field': _seq('OP_LABEL', 'delimiter', 'operation_type'),
-    'path_field': _seq('PATH_LABEL', 'delimiter', 'path'),
-    'value_field': _seq('VALUE_LABEL', 'delimiter', 'json_value'),
-    'delimiter': _alt('COLON', 'DELIMITER'),
-    'separator': _alt('SLASH', 'PATH_SEPARATOR'),
-    'path_delimiter': _alt('SLASH', 'PATH_SEPARATOR', 'SEP_COMMA'),
-    'operation_type': _alt('OPERATION', 'STRING'),
-    'path': _alt('grouped_path', 'scalar_path'),
-    'scalar_path': _seq(_repeat('SLASH', '?'), 'path_part', _repeat(_seq('separator', 'path_part'))),
-    'grouped_path': _alt(_seq('LPAREN', 'path_parts', 'RPAREN'), _seq('LBRACKET', 'path_parts', 'RBRACKET'), _seq('LBRACE', 'path_parts', 'RBRACE')),
-    'path_parts': _repeat(_seq('path_part', _repeat('path_delimiter', '?'))),
-    'path_part': _alt('STRING', 'NUMBER', 'WORD', 'OPERATION', 'BOOLEAN', 'NULL'),
-    'json_value': _alt('json_object', 'json_array', 'STRING', 'NUMBER', 'BOOLEAN', 'NULL'),
-    'json_object': _seq('LBRACE', _repeat('members', '?'), 'RBRACE'),
-    'members': _seq('member', _repeat(_seq('SEP_COMMA', 'member'))),
-    'member': _seq('json_key', 'COLON', 'json_value'),
-    'json_key': _alt('STRING', 'OP_LABEL', 'PATH_LABEL', 'VALUE_LABEL'),
-    'json_array': _seq('LBRACKET', _repeat('elements', '?'), 'RBRACKET'),
-    'elements': _seq('json_value', _repeat(_seq('SEP_COMMA', 'json_value'))),
-}
-
-
 def _components(nodes, options=None):
-    tokens = _tokenize(' '.join(map(_render, nodes)), operation=True, options=options)
-    def parse(expression, index):
-        if isinstance(expression, str):
-            if expression in RULES:
-                return parse(RULES[expression], index)
-            return index + 1 if index < len(tokens) and tokens[index].type == expression else None
-        kind, inner = expression
-        if kind == '|':
-            for alternative in inner:
-                end = parse(alternative, index)
-                if end is not None:
-                    return end
-            return None
-        if kind == ',':
-            for part in inner:
-                index = parse(part, index)
-                if index is None:
-                    return None
-            return index
-        start = index
-        while True:
-            end = parse(inner, index)
-            if end is None or end == index:
-                break
-            index = end
-            if kind == '?':
-                break
-        return None if kind == '+' and index == start else index
-    result, start = [], 0
-    while start < len(tokens):
-        end = parse('component', start)
-        if end is None or end == start:
-            raise IntentError('Invalid operation component')
-        result.append(lex_parse(' '.join(token.text for token in tokens[start:end])))
-        start = end
-    if not result:
-        raise IntentError('Missing operation')
+    tokens, ast = _grammar_parse(' '.join(map(_render, nodes)), 'operation', options)
+    return _ast_components(tokens, ast)
+
+
+def _ast_components(tokens, ast):
+    result = []
+    def visit(node):
+        if node.type.endswith('_component'):
+            result.append([item for item in lex_parse(' '.join(token.text for token in tokens[node.start:node.end])) if not _sep(item)])
+        else:
+            for child in node.children:
+                visit(child)
+    visit(ast)
     return result
 
 
 def parse_record(nodes, options=None):
+    return _convert_components(_components([node for node in nodes if not _sep(node)], options), options)
+
+
+def _convert_components(components, options=None):
     operations = _operations(options)
     fields, unlabeled = {}, []
-    for items in _components([node for node in nodes if not _sep(node)], options):
+    for items in components:
         key = LABELS.get(str(_token_value(items[0])).lower()) if not items[0].group else None
         if key and len(items) > 1 and items[1].type == 'DELIMITER':
             if key in fields:
@@ -442,18 +446,6 @@ def _repair_outer_wrapper(text, options):
     return text, None
 
 
-def _has_operation(node, options=None):
-    operations = _operations(options)
-    for i, child in enumerate(node.children):
-        if child.group:
-            if _has_operation(child, options):
-                return True
-        elif ((child.type in ('WORD', 'STRING') and str(_token_value(child)).lower() in operations) or
-              (LABELS.get(str(_token_value(child)).lower()) == 'op' and i+1 < len(node.children) and node.children[i+1].type == 'DELIMITER')):
-            return True
-    return False
-
-
 def parse_sequence(nodes, options=None):
     options = options or {}
     max_attempts, max_operations = options.get('maxBoundaryAttempts', 4096), options.get('maxOperations', 256)
@@ -544,49 +536,37 @@ def parse_intent_with_diagnostics(text, options=None):
         raise IntentError('Intent text size limit exceeded')
     text, diagnostics = unwrap_fence(text)
     repaired, repair = _repair_outer_wrapper(text, options)
-    tree = lex_parse(repaired)
     if repair:
         diagnostics.append({'code': 'OUTER_GROUP_RECOVERED', 'detail': repair})
-    meaningful = [node for node in tree if not _sep(node)]
-    if len(meaningful) == 1 and meaningful[0].group and all(_sep(n) for n in meaningful[0].children):
-        return {'operations': [], 'diagnostics': diagnostics}
-    candidates = {}
-    def accept(records):
-        if len(records) > options.get('maxOperations', 256):
-            raise IntentError('Operation count limit exceeded')
-        candidates[_key(records)] = records
-    def retain_error(error):
-        if 'limit exceeded' in str(error) or 'Ambiguous' in str(error):
-            raise error
-    try:
-        accept(parse_sequence(tree, options))
-    except IntentError as error:
-        retain_error(error)
-    try:
-        records, current = [], []
-        def flush():
-            if any(not _sep(node) for node in current):
-                records.extend(parse_sequence(current, options))
-            current.clear()
-        for node in tree:
-            if node.type == 'SEMICOLON':
-                flush()
-            elif node.group and all(_sep(x) for x in current) and _has_operation(node, options):
-                flush()
-                inner = [n for n in node.children if not _sep(n)]
-                if inner and all(n.group for n in inner):
-                    records.extend(parse_record(child.children, options) for child in inner)
-                else:
-                    records.extend(parse_sequence(node.children, options))
+    tokens, ast = _grammar_parse(repaired, 'intent', options)
+    def operations(node):
+        records, pending = [], [node]
+        while pending:
+            current = pending.pop()
+            if current.type == 'operation':
+                records.append(_convert_components(_ast_components(tokens, current), options))
+                if len(records) > options.get('maxOperations', 256):
+                    raise IntentError('Operation count limit exceeded')
             else:
-                current.append(node)
-        flush()
-        accept(records)
-    except IntentError as error:
-        retain_error(error)
-    if len(candidates) != 1:
-        raise IntentError('Ambiguous complete operation interpretations' if candidates else 'No complete operation sequence')
-    return {'operations': next(iter(candidates.values())), 'diagnostics': diagnostics}
+                pending.extend(reversed(current.children))
+        return records
+    result = operations(ast)
+    # The grammar owns structure. The bounded partition search is only a proof
+    # that its ordered choice has not hidden another newline interpretation.
+    pending = [ast]
+    while pending:
+        node = pending.pop()
+        if node.type == 'op_list':
+            nodes = lex_parse(' '.join(token.text for token in tokens[node.start:node.end]))
+            try:
+                alternate = parse_sequence(nodes, options)
+                if _key(alternate) != _key(operations(node)):
+                    raise IntentError('Ambiguous complete operation interpretations')
+            except IntentError as error:
+                if 'limit exceeded' in str(error) or 'Ambiguous' in str(error):
+                    raise
+        pending.extend(reversed(node.children))
+    return {'operations': result, 'diagnostics': diagnostics}
 
 
 def parse_intent(text, options=None):
