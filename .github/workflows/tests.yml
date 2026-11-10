@@ -61,7 +61,17 @@ jobs:
       - run: python -m tests.perchance_failure_browser_smoke
         env:
           WORKBENCH_SCREENSHOT: workbench-perchance-failure.png
-      - run: python -m tests.perchance_connection_browser_smoke
+      - name: Verify independent browser CDP connection
+        run: |
+          # This normal-browser launch retains the browser sandbox. Use the
+          # runner's installed Chrome, rather than Playwright's bundled build.
+          chrome="$(command -v google-chrome || command -v google-chrome-stable || true)"
+          if [ -z "$chrome" ] || [ ! -x "$chrome" ]; then
+            echo "The CDP connection smoke requires the runner's installed Google Chrome." >&2
+            exit 1
+          fi
+          "$chrome" --version
+          REPORT_BROWSER_EXECUTABLE="$chrome" python -m tests.perchance_connection_browser_smoke
       - run: python tests/browser_smoke.py
       - run: python tests/browser_model_smoke.py
       - run: python tests/browser_targeted_smoke.py

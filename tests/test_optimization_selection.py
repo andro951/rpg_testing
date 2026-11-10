@@ -188,7 +188,7 @@ class SelectionTests(unittest.TestCase):
         with patch('optimization.handoff.urlopen',side_effect=[URLError('not running'),io.BytesIO(identity)]),patch('optimization.handoff.subprocess.Popen') as launch:
             self.assertIn('#page=optimization',open_local(self.root,selection))
             self.assertEqual(launch.call_args.args[0][-1],'--no-browser')
-            self.assertEqual(launch.call_args.kwargs['cwd'],self.root)
+            self.assertEqual(Path(launch.call_args.kwargs['cwd']).resolve(),self.root.resolve())
         with patch('optimization.handoff.urlopen',side_effect=URLError('not running')),patch('optimization.handoff.subprocess.Popen') as launch:
             launch.return_value.poll.return_value=1
             with self.assertRaisesRegex(ValueError,'could not open'):open_local(self.root,selection)

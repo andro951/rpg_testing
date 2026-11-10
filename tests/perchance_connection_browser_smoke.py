@@ -1,6 +1,7 @@
 """Normal browser -> CDP -> hosted iframe, with a simulated text service only."""
 import os
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -9,6 +10,28 @@ from pathlib import Path
 from unittest.mock import patch
 
 from workbench import perchance, perchance_connection as connection
+
+
+def launch_with_stderr(launch, executable, profile, port, url, stderr):
+    """Keep the production launch arguments; capture only this fixture's child."""
+    original_popen = connection.subprocess.Popen
+    def capture(*args, **kwargs):
+        kwargs['stderr'] = stderr
+        return original_popen(*args, **kwargs)
+    with patch.object(connection.subprocess, 'Popen', side_effect=capture):
+        return launch(executable, profile, port, url, headless=True)
+
+
+def report_browser_failure(executable, children, stderr_path):
+    print(f'Fixture browser executable: {executable}', file=sys.stderr)
+    if not children:
+        print('Fixture browser did not return a child process.', file=sys.stderr)
+    for index, process in enumerate(children, 1):
+        code = process.poll()
+        status = 'still running' if code is None else f'exit status {code}'
+        print(f'Fixture browser child {index}: {status}', file=sys.stderr)
+    captured = Path(stderr_path).read_text(encoding='utf-8', errors='replace')
+    print('Fixture browser stderr:\n' + (captured or '(empty)'), file=sys.stderr)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -38,7 +61,7 @@ def main():
         reservation.bind(('127.0.0.1', 0)); port = reservation.getsockname()[1]
     child = []; original_launch = connection.launch
     def fixture_launch(executable, profile, port, url):
-        result = original_launch(executable, profile, port, url, headless=True)
+        result = launch_with_stderr(original_launch, executable, profile, port, url, browser_stderr)
         child.append(result); return result
     executable = os.environ.get('REPORT_BROWSER_EXECUTABLE') or os.environ.get('CHROME_PATH')
     if not executable:
@@ -46,6 +69,7 @@ def main():
         with sync_playwright() as playwright:executable = playwright.chromium.executable_path
     try:
         with tempfile.TemporaryDirectory() as tmp, \
+             (Path(tmp) / 'browser-stderr.log').open('wb') as browser_stderr, \
              patch.object(perchance, 'validate_url', side_effect=lambda value: value), \
              patch.object(connection, 'launch', side_effect=fixture_launch) as launch:
             settings = {'perchance_url': url, 'perchance_browser': executable,
@@ -72,6 +96,10 @@ def main():
                 assert second['forwarded_sampling'] == {'seed': 104771}
                 launch.assert_called_once()
                 assert backend.environment['browser_connection'] == 'normal-browser-cdp-v1'
+            except Exception:
+                browser_stderr.flush()
+                report_browser_failure(executable, child, browser_stderr.name)
+                raise
             finally:
                 #Only this fixture-owned browser is shut down by the test.
                 if getattr(backend, 'browser', None):backend.browser.close()
