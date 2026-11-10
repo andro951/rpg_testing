@@ -69,6 +69,8 @@ def summarize(record):
         reason = ('Matches the expected final state; array order and reference-patch equality do not affect pass/fail.'
                   if record.get('score', {}).get('array_order') == 'irrelevant' else
                   'Matches the required answer or final state and operation contract.')
+    elif record.get('score', {}).get('status') == 'configuration_error':
+        reason = 'Evaluator configuration error: model output is unscored until the validator configuration is corrected.'
     elif record.get('score', {}).get('status') == 'parser_gap':
         reason = 'Parser gap: free-format prose could not be normalized; semantic correctness is unassessed, not a model failure.'
     elif verdict == 'FAIL':

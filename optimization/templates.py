@@ -188,7 +188,10 @@ def projection(case, candidate, remote=False):
     controls = {} if remote else {'sampling': variant.get('sampling', {}), 'cache': variant.get('cache', 'default')}
     workflow = [{k: v for k, v in s.items() if k != 'prompt' and not (remote and k == 'sampling')}
                 for s in steps(variant['steps'])]
-    return digest({'bindings': bindings(case), 'earlier': [messages(test, s, {k: '<actual prior output>' for k in s.get('uses', [])}, variant) for s in earlier],
+    evaluator = variant.get('result', {}).get('evaluator', {})
+    identity_contract = ({'array_identities': copy.deepcopy(test['source'].get('array_identities'))}
+                         if isinstance(evaluator, dict) and evaluator.get('version') == 'array-identities-intent-v1' else {})
+    return digest({**identity_contract, 'bindings': bindings(case), 'earlier': [messages(test, s, {k: '<actual prior output>' for k in s.get('uses', [])}, variant) for s in earlier],
                    'workflow': workflow,
                    'controls': controls, 'contract': variant['result'], 'oracle': test.get('expected_state'),
                    'candidate': candidate,

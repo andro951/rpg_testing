@@ -26,7 +26,7 @@ New builds are staged and published only after success. Install checks the exact
 
 Final-state equality ignores database-array order. Output operation order remains significant. Expected-patch mismatch is separate and cannot turn a correct final state into failure. Unrecognized free-format prose is a parser gap with unknown semantic correctness, not an asserted model failure.
 
-Schema-free identity inference requires one unambiguous shared unique scalar `id` or `*_id` field for object arrays. Custom ID names and ambiguous ID fields are rejected rather than guessed. No expected state, reference patch, prompt or per-case schema is passed to normalization.
+Current builds now select `array-identities-intent-v1` with validator-only `array_identities.json` per case. Custom ID names and multiple ID-looking fields are supported by explicit ID metadata. No full shape schema or reference answer is passed to normalization. Metadata never enters prompt construction. ID-dependent presentations retain their data-only display convention and may require normal JSON for custom or ambiguous ID names. The original `schema-free-intent-v1` audit above is historical evidence, not a claim about the new evaluator.
 
 The evaluator source pin is portable across Python patch versions and normalizes checkout line endings. Actual Python version remains runtime provenance. Old evaluator definitions keep their own historical rules.
 

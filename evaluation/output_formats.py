@@ -101,7 +101,10 @@ def _line_records(raw, mode):
     return records
 
 
-def _typed(raw, initial):
+def _typed(raw, initial, identity_context=None):
+    if identity_context is not None:
+        from .typed_lines import decode as decode_typed
+        return decode_typed(raw, initial, identity_context)
     from workbench.ember_text import parse as parse_typed
     from .schema_free_intent import _operation, _reference
     # Preserve the original typed-line subset and grouping/application order.
@@ -127,7 +130,7 @@ def _typed(raw, initial):
     return operations
 
 
-def decode(raw, output_format, initial_state):
+def decode(raw, output_format, initial_state, *, identity_context=None):
     if output_format in ('json_dot', 'json_slash'):
         return _intent(raw, slash=output_format == 'json_slash')
     if output_format == 'free_format':
@@ -142,7 +145,7 @@ def decode(raw, output_format, initial_state):
             raise ParserGap('Free-format response could not be normalized; prose semantic correctness is unknown: ' + str(exc)) from exc
         return result
     if output_format == 'typed_lines':
-        operations = _typed(raw, initial_state)
+        operations = _typed(raw, initial_state, identity_context)
     elif output_format == 'two_line_text':
         from workbench.field_values import decode as decode_fields
         operations = [{**operation, 'op': {'replace': 'update', 'add': 'append', 'remove': 'remove'}[operation['op']],

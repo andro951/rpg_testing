@@ -139,13 +139,23 @@ def patch_checks(report, test, variant, raw, validator=None):
     # Explicit new identity only. Historical strict/schema-backed diagnostics
     # keep their existing operation/order semantics.
     from .schema_free_intent import VERSION as SCHEMA_FREE
+    from .array_identities_intent import VERSION as ARRAY_IDENTITIES
     evaluator = variant.get('result', {}).get('evaluator')
-    if isinstance(evaluator, dict) and evaluator.get('version') == SCHEMA_FREE:
+    if isinstance(evaluator, dict) and evaluator.get('version') in (SCHEMA_FREE, ARRAY_IDENTITIES):
         from workbench.workflows import evaluate
         score = evaluate(test, variant, {variant['result']['step']: raw})
+        if score.get('status') == 'configuration_error':
+            report.add('intent.configuration', NOT_EVALUATED,
+                       'Evaluator configuration error: ' + score.get('error', 'Invalid validator configuration.'),
+                       scope='evidence', configuration_error=True)
+            report.add('state.final', NOT_EVALUATED, 'Configuration must be corrected before model output can be scored.',
+                       scope='final_state', configuration_error=True)
+            return
         parser_gap = score.get('status') == 'parser_gap'
         report.add('intent.normalization', NOT_EVALUATED if parser_gap else PASS if score.get('valid') else FAIL,
-                   'Response normalized using initial data only; no case schema or oracle enters normalization.'
+                   ('Response normalized using initial data and explicit array identity metadata only; no full shape schema or oracle enters normalization.'
+                    if evaluator.get('version') == ARRAY_IDENTITIES else
+                    'Response normalized using initial data only; no case schema or oracle enters normalization.')
                    if score.get('valid') else score.get('error', 'No executable patch was established.'),
                    scope='response', parser_gap=parser_gap, actual=score.get('evaluation', {}).get('normalized_patch'))
         report.add('state.final', (PASS if score.get('exact_match') else FAIL) if score.get('valid') else NOT_EVALUATED,
@@ -444,7 +454,7 @@ def assess(test, variant, values, *, execution='completed', original_score=None,
                        step=check['step'], affects_verdict=False, expected=check['value'], actual=actual)
     fixed_oracle = bool(variant.get('expected_answers')) if result.get('representation', 'answers') == 'answers' else 'expected_state' in test
     failed = [c for c in report.checks if c['status'] == FAIL and c.get('affects_verdict', True)]
-    parser_gap = any(check.get('parser_gap') for check in report.checks)
+    parser_gap = any(check.get('parser_gap') or check.get('configuration_error') for check in report.checks)
     outcome = 'INCONCLUSIVE' if execution != 'completed' else ('UNSCORED' if not fixed_oracle or parser_gap else ('FAIL' if failed else 'PASS'))
     assessment = {'evaluator_version': VERSION, 'test_id': test['id'], 'variant_id': variant['id'],
             'definition_hash': digest({'test': test, 'variant': variant}), 'execution_outcome': execution,
@@ -597,7 +607,7 @@ def assess_record(record, *, validator=None):
         elif step['id'] == variant.get('result', {}).get('step') or step.get('assign') == variant.get('result', {}).get('step'):
             if 'expected_state' in test:
                 patch_checks(r, test, variant, call.get('text'), validator=adapter)
-                detail['semantic_outcome'] = ('UNSCORED' if any(c.get('parser_gap') for c in r.checks) else
+                detail['semantic_outcome'] = ('UNSCORED' if any(c.get('parser_gap') or c.get('configuration_error') for c in r.checks) else
                     'FAIL' if any(c['status'] == FAIL and c.get('affects_verdict', True) for c in r.checks) else 'PASS')
         elif step['id'] in variant.get('expected_answers', {}):
             answer_checks(r, {**variant, 'expected_answers': {step['id']: variant['expected_answers'][step['id']]}}, {step['id']: call.get('text')})

@@ -1,8 +1,8 @@
 ## Current template-builder contract (2026-11-10, supersedes older builder/schema instructions)
 
 - Editable sources: prompt_builder/templates/{common,input_format,output_format,test_cases}. Old test_builder was removed at the user’s request; do not restore it.
-- Current root suite is 13 cases / 38 input variants / 114 observations at three reps, schema-free-intent-v1. Historical five-operation root suite is archives/pre-template-builder, not current coverage.
-- Do not require or insert per-case schemas. General array ID/uniqueness/unordered restrictions apply. No expected values or patches enter prompt assembly/normalization.
+- Current root suite is 13 cases / 38 input variants / 114 observations at three reps, array-identities-intent-v1. Historical five-operation root suite is archives/pre-template-builder, not current coverage.
+- Per-case array_identities.json is an ID-only pseudo-schema for validation, frozen in source.array_identities. Never put it in prompt construction, template/OPRO bindings or model-facing text. No full shape schemas. General uniqueness/unordered restrictions apply. No expected values or patches enter prompt assembly/normalization. Raw JSON supports custom/ambiguous ID names; ID-dependent views use only their data-only display convention and reject unsupported views.
 - Expected patches are diagnostic only; pass/fail is final-state equality with unordered database arrays. Operation arrays remain ordered. Preserve frozen historic grading.
 - Edit text in files once, rebuild with python -m prompt_builder --output build/prompt-suite; --install activates after archiving old definitions. No automatic inference.
 - Legacy byte-parity evidence is archives/prompt-builder-parity; final schema-free prompts intentionally differ.

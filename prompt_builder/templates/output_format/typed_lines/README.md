@@ -1,6 +1,7 @@
 # Typed lines
 
-This folder owns its requested output wording. `format.json` chooses the implemented reader. Shared instructions come from common unless a local user.txt layout explicitly overrides assembly.
+This folder owns its requested output wording. `format.json` chooses the reader.
 
-The corresponding reader is evaluation/output_formats.py. All patches normalize to ID-based dot operations for schema-free evaluation.
-This retained source protocol supports scalar object-field updates, primitive array append, and no-change. ID-selected descent, complete object append and element removal are explicitly unsupported and reported by the builder.
+The array-identities-intent-v1 host uses `evaluation/typed_lines.py`: records execute in written order, slash paths support JSON-scalar ID/value selectors, and object/list labels accept complete single-line JSON payloads. Append accepts complete object elements, including into empty arrays. Remove deletes an array element; targeting an existing scalar object field instead retains legacy nullification. Set plus null is explicit null assignment. Set selects existing object fields and accepts complete object values; replacing a whole collection or collection element remains forbidden. Numeric change and legacy remove-field nullification are scalar-only. List syntax does not permit nested-array elements or override collection restrictions. Missing paths, extra value lines, wrong typed values, duplicate identities and ambiguous identities are rejected.
+
+The original `workbench/ember_text.py` and schema-free-intent-v1 reader retain their published grammar, scalar/primitive subset and grouped execution. Saved fixtures and results are not migrated.

@@ -283,8 +283,8 @@ def validate_test(test: dict) -> None:
         if result.get('representation', 'json_patch') not in ('json_patch', 'value_patch', 'dot_patch_v1', 'ember_text_v1', 'field_value_v2', 'semantic', 'state', 'answers'):
             raise ValueError('Unknown result representation')
         from evaluation.hosts import selected
-        from evaluation import schema_free_intent
-        schema_free='evaluator' in result and selected(result) is schema_free_intent
+        from evaluation import schema_free_intent, array_identities_intent
+        schema_free='evaluator' in result and selected(result) in (schema_free_intent, array_identities_intent)
         if result.get('representation') in ('value_patch','dot_patch_v1','ember_text_v1','field_value_v2') and not test.get('state_schema') and not schema_free:
             raise ValueError('Value-based paths require a predefined state_schema')
         if 'evaluator' in result:

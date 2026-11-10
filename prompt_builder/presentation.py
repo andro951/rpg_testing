@@ -1,6 +1,39 @@
 """Lossless schema-free input views. Every identifier comes from starting data."""
 import json
-from evaluation.schema_free_intent import identity, id_field, validate_data, scalar_text, encode_part
+from intent_parser.patch import IntentError, assert_json
+from workbench.dot_paths import scalar_text, encode_part
+from workbench.scoring import equal
+
+
+def id_field(array):
+    """Data-only display convention, never validator metadata or a schema."""
+    if not array or all(not isinstance(v, (dict, list)) for v in array):
+        return None
+    if not all(isinstance(v, dict) for v in array):
+        raise IntentError('ID-dependent presentation requires homogeneous arrays')
+    common = set.intersection(*(set(v) for v in array))
+    candidates = [k for k in sorted(common) if (k == 'id' or k.endswith('_id'))
+                  and all(not isinstance(v[k], (dict, list)) for v in array)
+                  and not any(equal(a[k], b[k]) for i, a in enumerate(array) for b in array[i + 1:])]
+    if len(candidates) != 1:
+        raise IntentError('ID-dependent presentation requires one unambiguous unique id or *_id field in starting data; use normal_json')
+    return candidates[0]
+
+
+def identity(element, array):
+    field = id_field(array)
+    return element[field] if field is not None else element
+
+
+def validate_display(value):
+    """Check only lossless display requirements, independently of validation."""
+    if isinstance(value, dict):
+        for child in value.values():validate_display(child)
+    elif isinstance(value, list):
+        ids = [identity(child, value) for child in value]
+        if len({scalar_text(item) for item in ids}) != len(ids):
+            raise IntentError('Array IDs collide in the presentation')
+        for child in value:validate_display(child)
 
 SERIALIZERS = ('normal_json','id_keyed_arrays','full_paths','named_tables')
 
@@ -63,8 +96,9 @@ def named_tables(value):
     return '\n'.join(lines).rstrip('\n')
 
 def render(value,serializer):
-    validate_data(value)
+    assert_json(value)
     if serializer=='normal_json':return json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False)
+    validate_display(value)
     if serializer=='id_keyed_arrays':return json.dumps(keyed(value),ensure_ascii=False,indent=2,allow_nan=False)
     if serializer=='full_paths':return '\n'.join(full_paths(value))
     if serializer=='named_tables':return named_tables(value)

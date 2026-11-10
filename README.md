@@ -21,7 +21,7 @@ The new build first passed exact legacy prompt parity, then deliberately removed
 | Read the actual intent grammar | [intent.grammar](intent-parser-js/intent.grammar), then [GRAMMAR-DESIGN.md](intent-parser-js/GRAMMAR-DESIGN.md) |
 | Use the parser/converter/updater in another program | [JavaScript](intent-parser-js/README.md), [C#](intent-parser-csharp/README.md), [Python](intent_parser/README.md) |
 | Run the current tests with the intent evaluator | [schema-free-evaluation.md](docs/schema-free-evaluation.md), [workbench/workflows.py](workbench/workflows.py) |
-| Follow one model call through scoring | [controller.py](workbench/controller.py) → [scheduler.py](workbench/scheduler.py) → [workflows.py](workbench/workflows.py) → [schema_free_intent.py](evaluation/schema_free_intent.py) / [scoring.py](workbench/scoring.py) |
+| Follow one model call through scoring | [controller.py](workbench/controller.py) → [scheduler.py](workbench/scheduler.py) → [workflows.py](workbench/workflows.py) → [array_identities_intent.py](evaluation/array_identities_intent.py) / [scoring.py](workbench/scoring.py) |
 | Inspect completed experiments and exact prompts | [experiments/required-scope-v2/](experiments/required-scope-v2/), especially `cohorts/` and `runs/` |
 | Inspect raw model outputs or make reports | [results/](results/), [reporting/README.md](reporting/README.md), [evaluation/README.md](evaluation/README.md) |
 | Work on the UI or native model runtime | [workbench/web/](workbench/web/), [server.py](workbench/server.py), [native.py](workbench/native.py) |
@@ -35,7 +35,7 @@ The new build first passed exact legacy prompt parity, then deliberately removed
 - **[common/](prompt_builder/templates/common/):** shared rules, allowed changes, layout and selection. Layout comments identify the source of every placeholder and are not sent to models.
 - **[input_format/](prompt_builder/templates/input_format/):** normal JSON, ID-keyed arrays, full paths and named tables. Each folder owns its explanatory text and selects its serializer.
 - **[output_format/](prompt_builder/templates/output_format/):** all eight available format choices, including `typed_lines` (renamed), each with its own complete instructions and reader selection. The typed-line subset reports unsupported combinations explicitly.
-- **[test_cases/](prompt_builder/templates/test_cases/):** one human-named folder per case containing starting_data.json, requested_change.txt, expected_result.json and expected_patch.json. No schema.json and no separate task-pattern source. Requested changes are read directly; reference answers are never sent to the model.
+- **[test_cases/](prompt_builder/templates/test_cases/):** one human-named folder per case containing starting_data.json, requested_change.txt, expected_result.json, expected_patch.json and validator-only array_identities.json. No schema.json and no separate task-pattern source. Requested changes are read directly; reference answers are never sent to the model.
 - **[builder.py](prompt_builder/builder.py):** file loading, compilation and installation. **[presentation.py](prompt_builder/presentation.py)** renders data, and **[template_text.py](prompt_builder/template_text.py)** fills layouts.
 
 Edit wording in one source file, then compile without running models:
@@ -48,7 +48,7 @@ python -m prompt_builder --output build/prompt-suite --install
 
 The last command activates the generated suite in root test_specs, preserving replaced definitions under archives/template-builds. A failed build leaves the previous complete build intact; prior successful builds are retained beside the output in a .history folder. Selection is explicit in common/selection.json or CLI arguments. Copying a case/format folder using an existing serializer/reader requires no Python edit; a completely new syntax needs a reader.
 
-Pass/fail uses the final database with unordered arrays. A separate **expected-patch difference** flag shows alternative normalized patches without turning them into failures. Operation sequence remains ordered. Schema-free identity inference currently requires one unambiguous shared `id` or `*_id` field on object elements; other conventions fail clearly rather than guessing. Normalization receives no expected answer.
+Pass/fail uses the final database with unordered arrays. A separate **expected-patch difference** flag shows alternative normalized patches without turning them into failures. Operation sequence remains ordered. Validator-only `array_identities.json` names each array’s exact ID field, including custom names and empty arrays. It is not used in prompt construction. Normal JSON supports arbitrary names; ID-dependent displays require one unambiguous data-only `id` or `*_id` convention and otherwise recommend normal JSON. Normalization receives no expected answer.
 
 ### Read the complete prompt actually sent
 
@@ -81,7 +81,7 @@ The generic API keeps parsing, conversion and updating separate. Custom patches 
 
 ### Current live research integration
 
-- **[evaluation/schema_free_intent.py](evaluation/schema_free_intent.py):** the new `schema-free-intent-v1` host, with identity-based resolution, final-state grading and separate expected-patch diagnostics.
+- **[evaluation/array_identities_intent.py](evaluation/array_identities_intent.py):** the current `array-identities-intent-v1` host with validator-only ID mappings, with identity-based resolution, final-state grading and separate expected-patch diagnostics.
 - **[evaluation/output_formats.py](evaluation/output_formats.py):** readers for all eight output choices. Free-format prose that cannot be recovered is a parser gap with unknown semantic correctness, not automatically a model failure.
 - **[evaluation/hosts.py](evaluation/hosts.py):** explicit host dispatch. [workbench/workflows.py](workbench/workflows.py) uses the evaluator captured in each definition; [evaluation/core.py](evaluation/core.py) supplies matching detailed diagnostics.
 - **[evaluation/live_intent.py](evaluation/live_intent.py):** retained `dot-intent-v1` for frozen schema-based experiments. [workbench/live.py](workbench/live.py) remains the preparation path for those historical controls; do not use it to relabel new schema-free definitions.

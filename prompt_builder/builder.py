@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from evaluation import schema_free_intent as evaluator
+from evaluation import array_identities_intent as evaluator
 from workbench.domain import digest, read_json, safe_id, validate_test, write_json
 from .presentation import render, has_array, SERIALIZERS
 from .template_text import assemble, read_text
@@ -27,14 +27,15 @@ def discover(root=ROOT):
 def load_case(name,root=ROOT):
     path=folder(root,'test_cases',name)
     state=read_json(path/'starting_data.json');expected=read_json(path/'expected_result.json');patch=read_json(path/'expected_patch.json')
-    evaluator.validate_data(state);evaluator.validate_data(expected)
-    actual=evaluator.apply_patch(state,patch)
+    identities=read_json(path/'array_identities.json')
+    evaluator.validate_data(state,identities);evaluator.validate_data(expected,identities)
+    actual=evaluator.apply_patch(state,patch,identities)
     # A reference is checked separately. It NEVER enters model-input assembly.
     from workbench.scoring import equal
     if not equal(evaluator.unordered(actual['final_state']),evaluator.unordered(expected)):
         raise ValueError(f'{name}: expected_patch does not produce expected_result')
     return {'id':name,'starting_data':state,'requested_change':read_text(path/'requested_change.txt'),
-            'expected_result':expected,'expected_patch':patch}
+            'expected_result':expected,'expected_patch':patch,'array_identities':identities}
 
 def configuration(root,category,name):
     data=read_json(folder(root,category,name)/'format.json')
@@ -48,23 +49,39 @@ def prompt(case,input_format,output_format,root=ROOT,*,with_parts=False):
     return assemble(root,input_format=input_format,output_format=output_format,
         current_data=render(case['starting_data'],input_config['serializer']),task=case['requested_change'],with_parts=with_parts)
 
+def validate_presentation_identity(case,formats,root=ROOT):
+    """Reject inconsistent display selectors, without supplying IDs to rendering.
+
+    This is a compile-time validation gate only. Both prompt() and the display
+    functions remain independent of validator metadata and never select a field
+    from it. Empty arrays display no element selectors and need no comparison.
+    """
+    if all(configuration(root,'input_format',mode)['serializer']=='normal_json' for mode in formats):
+        return
+    from evaluation.array_identity_map import IdentityMap
+    from .presentation import id_field
+    declarations=IdentityMap(case['array_identities'])
+    def walk(value,path):
+        if isinstance(value,dict):
+            for key,child in value.items():walk(child,path+(key,))
+        elif isinstance(value,list):
+            if value and id_field(value)!=declarations.field(value,path):
+                raise ValueError('ID-dependent presentation disagrees with validator identity at '+repr(path)+'; use normal_json')
+            for child in value:walk(child,path+(None,))
+    walk(case['starting_data'],())
+
+
 def applicable(case,output_format,root=ROOT):
     config=configuration(root,'output_format',output_format)
     if config['decoder']!='typed_lines':return None
-    from workbench.ember_text import typed
-    for op in case['expected_patch']:
-        if op['op']not in ('replace','add'):return 'The retained typed-line protocol has no collection-element removal.'
-        node=case['starting_data']
-        from workbench.dot_paths import tokens
-        for part in tokens(op['path']):
-            if not isinstance(node,dict):return 'The retained typed-line protocol has no ID-selected array descent.'
-            if not part or part in ('__proto__','prototype','constructor'):return 'Unsupported typed-line object field.'
-            node=node[part]
-        if op['op']=='replace'and isinstance(node,(dict,list)):return 'Typed-line replacement is restricted to scalar fields.'
-        if op['op']=='add'and isinstance(op['value'],(dict,list)):return 'Typed-line append is restricted to primitive values.'
-        try:typed(op['value'])
-        except ValueError as exc:return str(exc)
+    from .reference_output import encode
+    from evaluation.array_identities_intent import normalize_response
+    try:
+        raw=encode(case['starting_data'],case['expected_patch'],output_format,case['array_identities'])
+        normalize_response(raw,case['starting_data'],output_format,case['array_identities'])
+    except ValueError as exc:return str(exc)
     return None
+
 
 def apply_saved_promotion(test, repository=None):
     """Preserve accepted guidance only for the exact compiled template inputs."""
@@ -83,6 +100,7 @@ def compile_test(case,output_format,*,input_formats=None,root=ROOT,repetitions=3
     skip_keyed=selection.get('skip_id_keyed_when_no_arrays',True)
     if type(skip_keyed)is not bool:raise ValueError('skip_id_keyed_when_no_arrays must be boolean')
     config=configuration(root,'output_format',output_format)
+    validate_presentation_identity(case,formats,root)
     assembled={mode:prompt(case,mode,output_format,root,with_parts=True)for mode in formats
               if not(skip_keyed and configuration(root,'input_format',mode)['serializer']=='id_keyed_arrays'and not has_array(case['starting_data']))}
     requests={mode:result[0]for mode,result in assembled.items()}
@@ -92,7 +110,7 @@ def compile_test(case,output_format,*,input_formats=None,root=ROOT,repetitions=3
     test={'schema_version':2,'id':case['id']+'__'+output_format,'name':case['id'].replace('_',' ').capitalize(),
           'description':'Schema-free database updates; final-state grading with an expected-patch difference diagnostic.',
           'workflow':'steps','enabled':True,'instructions':system,'repetitions':repetitions,'timeout_seconds':120,
-          'source':{'initial_state':copy.deepcopy(case['starting_data'])},'expected_state':copy.deepcopy(case['expected_result']),
+          'source':{'initial_state':copy.deepcopy(case['starting_data']),'array_identities':copy.deepcopy(case['array_identities'])},'expected_state':copy.deepcopy(case['expected_result']),
           'prompt_builder':{'version':VERSION,'fixture':case['id'],'method':output_format,'prompt_digest':digest(requests),
                             'review_status':'user_authorized_implementation','schema_hints':False},'variants':[]}
     for mode,msgs in requests.items():
@@ -127,7 +145,7 @@ def _build(output,*,root=ROOT,input_formats=None,output_formats=None,cases=None,
                 manifest['unsupported'].append({'test_case':name,'output_format':form,'reason':reason});continue
             test=compile_test(case,form,input_formats=modes,root=root,repetitions=repetitions,promotion_root=promotion_root)
             write_json(output/'test_specs'/(test['id']+'.json'),test)
-            write_json(output/'references'/(test['id']+'.json'),{'synthetic_reference_only':True,'expected_patch':case['expected_patch'],'expected_state':case['expected_result']})
+            write_json(output/'references'/(test['id']+'.json'),{'synthetic_reference_only':True,'array_identities':case['array_identities'],'expected_patch':case['expected_patch'],'expected_state':case['expected_result']})
             for variant in test['variants']:
                 from workbench.workflows import messages
                 request=messages(test,variant['steps'][0],{},variant)
@@ -218,6 +236,17 @@ def install(output,repository=None):
             dest=archive/name
             if dest.exists()and dest.read_bytes()!=p.read_bytes():raise ValueError('Archive conflict')
             shutil.copy2(p,dest)
+        # Preview messages and their manifest are frozen research artifacts too.
+        # Preserve exact bytes before replacing the current generated view.
+        previews=repository/'prompts/current-suite'
+        if previews.exists():
+            saved=archive.parent/'prompts/current-suite'
+            for source in sorted(previews.rglob('*')):
+                if not source.is_file():continue
+                dest=saved/source.relative_to(previews)
+                if dest.exists()and dest.read_bytes()!=source.read_bytes():raise ValueError('Archived preview conflict')
+                dest.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copy2(source,dest)
     for name,t in generated.items():write_json(current/name,t)
     for name,p in managed.items():
         if name not in generated:p.unlink()
@@ -257,7 +286,7 @@ def install(output,repository=None):
                 'input_presentation':v['id'],'reviewed_definition':digest(experiment_spec(test,v))}
             from .reference_output import encode
             from workbench.workflows import evaluate
-            raw=encode(test['source']['initial_state'],v['expected_patch'],v['result']['output_format'])
+            raw=encode(test['source']['initial_state'],v['expected_patch'],v['result']['output_format'],test['source']['array_identities'])
             if evaluate(test,v,{'patch':raw}).get('exact_match')is not True:raise ValueError('Synthetic reference does not pass its selected reader: '+test['id'])
             rows.append({'test_id':test['id'],'variant_id':v['id'],'source_path':path.relative_to(repository).as_posix(),
                 'label':'synthetic known pass, not model inference','outputs':{'patch':raw},'expected_outcome':'PASS'})

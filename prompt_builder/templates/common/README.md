@@ -11,6 +11,7 @@ These are the actual editable sources used by `python -m prompt_builder`. No sch
 
 ## A test case
 
+- `array_identities.json`: validator-only ID pseudo-schema. Each entry names an array path and its exact ID field (or `null` for primitive values). It is never inserted into prompts or prompt bindings.
 - `starting_data.json`: the exact initial database.
 - `requested_change.txt`: the exact task sentence sent to the model. It is read directly, not regenerated from hidden task patterns.
 - `expected_result.json`: the correct final database, used only in grading.
@@ -39,8 +40,18 @@ The default creates 13 test definitions, 38 unique prompts, and 114 observations
 
 ## Important boundaries
 
-Database arrays are unordered collections of objects with unique IDs or unique primitive values. Output operation lists remain ordered because patches execute sequentially. Object-array IDs are inferred from exactly one shared unique scalar `id` or `*_id` field. Other names or multiple eligible fields are rejected instead of guessed. Empty arrays obtain identity information only from newly supplied values, not from expected answers. This is an explicit current implementation limit, not a hidden case schema.
+Database arrays are unordered collections of objects with unique IDs or unique primitive values. Output operation lists remain ordered because patches execute sequentially. Validator identity comes only from `array_identities.json`, for example:
+
+```json
+[{"path": ["items"], "id_field": "sku"}, {"path": ["items", null, "tags"], "id_field": null}]
+```
+
+String path components are literal field names; `null` means every element of the preceding array. An empty path denotes a root array. Every array, including empty arrays and arrays introduced by an append, must be declared. This is only an ID mapping, not a field/type/shape schema. No expected answers or identity metadata enter prompt assembly, OPRO bindings, or model-facing text.
+
+Normal JSON supports arbitrary ID field names and multiple ID-looking fields. ID-dependent views still use a separate data-only display convention: exactly one unique scalar `id` or `*_id` field must be evident in the starting data. They explicitly reject unsupported or ambiguous displays; they never consult validator metadata to choose the displayed ID. Choose `normal_json` for such records. Changing only the mapping cannot change any rendered prompt.
 
 The ID-keyed and full-path views now carry container markers derived from the starting data, so deleting schema hints does not erase the distinction between objects and arrays. Normal JSON is ordinary JSON. These deliberate input changes are not claimed to reproduce historical prompts.
 
 See `PARITY.md` for the before-change check and `VALIDATION_NOTES.md` for grading. Legacy evidence remains under `archives/` and `experiments/`; the superseded builder code is removed.
+
+Compilation separately rejects an ID-dependent view if its data-only display field disagrees with the validator declaration, including in nested arrays. This validation gate never passes metadata to rendering or changes prompt text. Empty arrays display no selectors; normal JSON remains available for every declared ID convention.

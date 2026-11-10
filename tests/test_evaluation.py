@@ -27,32 +27,39 @@ def failed_codes(assessment):
 
 
 def schema_free(variant):
-    return variant.get('result', {}).get('evaluator', {}).get('version') == 'schema-free-intent-v1'
+    return variant.get('result', {}).get('evaluator', {}).get('version') in ('schema-free-intent-v1', 'array-identities-intent-v1')
 
 
-def unrequested_schema_free_change(state):
+def unrequested_schema_free_change(state, array_identities=None):
     """Construct a valid extra edit for a final-state mismatch, not a parser error."""
-    from evaluation.schema_free_intent import from_pointer
+    if array_identities is None:
+        from evaluation.schema_free_intent import from_pointer
+    else:
+        from evaluation.array_identities_intent import from_pointer as explicit_pointer
+        from evaluation.array_identity_map import IdentityMap
+        context = IdentityMap(array_identities)
+        def from_pointer(value, parts):
+            return explicit_pointer(value, parts, context)
     empty_arrays = []
-    def walk(value, parts):
+    def walk(value, parts, template=()):
         if isinstance(value, dict):
             for field, child in value.items():
                 child_parts = parts + [field]
                 if not isinstance(child, (dict, list)):
                     return {'op': 'replace', 'path': from_pointer(state, child_parts),
                             'value': '__unrequested_extra_change__'}
-                result = walk(child, child_parts)
+                result = walk(child, child_parts, template + (field,))
                 if result is not None:
                     return result
         elif isinstance(value, list):
             if not value:
-                empty_arrays.append(parts)
+                empty_arrays.append((parts, template))
             for index, child in enumerate(value):
                 if not isinstance(child, (dict, list)):
                     # Primitive membership changes remain valid operations.
                     return {'op': 'add', 'path': from_pointer(state, parts),
                             'value': '__unrequested_extra_element__'}
-                result = walk(child, parts + [str(index)])
+                result = walk(child, parts + [str(index)], template + (None,))
                 if result is not None:
                     return result
         return None
@@ -60,12 +67,26 @@ def unrequested_schema_free_change(state):
     if result is not None:
         return result
     if empty_arrays:
-        return {'op': 'add', 'path': from_pointer(state, empty_arrays[0]),
-                'value': '__unrequested_extra_element__'}
+        parts, template = empty_arrays[0]
+        value = '__unrequested_extra_element__'
+        if array_identities is not None and context.fields[template] is not None:
+            value = {context.fields[template]: value}
+        return {'op': 'add', 'path': from_pointer(state, parts), 'value': value}
     raise AssertionError('The fixture needs an explicit unrequested-change probe')
 
 
 class CoverageTests(unittest.TestCase):
+    def test_explicit_identity_extra_change_probes_are_valid(self):
+        from evaluation.array_identities_intent import apply_patch
+        for state, declarations in (
+                ({'items': [{'arbitrary.key': 'a', 'id': 'other', 'value': 1}]},
+                 [{'path': ['items'], 'id_field': 'arbitrary.key'}]),
+                ({'items': []}, [{'path': ['items'], 'id_field': ''}]),
+                ({'items': []}, [{'path': ['items'], 'id_field': None}])):
+            with self.subTest(state=state, declarations=declarations):
+                probe = unrequested_schema_free_change(state, declarations)
+                self.assertNotEqual(apply_patch(state, [probe], declarations)['final_state'], state)
+
     def test_every_current_definition_and_variant_registered(self):
         entries = catalog()['definitions']
         paths = {e['path'] for e in entries}
@@ -159,7 +180,7 @@ class CoverageTests(unittest.TestCase):
                             self.assertFalse(evaluate(test, variant, values)['valid'])
                             self.assertEqual(next(c['status'] for c in result['checks']
                                                   if c['code'] == 'state.final'), 'not_evaluated')
-                    extra = unrequested_schema_free_change(test['expected_state'])
+                    extra = unrequested_schema_free_change(test['expected_state'], test['source'].get('array_identities'))
                     values[key] = json.dumps(patch + [extra])
                     result = assess(test, variant, values)
                     score = evaluate(test, variant, values)

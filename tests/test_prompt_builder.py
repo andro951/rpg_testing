@@ -43,7 +43,7 @@ class PromptBuilderTests(unittest.TestCase):
                         self.assertTrue(result['exact_match'],result)
                         self.assertTrue(result['expected_patch_match'],result)
                         count+=1
-        self.assertEqual((count,unsupported),(372,9))
+        self.assertEqual((count,unsupported),(408,0))
     def test_edit_file_and_new_case_and_format_without_code(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)/'templates';shutil.copytree(ROOT,root)
@@ -90,6 +90,58 @@ class PromptBuilderTests(unittest.TestCase):
         case['expected_patch']=[{'value':'ANSWER_SENTINEL'}];case['expected_result']={'ANSWER_SENTINEL':True}
         self.assertEqual(before,prompt(case,'normal_json','json_dot'))
         self.assertNotIn('ANSWER_SENTINEL',json.dumps(before))
+    def test_validator_identities_never_enter_prompts_or_bindings(self):
+        case=load_case('update_record_field')
+        before={mode:prompt(case,mode,'json_dot',with_parts=True) for mode in discover()['input_format']}
+        case['array_identities']=[{'path':['SECRET_VALIDATOR_PATH'],'id_field':'SECRET_VALIDATOR_FIELD'}]
+        for mode,expected in before.items():
+            self.assertEqual(expected,prompt(case,mode,'json_dot',with_parts=True))
+        case['array_identities']=[{'path':['items'],'id_field':'count'}]
+        test=compile_test(case,'json_dot',input_formats=['normal_json'])
+        self.assertEqual(test['source']['array_identities'],case['array_identities'])
+        self.assertNotIn('SECRET_VALIDATOR',json.dumps([v['prompt_bindings'] for v in test['variants']]))
+
+    def test_raw_json_custom_and_ambiguous_ids_with_validator_metadata(self):
+        for records,field in [([{'sku':'a','count':1}],'sku'),
+                              ([{'id':'a','other_id':'b','count':1}],'other_id')]:
+            case={'id':'custom_identity','starting_data':{'records':records},
+                  'requested_change':'Make no changes.','expected_result':{'records':records},
+                  'expected_patch':[],'array_identities':[{'path':['records'],'id_field':field}]}
+            test=compile_test(case,'json_dot',input_formats=['normal_json'])
+            result=evaluate(test,test['variants'][0],{'patch':'[]'})
+            self.assertTrue(result['exact_match'],result)
+            self.assertEqual(json.loads(test['variants'][0]['prompt_bindings']['current_state']),case['starting_data'])
+            for mode in ('id_keyed_arrays','full_paths','named_tables'):
+                with self.assertRaisesRegex(ValueError,'ID-dependent presentation'):
+                    prompt(case,mode,'json_dot')
+
+    def test_compile_rejects_mismatched_display_selector_without_changing_prompt(self):
+        case=load_case('update_record_field')
+        before={mode:prompt(case,mode,'json_dot',with_parts=True) for mode in discover()['input_format']}
+        case['array_identities']=[{'path':['items'],'id_field':'count'}]
+        # Direct assembly is map-blind. Compilation validates its consistency
+        # separately rather than using the map to alter the displayed selector.
+        for mode,expected in before.items():
+            self.assertEqual(expected,prompt(case,mode,'json_dot',with_parts=True))
+        for mode in ('id_keyed_arrays','full_paths','named_tables'):
+            with self.assertRaisesRegex(ValueError,'disagrees with validator identity'):
+                compile_test(case,'json_dot',input_formats=[mode])
+        compile_test(case,'json_dot',input_formats=['normal_json'])
+        nested=copy.deepcopy(case)
+        nested['starting_data']={'groups':[{'id':'g','records':case['starting_data']['items']}]}
+        nested['array_identities']=[{'path':['groups'],'id_field':'id'},
+                                    {'path':['groups',None,'records'],'id_field':'count'}]
+        with self.assertRaisesRegex(ValueError,'disagrees with validator identity'):
+            compile_test(nested,'json_dot',input_formats=['full_paths'])
+
+    def test_identity_metadata_loaded_and_included_in_references(self):
+        case=load_case('append_record_to_empty_array')
+        self.assertEqual(case['array_identities'],[{'path':['items'],'id_field':'item_id'}])
+        with tempfile.TemporaryDirectory() as temp:
+            build(temp,cases=['append_record_to_empty_array'])
+            reference=read_json(Path(temp)/'references/append_record_to_empty_array__json_dot.json')
+            self.assertEqual(reference['array_identities'],case['array_identities'])
+
     def test_rebuild_removes_deselected_and_failed_build_keeps_previous(self):
         with tempfile.TemporaryDirectory() as temp:
             output=Path(temp)/'build'
@@ -131,6 +183,18 @@ class PromptBuilderTests(unittest.TestCase):
             for row in fixtures:
                 test=read_json(repo/row['source_path']);variant=next(v for v in test['variants']if v['id']==row['variant_id'])
                 self.assertTrue(evaluate(test,variant,row['outputs'])['exact_match'],row)
+    def test_install_preserves_superseded_definitions_and_previews(self):
+        from workbench.domain import write_json
+        with tempfile.TemporaryDirectory() as temp:
+            output=Path(temp)/'build';repo=Path(temp)/'repo';repo.mkdir()
+            for name,value in {'evaluation/catalog.json':{'definitions':[]},'evaluation/fixtures.json':{'fixtures':[]},'reporting/grouping_metadata.json':{},'reporting/timing_expectations.json':{}}.items():write_json(repo/name,value)
+            build(output,cases=['update_field']);install(output,repo)
+            prior={p.relative_to(repo).as_posix():p.read_bytes() for folder in ['test_specs','prompts/current-suite'] for p in (repo/folder).rglob('*') if p.is_file()}
+            build(output,cases=['no_change']);install(output,repo)
+            snapshots=list((repo/'archives/template-builds').iterdir())
+            self.assertEqual(len(snapshots),1)
+            for name,raw in prior.items():self.assertEqual((snapshots[0]/name).read_bytes(),raw,name)
+            self.assertFalse((repo/'test_specs/update_field__json_dot.json').exists())
     def test_bad_reference_caught_before_build(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)/'templates';shutil.copytree(ROOT,root)
