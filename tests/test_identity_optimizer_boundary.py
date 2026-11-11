@@ -21,7 +21,7 @@ class IdentityOptimizerBoundaryTests(unittest.TestCase):
                            'messages': [{'role': 'user', 'content': 'PROMPT_RETAINED'}]}]}
 
     def test_identity_diagnostics_redacted_without_mutating_evidence(self):
-        for version in ('array-identities-intent-v1', 'array-identities-intent-v2'):
+        for version in ('array-identities-intent-v1', 'array-identities-intent-v2', 'array-identities-intent-v3'):
             with self.subTest(version=version):
                 record = self.record()
                 record['variant_definition']['result']['evaluator']['version'] = version

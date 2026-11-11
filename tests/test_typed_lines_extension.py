@@ -2,7 +2,10 @@
 import unittest
 from evaluation import array_identities_intent as host
 from evaluation import schema_free_intent as legacy
-from evaluation.typed_lines import records
+from evaluation.output_formats import decode
+
+def records(raw):
+    return decode(raw, "typed_lines", {})["operations"]
 
 
 class TypedLineExtensionTests(unittest.TestCase):
@@ -34,7 +37,7 @@ remove: /items/"a/b"/tags/"x"'''
                    'append: /items\nobject: {"key":"x","key":"y"}',
                    'remove: /items/"missing"', 'set: /missing\ntext: x',
                    'remove: /items/"a"\ntext: extra', 'change: /n\nboolean: true',
-                   'set: /n\nnumber: 1e3', 'set: /n\nnull: extra',
+                   'set: /n\nnull: extra',
                    'append: /items\nobject: {"wrong":"b"}',
                    'append: /items\nobject: {"key":"a"}',
                    'set: /items/"a"\nobject: {"key":"b"}',
@@ -43,15 +46,19 @@ remove: /items/"a/b"/tags/"x"'''
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 self.apply(raw, {'items': [{'key': 'a'}], 'n': 1})
 
+    def test_safe_exponent_is_the_same_numeric_intent(self):
+        self.assertEqual(self.apply('set: /n\nnumber: 1e3', {'n': 0}, []), {'n': 1000})
+        with self.assertRaisesRegex(ValueError, 'underflow'):
+            self.apply('set: /n\nnumber: 1e-1000', {'n': 0}, [])
+
     def test_ordered_repeated_updates(self):
         self.assertEqual(self.apply('set: /n\nnumber: 4\nchange: /n\nnumber: 1\nset: /n\nnumber: 2', {'n': 0}, []), {'n': 2})
 
-    def test_legacy_grouping_and_restrictions_unchanged(self):
+    def test_retired_grouped_contract_cannot_receive_current_semantics(self):
         raw = 'change: /n\nnumber: 1\nset: /n\nnumber: 4'
-        self.assertEqual(legacy.normalize_response(raw, {'n': 0}, 'typed_lines')['final_state'], {'n': 5})
         self.assertEqual(self.apply(raw, {'n': 0}, []), {'n': 4})
-        with self.assertRaises(ValueError):
-            legacy.normalize_response('append: /items\nobject: {"id":"a"}', {'items': []}, 'typed_lines')
+        with self.assertRaisesRegex(ValueError, 'Retired response contract schema-free-intent-v1'):
+            legacy.normalize_response(raw, {'n': 0}, 'typed_lines')
 
     def test_reserved_field_names_remain_valid_array_identities(self):
         for name in ('constructor', '__proto__', 'prototype'):

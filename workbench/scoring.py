@@ -64,12 +64,8 @@ def change(doc,parts,op,value=None):
 
 
 def apply(initial,patch,representation,schema=None):
-    if representation=='field_value_v2':
-        from .field_values import apply as apply_fields
-        return apply_fields(initial,patch,schema)
-    if representation=='ember_text_v1':
-        from .ember_text import apply as apply_text
-        return apply_text(initial,patch,schema)
+    from evaluation.retired_contracts import require_supported
+    require_supported({'representation': representation})
     if representation=='dot_patch_v1':
         from .dot_paths import apply as apply_dots
         return apply_dots(initial,patch,schema)
@@ -123,10 +119,13 @@ def changes(a,b,path=''):
 
 def score_state(test,value,representation):
     from jsonschema import Draft202012Validator
+    from evaluation.retired_contracts import reason, configuration_score
+    if reason({'representation': representation}):
+        return configuration_score({'representation': representation})
     before=test['source']['initial_state'];expected=test['expected_state'];required=changes(before,expected)
     try:
-        if isinstance(value,str) and representation not in ('ember_text_v1','field_value_v2'):value=parse(value)
-        actual=value if representation=='state' else (apply(before,value,representation,test.get('state_schema')) if representation in ('value_patch','dot_patch_v1','ember_text_v1','field_value_v2') else apply(before,value,representation))
+        if isinstance(value,str):value=parse(value)
+        actual=value if representation=='state' else (apply(before,value,representation,test.get('state_schema')) if representation in ('value_patch','dot_patch_v1') else apply(before,value,representation))
         if test.get('state_schema'):Draft202012Validator(test['state_schema']).validate(actual)
         predicted=changes(before,actual);shared=required.keys() & predicted.keys()
         correct=sum(equal(required[k],predicted[k]) for k in shared)

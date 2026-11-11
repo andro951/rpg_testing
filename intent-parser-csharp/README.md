@@ -30,19 +30,29 @@ Namespace `Csc592.IntentParser`, class `IntentParser`:
 - `ApplyPatch(JsonNode? input, JsonArray patch, IntentOptions? options = null)`
 - `ReplayPrepared(JsonArray records, IntentOptions? options = null)`
 
-`IntentOptions` defaults: `JsonPatch=false`, `IdKey="id"`, `MaxChars=65536` UTF-16 units, `MaxDepth=64`, `MaxOperations=256`, `MaxBoundaryAttempts=4096`, `PathSyntax=null`. Return objects preserve the JavaScript/Python wire keys (`op`, `path`, `value`, `from`, `to`, `operations`, `diagnostics`). CLR naming follows C# conventions.
+`IntentOptions` defaults: `JsonPatch=false`, `IdKey="id"`, `MaxChars=65536` UTF-16 units, `MaxDepth=64`, `MaxOperations=256`, `MaxBoundaryAttempts=4096`, `PathSyntax=null`, `OutputFormat=null`. Return objects preserve the JavaScript/Python wire keys (`op`, `path`, `value`, `from`, `to`, `operations`, `diagnostics`). CLR naming follows C# conventions.
 
 Default normalization returns only custom ID-addressed patches. `JsonPatch=true` returns only RFC6902 output, compiled against the exact input state in sequential order. Copy/move emit append-copy plus optional source removal, not positional insertion. Input objects are cloned; failures never partially mutate the caller's input.
 
-`--json-lines` reads requests from standard input and writes one `{"ok":true,"result":...}` or `{"ok":false,"error":...}` result per line. Actions are `parse`, `diagnostics`, `normalize`, `convert`, `apply`, `prompt`, and `replay`. Options use portable wire names `json_patch`, `idKey`, `maxChars`, `maxDepth`, `maxOperations`, and `maxBoundaryAttempts`, and `pathSyntax`. This provides a process-level conformance interface for tests and other hosts.
+`--json-lines` reads requests from standard input and writes one `{"ok":true,"result":...}` or `{"ok":false,"error":...}` result per line. Actions are `parse`, `diagnostics`, `normalize`, `convert`, `apply`, `prompt`, and `replay`. Options use portable wire names `json_patch`, `idKey`, `maxChars`, `maxDepth`, `maxOperations`, and `maxBoundaryAttempts`, `pathSyntax`, and `output_format` (also accepted as `outputFormat`). This provides a process-level conformance interface for tests and other hosts.
 
 ## Current host paths
 
-`PathSyntax="value_patch"` is an explicit CSC592 host option for typed slash paths. Unquoted scalar path parts retain their JSON types; quoted embedded JSON string parts preserve literal strings and slashes. The default remains RFC6901-style quoted pointer strings with string parts. Array-form paths always preserve explicit scalar types. The current host operation `replace` maps to update only in this explicitly selected mode. Generic intent does not accept `replace` or `set` operation aliases.
+`PathSyntax="value_patch"` is an explicit CSC592 host option for typed slash paths. Unquoted scalar path parts retain their JSON types; quoted embedded JSON string parts preserve literal strings and slashes. The default remains RFC6901-style quoted pointer strings with string parts. Array-form paths always preserve explicit scalar types. The current host operation `replace` maps to update only in this explicitly selected mode. Generic intent accepts `set` as an update alias; `replace` still requires the host option.
 
 Normalization accepts the documented intent grammar only. RFC6902 remains an output format; no RFC input importer or automatic input-dialect bridge is provided.
 
 One exact enclosing bare/JSON Markdown fence can be removed with `MARKDOWN_FENCE_REMOVED` diagnostics. Prefix/suffix prose is not stripped. The complete program AST determines operation groups and strict JSON values. A bounded newline-partition check rejects ambiguous operation boundaries without discovering or repairing operations.
+
+## Shared line formats
+
+The shared grammar also recognizes header and inline typed operations, two-line JSON values, arrow transfers, and explicit `none`. These use the same operation AST as generic intent rather than separate format readers. Raw slash line paths preserve typed selectors, embedded quoted strings, and literal field spaces, including trailing spaces in header paths.
+
+`OutputFormat` selects only the text value codec: `typed_lines` preserves raw text after removing exactly one separator space; `literal_line` decodes `\\`, `\n`, `\r`, `\t`, `\s`, and `\"`; `end_marked_line` requires and drops only the final `|` and decodes `\\`, `\n`, `\r`, and `\t`. The default preserves the raw remainder after `text:`. Text extends to the physical newline, retaining punctuation and trailing spaces, and must contain valid Unicode. Numeric typed values accept finite safe JSON numbers, including exponent notation and an optional leading plus sign. `object:` and `list:` can denote empty containers; `json:` does not accept string values.
+
+`change` requires a typed number and produces an update with `semantic: "numeric_delta"`. Removals parsed with `OutputFormat="typed_lines"` carry `semantic: "typed_remove"`. A state-aware host must lower these markers before calling the ordinary patch converter. `ConvertIntent` and `NormalizeIntent` deliberately reject unlowered markers rather than silently applying a delta as an absolute update.
+
+The literal verb `add` carries `semantic: "literal_add"` with canonical `op: "append"` in parsed IR. `ConvertIntent` resolves its existing target against the current sequential document state: an array means append; an existing object field means update. Root scalar replacement, whole non-array collection-element replacement, and missing-field creation are rejected. `append` and `insert` remain array-only aliases. Unlabeled path/value candidates retain this marker during uniqueness checks. Returned custom patches have the resolved operation and no semantic marker; `ApplyPatch` rejects unlowered semantic intents.
 
 ## Safety and limits
 

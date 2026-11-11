@@ -1,6 +1,6 @@
 # Schema-free evaluation for template-built tests
 
-New template builds explicitly select `array-identities-intent-v2`. This selection is
+New template builds explicitly select `array-identities-intent-v3`. This selection is
 not a change to archived strict, schema-backed, or live-intent definitions.
 Generated definitions do not need `state_schema`, a `schema.json` file, or a
 model-facing database-structure section.
@@ -72,8 +72,7 @@ view is outside this permission and retains its data-only convention: one
 unambiguous unique scalar `id` or `*_id` field in starting data. Current-case
 prompts remain byte-identical because their declarations name the same IDs.
 
-The old `schema-free-intent-v1` evaluator and archived definitions retain their
-original inference rules. The new version and frozen mapping change experiment
+The old `schema-free-intent-v1`, `ember_text_v1`, and `field_value_v2` runtime decoders are retired. Archived definitions and stored scores remain preserved; these retired contracts cannot be executed in the current checkout. The new version and frozen mapping change experiment
 identity even when model messages are unchanged; prior observations are not
 relabelled or reused as new results.
 
@@ -101,7 +100,7 @@ from the caller's perspective: rejected operations never mutate initial data.
   compatibility. `set` plus `null:` explicitly assigns null. Existing-object-field
   updates (including object values), complete-element append (including empty collections), numeric
   change, custom `move`/`copy` followed by a destination `to:` line, and `none` are supported. Extra value lines and wrong typed payloads
-  are rejected. Legacy hosts keep their original grouped, restricted reader.
+  are rejected. The grammar produces ordered semantic instructions; no typed-line-specific model decoder remains.
 - `free_format` (experimental, explicit selection only): no output syntax is prescribed by the prompt. Recognizable
   intent and explicit `none` can be applied deterministically. Unrecognized
   prose is recorded as `score.status = "parser_gap"`, `exact_match = null`, and
@@ -178,7 +177,7 @@ The standard build covers six active structured output formats and three input
 views (two for the no-array field update): 62 case/input pairs × six formats =
 372 distinct prompts. The current default is one repetition, so there are 372 observations per model. Extra repetitions can be explicitly configured; three would produce 1,116. Historical and already-frozen runs keep their recorded repetitions.
 Those are coverage counts, not measured model results. Historical two-line and
-experimental free-format readers remain explicitly selectable. No model run is
+experimental free-format prompt styles remain explicitly selectable through the same grammar. No model run is
 started by a build, an installation, or a synthetic reference check.
 
 The required catalog and format status metadata guard full-suite selection.
@@ -196,6 +195,46 @@ JSON slash output uses typed slash paths for both fields. Path-list output uses
 output uses `move: items.item-a` followed by `to: storage`; typed lines use
 `move: /items/"item-a"` followed by `to: /storage`. Copy uses the same forms.
 
-The v2 evaluator source identity intentionally differs. Frozen v1 definitions
-are not silently rescored or relabeled; replay them with their matching source
-revision. Prior raw observations, prompts and archived answers stay unchanged.
+That historical v2 migration intentionally changed evaluator identity. The current v3 migration retires v1/v2 execution in this checkout; their captured scores remain viewable without replay. Prior raw observations, prompts and archived answers stay unchanged.
+
+
+## Shared grammar migration (2026-11-11)
+
+All six current output formats now enter `parse_intent_with_diagnostics` in
+`intent_parser/parse.py`. The authoritative source is
+`intent-parser-js/intent.grammar`; generated rules are shared by Python, C#,
+and JavaScript. `evaluation/output_formats.py` is only the common entry point
+and lexical-path adapter, not a collection of format-specific parsers.
+The old line-record and typed-line decoders were deleted, including the retired
+research `ember_text_v1` and `field_value_v2` decoders. Reference encoders that
+create synthetic tests are not model-response readers.
+
+The requested format still identifies how an explicit `text:` literal is
+encoded: raw text in typed lines, escaped text in literal lines, and escaped
+text with a final pipe in end-marked lines. These are value interpretations,
+not alternate operation grammars. Exact text, quoted strings, nested objects,
+array contents, and operation order are preserved. `none` and `[]` explicitly
+represent no changes. Empty or unrecognized responses are never invented patches.
+
+Entirely unquoted bracketed path lists are the documented textual-selector format: `[strings,42]` names the unique textual ID `42`. If a grouped path contains a quoted component, its scalar values retain explicit JSON types, so `["strings",42]` cannot select string ID `"42"`. Quoted strings never match numeric or boolean IDs by coercion. This lexical precedence preserves the existing unquoted path-list prompt contract; typed identity collisions in a collection still reject.
+
+Slash paths preserve quoted JSON scalar types. A bare non-JSON spelling such
+as `/locations/town-a` may select the unique string ID `town-a`; a numeric path
+part is still an ID, never an array position. Duplicate identities, typed
+identity collisions, ambiguous dot paths, unresolved source/destination roles,
+and extra operation payloads reject. Neither the expected patch nor the expected
+final state is available to parsing or identity resolution.
+
+The literal word `add` retains a semantic marker until the target is resolved: it appends to an array or updates an existing non-array object field. `append` and `insert` remain array-only. Missing targets, root/whole-element updates and ambiguous paths reject.
+
+State-dependent work remains outside grammar: resolving declared IDs, checking
+array destinations and duplicate IDs, executing numeric deltas, compatibility
+nullification for typed scalar removal, and enforcing data preservation. Grammar
+cannot determine these without the actual input document. Literal escape
+interpretation and bounded ambiguity/resource checks are also procedural.
+
+Version v3 deliberately changes scoring identity. Old v1/v2 pins fail validation
+before normalization; old saved scores and raw evidence remain unchanged and
+readable. This change does not rescore a completed observation or modify a
+running frozen experiment. A new-parser comparison must be a separate, explicitly
+identified analysis, never relabeled historical model accuracy.

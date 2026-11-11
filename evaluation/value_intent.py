@@ -26,7 +26,21 @@ def encode_path(parts):
     return ''.join('/' + stringify(part) for part in parts)
 
 
+def _contextual_operation(state, schema, operation):
+    if 'semantic' not in operation:
+        return operation
+    if (operation.get('semantic') != 'literal_add' or operation.get('op') != 'append'
+            or set(operation) != {'op', 'path', 'value', 'semantic'}):
+        raise IntentError('Invalid literal add operation fields')
+    target, _, _ = value_paths.resolve(state, schema, encode_path(operation['path']))
+    # This selects intent only. The unchanged schema-aware lowerer enforces
+    # existing-field/collection roles and rejects root or whole-element updates.
+    return {'op': 'append' if isinstance(target, list) else 'update',
+            'path': operation['path'], 'value': operation['value']}
+
+
 def lower(state, schema, operation):
+    operation = _contextual_operation(state, schema, operation)
     op = operation['op']
     if op not in ('update', 'append', 'remove', 'move', 'copy'):
         raise IntentError('Unsupported operation')
@@ -51,17 +65,21 @@ def lower(state, schema, operation):
 def select_operation(state, schema, raw):
     """Use state/schema alone to choose exactly one valid interpretation."""
     if 'unlabeledPathValue' in raw:
-        candidates = [{'op': raw['op'], **candidate} for candidate in raw['unlabeledPathValue']]
+        candidates = [{'op': raw['op'], **candidate,
+                       **({'semantic': raw['semantic']} if 'semantic' in raw else {})}
+                      for candidate in raw['unlabeledPathValue']]
     elif 'unlabeledPaths' in raw:
         first, second = raw['unlabeledPaths']
         candidates = [{'op': raw['op'], 'from': first, 'to': second},
                       {'op': raw['op'], 'from': second, 'to': first}]
     else:
-        concrete, after = lower(state, schema, raw)
-        return raw, concrete, after
+        operation = _contextual_operation(state, schema, raw)
+        concrete, after = lower(state, schema, operation)
+        return operation, concrete, after
     valid = []
     for candidate in candidates:
         try:
+            candidate = _contextual_operation(state, schema, candidate)
             concrete, after = lower(state, schema, candidate)
             if not any(equal(candidate, item[0]) for item in valid):
                 valid.append((candidate, concrete, after))

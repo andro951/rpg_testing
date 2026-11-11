@@ -27,11 +27,11 @@ def failed_codes(assessment):
 
 
 def schema_free(variant):
-    return variant.get('result', {}).get('evaluator', {}).get('version') in ('schema-free-intent-v1', 'array-identities-intent-v1', 'array-identities-intent-v2')
+    return variant.get('result', {}).get('evaluator', {}).get('version') in ('schema-free-intent-v1', 'array-identities-intent-v1', 'array-identities-intent-v2', 'array-identities-intent-v3')
 
 
 def canonical_response(test, variant, raw):
-    """Read each synthetic response with its selected protocol, not json.loads."""
+    """Read each synthetic response through its evaluator, not json.loads."""
     from evaluation.hosts import selected
     host = selected(variant['result'])
     kwargs = ({'array_identities': test['source']['array_identities']}
@@ -84,14 +84,11 @@ def malformed_response_probes(output_format):
 
 def unrequested_schema_free_change(state, array_identities=None):
     """Construct a valid extra edit for a final-state mismatch, not a parser error."""
-    if array_identities is None:
-        from evaluation.schema_free_intent import from_pointer
-    else:
-        from evaluation.array_identities_intent import from_pointer as explicit_pointer
-        from evaluation.array_identity_map import IdentityMap
-        context = IdentityMap(array_identities)
-        def from_pointer(value, parts):
-            return explicit_pointer(value, parts, context)
+    from evaluation.array_identities_intent import from_pointer as explicit_pointer
+    from evaluation.array_identity_map import IdentityMap
+    context = IdentityMap(array_identities if array_identities is not None else [])
+    def from_pointer(value, parts):
+        return explicit_pointer(value, parts, context)
     empty_arrays = []
     def walk(value, parts, template=()):
         if isinstance(value, dict):
@@ -191,9 +188,9 @@ class CoverageTests(unittest.TestCase):
                     result = assess(test, variant, values)
                     if schema_free(variant):
                         output_format = variant['result'].get('output_format', 'json_dot')
-                        # Only intent/JSON readers unwrap Markdown fences. The
-                        # independent text protocols retain exact line syntax.
-                        accepts_fence = output_format in ('json_dot', 'json_slash', 'free_format')
+                        # Every current format now shares the recursive intent
+                        # grammar, including its outer Markdown-fence support.
+                        accepts_fence = True
                         self.assertEqual(result['objective_outcome'], 'PASS' if accepts_fence else 'FAIL')
                         self.assertEqual(evaluate(test, variant, values)['exact_match'], accepts_fence)
                         self.assertEqual(next(c['status'] for c in result['checks']

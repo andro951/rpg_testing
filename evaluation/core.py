@@ -136,6 +136,14 @@ def state_checks(report, test, actual):
 
 
 def patch_checks(report, test, variant, raw, validator=None):
+    from .retired_contracts import reason
+    retired = reason(variant.get('result', {}))
+    if retired:
+        report.add('intent.configuration', NOT_EVALUATED, retired, scope='evidence',
+                   configuration_error=True, contract_status='retired')
+        report.add('state.final', NOT_EVALUATED, 'Retired contract: no response was decoded or regraded.',
+                   scope='final_state', configuration_error=True)
+        return
     # Explicit new identity only. Historical strict/schema-backed diagnostics
     # keep their existing operation/order semantics.
     from .schema_free_intent import VERSION as SCHEMA_FREE
@@ -170,38 +178,6 @@ def patch_checks(report, test, variant, raw, validator=None):
                    actual=score.get('evaluation', {}).get('normalized_patch'))
         return
     representation = variant['result']['representation']
-    if representation == 'field_value_v2':
-        from workbench.field_values import decode
-        try:
-            operations = decode(raw, test['source']['initial_state'], test['state_schema'])
-        except Exception as exc:
-            report.add('text.document', FAIL, str(exc))
-            report.add('state.final', NOT_EVALUATED, 'Field/value syntax failed; no state committed.', dependencies=['text.document'])
-            return
-        report.add('text.document', PASS, 'Valid research field/value records; Dot paths, object values and actual array deletion use the unchanged canonical database evaluator.')
-        semantic_variant = copy.deepcopy(variant)
-        semantic_variant['result']['representation'] = 'dot_patch_v1'
-        semantic_report = Report()
-        patch_checks(semantic_report, test, semantic_variant, operations, validator=validator)
-        report.checks.extend(c for c in semantic_report.checks if c['code'] not in ('json.document', 'patch.array'))
-        return
-    if representation == 'ember_text_v1':
-        from workbench.ember_text import decode
-        try:
-            operations = decode(raw, test['source']['initial_state'], test['state_schema'])
-        except Exception as exc:
-            report.add('text.document', FAIL, str(exc))
-            report.add('state.final', NOT_EVALUATED, 'Text contract or database operation failed; no state committed.', dependencies=['text.document'])
-            return
-        report.add('text.document', PASS, 'Valid Ember typed-line records lowered through the unchanged database operation contract; no JSON model output required.')
-        semantic_variant = copy.deepcopy(variant)
-        semantic_variant['result']['representation'] = 'value_patch'
-        semantic_report = Report()
-        patch_checks(semantic_report, test, semantic_variant, operations, validator=validator)
-        # These describe the compiler's intermediate representation, not the
-        # model's plaintext response. All semantic/operation checks are retained.
-        report.checks.extend(c for c in semantic_report.checks if c['code'] not in ('json.document', 'patch.array'))
-        return
     normalization = None
     try:
         parser = getattr(validator.adapter, 'parse_response', None) if validator else None
@@ -416,8 +392,27 @@ def answer_checks(report, variant, values):
             report.compare('index.format', wanted, actual, 'Return only the exact requested index text, including move pair order and spacing.', step=step)
 
 
+def _retired_assessment(test, variant, values, execution, original_score):
+    """Show captured scores, never replay a retired contract with current semantics."""
+    from .retired_contracts import reason
+    message = reason(variant.get('result', {}))
+    exact = original_score.get('exact_match') if isinstance(original_score, dict) else None
+    outcome = ('PASS' if exact else 'FAIL') if type(exact) is bool else 'UNSCORED'
+    return {'evaluator_version': VERSION, 'test_id': test['id'], 'variant_id': variant['id'],
+            'definition_hash': digest({'test': test, 'variant': variant}), 'execution_outcome': execution,
+            'objective_outcome': outcome, 'primary_reason': message,
+            'contract_status': 'retired', 'assessment_mode': 'saved_score_only',
+            'score_comparison': 'preserved' if original_score is not None else 'not_comparable',
+            'checks': [{'code': 'contract.retired', 'status': NOT_EVALUATED, 'scope': 'evidence',
+                        'explanation': message, 'configuration_error': True, 'affects_verdict': False}],
+            'original_score': copy.deepcopy(original_score), 'raw_outputs': copy.deepcopy(values)}
+
+
 def assess(test, variant, values, *, execution='completed', original_score=None, validator=None):
     """Evaluate supplied completed values; callers must identify partial/error evidence."""
+    from .retired_contracts import reason
+    if reason(variant.get('result', {})):
+        return _retired_assessment(test, variant, values, execution, original_score)
     report = Report()
     report.add('evidence.execution', PASS if execution == 'completed' else NOT_EVALUATED,
                'Completed response.' if execution == 'completed' else f'Execution is {execution}; semantic success is not established.')
@@ -542,6 +537,17 @@ def assess_record(record, *, validator=None):
         if len(variants) != 1:
             raise ValueError('Captured definition must contain exactly one matching variant')
         variant = variants[0]
+    from .retired_contracts import reason
+    if reason(variant.get('result', {})):
+        assessment = _retired_assessment(test, variant, record.get('outputs', {}),
+                                         record.get('status', 'missing'), record.get('score'))
+        assessment.update(case_id=record.get('case_id'), source_record_checksum=record.get('sha256'),
+                          model_id=record.get('model_id'), repetition=record.get('repetition'),
+                          measurement_valid=record.get('measurement_valid'), steps=[],
+                          raw_calls=copy.deepcopy(record.get('calls', [])))
+        if validator is not None:
+            assessment['validation_applicability'] = 'unsupported_retired_contract'
+        return assessment
     selected = None
     if validator is not None:
         from .validation import get_validator

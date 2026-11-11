@@ -159,6 +159,12 @@ public static partial class IntentParser
         if (!new[] { "append", "update", "remove", "copy", "move" }.Contains(name)) throw new ArgumentException("Invalid operation");
         bool two = name is "copy" or "move";
         string[] allowed = two ? ["op", "from", "to", "unlabeledPaths"] : name == "remove" ? ["op", "path"] : ["op", "path", "value", "unlabeledPathValue"];
+        if(op.ContainsKey("semantic"))
+        {
+            if(name!="append" || op["semantic"]?.GetValueKind()!=JsonValueKind.String || op["semantic"]!.GetValue<string>()!="literal_add")
+                throw new ArgumentException("Unsupported operation semantic");
+            allowed=allowed.Append("semantic").ToArray();
+        }
         if (op.Any(p => !allowed.Contains(p.Key))) throw new ArgumentException("Unexpected operation field");
         foreach (string field in new[] { "path", "from", "to" }) if (op.ContainsKey(field) && (op[field] is not JsonArray path || !path.All(Scalar))) throw new ArgumentException("Path must contain scalar JSON tokens");
         if (two)
@@ -171,6 +177,18 @@ public static partial class IntentParser
         }
         else if (op["unlabeledPathValue"] is null && (op["path"] is null || (name != "remove" && !op.ContainsKey("value")))) throw new ArgumentException("Missing path/value");
     }
+    private static JsonObject LowerLiteralAdd(JsonObject op,JsonNode? state,IntentOptions options)
+    {
+        if(!op.ContainsKey("semantic")) return op;
+        if(op["op"]?.GetValue<string>()!="append" || op["semantic"]?.GetValue<string>()!="literal_add")
+            throw new ArgumentException("Unsupported operation semantic");
+        var target=Resolve(state,Path(op,"path"),options);
+        if(target.Node is JsonArray) op["op"]="append";
+        else if(target.Parent is JsonObject) op["op"]="update";
+        else throw new ArgumentException("Literal add requires a collection or existing object field");
+        op.Remove("semantic");
+        return op;
+    }
     private static JsonObject Concrete(JsonObject raw, JsonNode? state, IntentOptions options)
     {
         var op = (JsonObject)JsonContract.Clone(raw)!;
@@ -182,7 +200,8 @@ public static partial class IntentParser
                 var trial = new JsonObject { ["op"] = JsonContract.Clone(op["op"]) };
                 if (candidate is not JsonObject candidateObject) continue;
                 foreach (var p in candidateObject) trial[p.Key] = JsonContract.Clone(p.Value);
-                try { Execute(JsonContract.Clone(state), trial, options); valid.Add(trial); } catch { }
+                if(op.ContainsKey("semantic")) trial["semantic"]=JsonContract.Clone(op["semantic"]);
+                try { ValidateShape(trial); LowerLiteralAdd(trial,state,options); Execute(JsonContract.Clone(state), trial, options); valid.Add(trial); } catch { }
             }
             if (valid.Count != 1) throw new ArgumentException("Unlabeled path/value must resolve uniquely");
             return valid[0];
@@ -193,7 +212,7 @@ public static partial class IntentParser
             if ((a.Node is JsonArray) == (b.Node is JsonArray)) throw new ArgumentException("Unlabeled source/destination ambiguous");
             op["from"] = JsonContract.Clone(paths[a.Node is JsonArray ? 1 : 0]); op["to"] = JsonContract.Clone(paths[a.Node is JsonArray ? 0 : 1]); op.Remove("unlabeledPaths");
         }
-        return op;
+        return LowerLiteralAdd(op,state,options);
     }
     private static JsonArray Execute(JsonNode? state, JsonObject op, IntentOptions options)
     {
@@ -250,7 +269,7 @@ public static partial class IntentParser
     public static JsonNode? ApplyPatch(JsonNode? input, JsonArray patch, IntentOptions? options = null)
     {
         options ??= new(); var state = JsonContract.Clone(input);
-        foreach (var raw in patch) { ValidateShape(raw); var op = (JsonObject)raw!; if (op["unlabeledPaths"] is not null || op["unlabeledPathValue"] is not null) throw new ArgumentException("Custom patch must have resolved roles"); Execute(state, op, options); }
+        foreach (var raw in patch) { ValidateShape(raw); var op = (JsonObject)raw!; if (op.ContainsKey("semantic") || op["unlabeledPaths"] is not null || op["unlabeledPathValue"] is not null) throw new ArgumentException("Custom patch must have resolved roles"); Execute(state, op, options); }
         return state;
     }
 }

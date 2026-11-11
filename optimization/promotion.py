@@ -9,6 +9,9 @@ def apply(test, recipe):
         raise ValueError('Promotion needs an accepted exact candidate')
     if recipe.get('base_definition_digest', digest(test)) != digest(test):
         raise ValueError('Base definition changed since OPRO promotion')
+    from evaluation.retired_contracts import require_supported
+    for variant in test['variants']:
+        require_supported(variant.get('result', {}))
     candidate=recipe['candidate']
     validation=recipe.get('validation',{})
     if validation.get('complete') is not True or not validation.get('required') or validation.get('passes')!=validation['required']:
@@ -23,22 +26,13 @@ def apply(test, recipe):
     import json
     if test['id'] in text or json.dumps(test.get('expected_state'),ensure_ascii=False) in text:
         raise ValueError('Candidate contains a fixture identity or expected state')
-    def evaluator_version(variant):
-        selected = variant.get('result', {}).get('evaluator')
-        return selected.get('version') if isinstance(selected, dict) else selected
-    schema_free = all(evaluator_version(v) == 'schema-free-intent-v1' for v in test['variants'])
     def identifiers(value,schema):
         if isinstance(value,dict):
             for name,child in value.items():yield from identifiers(child,schema.get('properties',{}).get(name,{}))
         elif isinstance(value,list):
-            if schema_free:
-                from evaluation.schema_free_intent import id_field
-                field=id_field(value)
-            else:
-                field=schema.get('x-id-field')
+            field=schema.get('x-id-field')
             for element in value:
                 if field and isinstance(element,dict) and isinstance(element.get(field),str) and len(element[field])>=4:yield element[field]
-                if schema_free and field is None and isinstance(element, str) and len(element) >= 4:yield element
                 yield from identifiers(element,schema.get('items',{}))
     if any(identifier in text for identifier in identifiers(test['source']['initial_state'],test.get('state_schema',{}))):
         raise ValueError('Candidate contains a literal fixture element ID')

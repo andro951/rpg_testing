@@ -84,7 +84,8 @@ static IntentOptions ReadOptions(JsonNode? node)
     => new(JsonPatch:node?["json_patch"]?.GetValue<bool>()??false, IdKey:node?["idKey"]?.GetValue<string>()??"id",
         MaxChars:node?["maxChars"]?.GetValue<int>()??65536, MaxDepth:node?["maxDepth"]?.GetValue<int>()??64,
         MaxOperations:node?["maxOperations"]?.GetValue<int>()??256, MaxBoundaryAttempts:node?["maxBoundaryAttempts"]?.GetValue<int>()??4096,
-        PathSyntax:node?["pathSyntax"]?.GetValue<string>());
+        PathSyntax:node?["pathSyntax"]?.GetValue<string>(),
+        OutputFormat:node?["output_format"]?.GetValue<string>()??node?["outputFormat"]?.GetValue<string>());
 
 // Independent, index-addressed RFC6902 reference interpreter for emitted add/replace/remove.
 static JsonNode? ApplyRfc(JsonNode? input,JsonArray patch)

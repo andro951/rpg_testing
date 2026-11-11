@@ -45,7 +45,7 @@ def get_validator(version):
         adapter = dot_outer_arrays_v1
     root = Path(__file__).resolve().parents[1]
     names = ('evaluation/validation.py', 'evaluation/dot_separators_v2.py',
-             'evaluation/core.py', 'evaluation/__main__.py',
+             'evaluation/core.py', 'evaluation/__main__.py', 'evaluation/retired_contracts.py',
              'workbench/domain.py', 'workbench/scoring.py', 'workbench/value_paths.py',
              'workbench/workflows.py', 'workbench/dot_paths.py')
     if version == DOT_OUTER_ARRAYS_V1:

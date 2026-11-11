@@ -81,7 +81,7 @@ The generic API keeps parsing, conversion and updating separate. Custom patches 
 
 ### Current live research integration
 
-- **[evaluation/array_identities_intent.py](evaluation/array_identities_intent.py):** the current `array-identities-intent-v2` host with explicit ID mappings, with identity-based resolution, final-state grading and separate expected-patch diagnostics.
+- **[evaluation/array_identities_intent.py](evaluation/array_identities_intent.py):** the current `array-identities-intent-v3` host. Every current response format uses the shared intent grammar before identity-based resolution, final-state grading and separate expected-patch diagnostics. Old format-specific model decoders have been removed; historical scores remain stored evidence, not new-parser results.
 - **[evaluation/output_formats.py](evaluation/output_formats.py):** readers for all eight output choices. Free-format prose that cannot be recovered is a parser gap with unknown semantic correctness, not automatically a model failure.
 - **[evaluation/hosts.py](evaluation/hosts.py):** explicit host dispatch. [workbench/workflows.py](workbench/workflows.py) uses the evaluator captured in each definition; [evaluation/core.py](evaluation/core.py) supplies matching detailed diagnostics.
 - **[evaluation/live_intent.py](evaluation/live_intent.py):** retained `dot-intent-v1` for frozen schema-based experiments. [workbench/live.py](workbench/live.py) remains the preparation path for those historical controls; do not use it to relabel new schema-free definitions.

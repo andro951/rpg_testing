@@ -137,13 +137,29 @@ def _check_append(array, value, id_key, exclude=None):
         raise IntentError('Operation would create ambiguous duplicate identity')
 
 
+def _lower_literal_add(operation, state, options):
+    if operation.get('semantic') == 'literal_add':
+        target = resolve(state, operation['path'], options)
+        if isinstance(target['node'], list):
+            operation['op'] = 'append'
+        elif isinstance(target['parent'], dict):
+            operation['op'] = 'update'
+        else:
+            raise IntentError('Literal add must select a collection or an existing object field')
+        del operation['semantic']
+    return operation
+
+
 def _concrete(operation, state, options):
     operation = clone(operation)
     if 'unlabeledPathValue' in operation:
         valid = []
         for candidate in operation['unlabeledPathValue']:
             trial = {'op': operation['op'], **candidate}
+            if 'semantic' in operation:
+                trial['semantic'] = operation['semantic']
             try:
+                _lower_literal_add(trial, state, options)
                 _execute(clone(state), trial, options)
                 valid.append(trial)
             except (IntentError, KeyError, TypeError):
@@ -158,7 +174,7 @@ def _concrete(operation, state, options):
             raise IntentError('Unlabeled source/destination ambiguous')
         operation['from'], operation['to'] = reversed(paths) if isinstance(a['node'], list) else paths
         del operation['unlabeledPaths']
-    return operation
+    return _lower_literal_add(operation, state, options)
 
 
 def _execute(state, operation, options):
@@ -214,6 +230,8 @@ def _validate_shape(operation):
     two = operation['op'] in ('copy', 'move')
     allowed = ('op', 'from', 'to', 'unlabeledPaths') if two else (
         ('op', 'path') if operation['op'] == 'remove' else ('op', 'path', 'value', 'unlabeledPathValue'))
+    if operation.get('semantic') == 'literal_add' and operation['op'] == 'append':
+        allowed = (*allowed, 'semantic')
     if any(key not in allowed for key in operation):
         raise IntentError('Unexpected operation field')
     def is_path(value):
@@ -251,7 +269,7 @@ def apply_patch(document, patch, options=None):
     for operation in patch:
         _validate_shape(operation)
         assert_json(operation)
-        if 'unlabeledPaths' in operation or 'unlabeledPathValue' in operation:
+        if 'unlabeledPaths' in operation or 'unlabeledPathValue' in operation or 'semantic' in operation:
             raise IntentError('Custom patch must have resolved roles')
         _execute(state, operation, options)
     return state

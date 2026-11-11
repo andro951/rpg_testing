@@ -4,11 +4,14 @@ This contract separates parsing, semantic normalization, patch application and e
 
 ## Intent semantics and output format
 
-The generic intent language has five operations. Add/append/insert mean append to
-an existing collection. Update replaces an existing target and never creates a
+The generic intent language has five operations. Append/insert mean append to
+an existing collection. Literal add carries `semantic: "literal_add"` in the
+parsed IR: conversion appends when the target is a collection and updates when
+it is an existing object field. It cannot replace a whole collection element
+or create a field. Update/set replace an existing target and never create a
 missing field. Remove/delete removes the selected value. Copy/move append a
 complete independent source copy to a different collection; move then removes the
-original. Generic `replace` and `set` aliases are not supported.
+original. Generic `replace` is not supported; `set` is an Update alias.
 
 `json_patch: false` returns only custom patches. `json_patch: true` returns only
 standard RFC 6902 output representing the intent correctly, with state-dependent
@@ -21,6 +24,26 @@ its approved operation name `replace` to Update and decodes typed quoted path
 segments. This mapping is scoped to that current format, never enabled in the
 generic intent parser. The Python host also enforces per-collection schema IDs
 and operation scopes through CSC592's existing schema-aware lowerer.
+
+## Shared structured output syntax
+
+The same grammar recognizes JSON operation objects, bracketed path-list lines,
+literal/end-marked text lines, typed value lines and historical two-line JSON
+values. `none` and an empty list express no change. Transfers can use explicit
+`from`/`to`, a colon header followed by `to:`, or an arrow between paths.
+
+`output_format` chooses only the codec of a grammar-declared text value:
+`typed_lines` removes exactly one separator space and preserves the remainder;
+`literal_line` decodes its documented escapes; `end_marked_line` removes the
+required final pipe and decodes its documented escapes. Other values use JSON
+or typed grammar productions, independent of format metadata. Text punctuation,
+unmatched brackets and quotes are data; leading/trailing spaces are preserved.
+
+`change` is parsed as Update with `semantic: "numeric_delta"`, and removals in
+`typed_lines` carry `semantic: "typed_remove"`. These require host-specific
+state-aware lowering; standalone conversion rejects them rather than silently
+changing their meaning. Only `literal_add` is lowered by the native converter.
+Concrete patches never retain semantic annotations.
 
 ## Generic syntax recovery
 

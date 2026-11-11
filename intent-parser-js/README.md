@@ -9,7 +9,7 @@ Run all checks with `node run-all.cjs` (or `npm test`). Run `node demo.cjs` for 
 ## Independent stages
 
 1. `buildPrompt({request,document,idKey})`: constructs model instructions without expected answers.
-2. `parseIntent(text)`: the complete GrammarForge program grammar produces an AST, which is converted to a separate intent IR. `parseIntentWithDiagnostics` also reports recovered outer wrappers.
+2. `parseIntent(text, options)`: the complete GrammarForge program grammar produces an AST, which is converted to a separate intent IR. `parseIntentWithDiagnostics` also reports recovered outer wrappers.
 3. `convertIntent(ir, document, {json_patch:false,idKey:'id'})`: resolves ambiguous roles only when unique, checks current state, and returns custom patches by default.
 4. `applyPatch(document, customPatch)`: applies custom operations atomically to a clone.
 
@@ -17,13 +17,21 @@ Setting `json_patch:true` returns standard RFC6902 **instead** of custom patches
 
 ## Supported semantics
 
-- Update an existing value; append to a collection; remove a selected element/field; copy or move to a different collection.
+- Update an existing value (`set` is an alias); append to a collection; remove a selected element/field; copy or move to a different collection.
 - Arrays select object elements by typed ID and primitive elements by their own unique typed JSON value, never by position. Numeric `1` and string `"1"` are distinct identities.
 - Component order and optional labels vary. From/source and to/destination are directional. One directional label can determine the other role. Two unlabeled paths or a path/value pair require one uniquely valid interpretation; ambiguous alternatives reject.
 - Quoted strings and recursive JSON values preserve contents and types. Duplicate JSON keys, nonfinite numbers and invalid JSON values reject.
 - Parentheses, braces and brackets group intent components. A single missing outer wrapper can be recovered with diagnostics; broken inner JSON is never repaired by guessing.
 - Newlines are candidate boundaries. All complete grammatical partitions are considered; accept exactly one. Newlines inside values remain inside values. Explicit groups and semicolons are recommended for clear boundaries.
 - Default safety bounds: 65,536 text characters, depth 64, 256 operations, 4,096 boundary attempts. Options can adjust these explicit limits.
+
+## Structured output records
+
+The same grammar accepts header and inline writes, header and arrow transfers, typed values, and `none`. `unified-format-fixtures.json` contains cross-language examples and rejection cases.
+
+Pass `output_format` to select the text codec. Default text preserves everything after the colon; `typed_lines` removes one leading separator space; `literal_line` decodes backslash, newline, carriage return, tab, space and quote escapes; `end_marked_line` requires a final pipe and decodes backslash, newline, carriage return and tab escapes. This is value decoding, not a separate format reader.
+
+`change: /score\nnumber: +2` produces an update IR with `semantic: "numeric_delta"`. Removes parsed with `output_format: "typed_lines"` carry `semantic: "typed_remove"`. A host must lower these markers using its document semantics. Standalone `normalizeIntent` and `convertIntent` reject these two host-only markers instead of applying ordinary updates or removes.
 
 ## Deliberate limits
 
@@ -50,3 +58,9 @@ Runtime: `andro951/GrammarForge`, commit `4bbdff99f6e7224cfca0788b0d34772a194923
 ## Grammar-first revision
 
 See [GRAMMAR-DESIGN.md](GRAMMAR-DESIGN.md) for the canonical grammar, generated C#/Python specification, new structure checks, and the explicit reasons for keeping state semantics, ambiguity proof, recovery and resource limits in code. Run `node build-grammar-spec.cjs` after grammar changes; `--check` detects stale generated files. The additional 52 grammar-focused checks do not represent model observations.
+
+### Contextual literal add
+
+Only the original verb `add` produces `semantic: "literal_add"` on append-shaped IR. Standalone conversion resolves the target against the current sequential document: an array receives an append; an existing object field receives an update. Root scalar replacement and whole collection-element replacement reject. Unlabeled path/value candidates are tested with this same rule before choosing a unique interpretation. `append` and `insert` remain append-only.
+
+Conversion removes the resolved marker from custom patches. `applyPatch` rejects unresolved markers, and unknown semantics still reject. The `numeric_delta` and `typed_remove` markers continue to require host lowering.

@@ -2,16 +2,18 @@
 
 Paths use exact property strings and None for an array-element template.
 A null id_field selects primitive elements by their own values.
-The v1 inference evaluator remains separate for historical test definitions.
+All current formats share the intent grammar. Retired evaluator pins cannot be replayed as this version.
 """
 from __future__ import annotations
 
 import copy
 import hashlib
 import platform
+import re
 from pathlib import Path
 
 from intent_parser.patch import IntentError, assert_json
+from intent_parser.parse import _json
 from workbench import dot_paths, value_paths
 from workbench.domain import canonical, digest
 from workbench.scoring import apply as apply_rfc, at, changes, equal, parse
@@ -20,15 +22,14 @@ from .dot_separators_v2 import _resolution_parts
 from .schema_free_intent import ParserGap
 
 
-VERSION = 'array-identities-intent-v2'
+VERSION = 'array-identities-intent-v3'
 OUTPUT_FORMATS = ('json_dot', 'json_slash', 'path_list', 'literal_line',
                   'end_marked_line', 'two_line_text', 'typed_lines', 'free_format')
-SOURCES = ('evaluation/array_identities_intent.py', 'evaluation/array_identity_map.py', 'evaluation/typed_lines.py', 'evaluation/schema_free_intent.py', 'evaluation/output_formats.py',
-           'evaluation/hosts.py', 'evaluation/live_intent.py', 'evaluation/dot_separators_v2.py',
+SOURCES = ('evaluation/array_identities_intent.py', 'evaluation/array_identity_map.py', 'evaluation/schema_free_intent.py', 'evaluation/output_formats.py',
+           'evaluation/hosts.py', 'evaluation/retired_contracts.py', 'evaluation/live_intent.py', 'evaluation/dot_separators_v2.py',
            'intent_parser/parse.py', 'intent_parser/patch.py', 'intent_parser/json_contract.py',
            'intent_parser/grammar-spec.json', 'workbench/domain.py', 'workbench/workflows.py',
-           'workbench/scoring.py', 'workbench/dot_paths.py', 'workbench/value_paths.py',
-           'workbench/field_values.py', 'workbench/ember_text.py')
+           'workbench/scoring.py', 'workbench/dot_paths.py', 'workbench/value_paths.py')
 encode_part = dot_paths.encode_part
 scalar_text = dot_paths.scalar_text
 
@@ -67,19 +68,20 @@ def validate_data(state, array_identities):
     _context(array_identities).validate(state)
 
 
-def _components(state, parts, array_identities, *, typed=False, slash=False):
+def _components(state, parts, array_identities, *, typed=False, slash=False, typed_parts=None):
     concrete = []
     template = ()
-    for part in parts:
+    for offset, part in enumerate(parts):
+        part_is_typed = typed or slash or (typed_parts is not None and typed_parts[offset])
         if isinstance(state, dict):
             key = value_paths.property_name(part) if slash else scalar_text(part)
             if key not in state:
                 raise IntentError('Missing existing field: ' + key)
         elif isinstance(state, list):
-            wanted = parse(part) if slash else part
+            wanted = _slash_identity(part) if slash else part
             key_field = id_field(state, array_identities, template)
             matches = [index for index, element in enumerate(state)
-                       if (equal(element[key_field] if key_field is not None else element, wanted) if typed or slash else
+                       if (equal(element[key_field] if key_field is not None else element, wanted) if part_is_typed else
                            scalar_text(element[key_field] if key_field is not None else element) == scalar_text(wanted))]
             if len(matches) != 1:
                 raise IntentError('Array ID must match exactly one element; no positional selectors')
@@ -154,24 +156,41 @@ def from_pointer(state, parts, array_identities):
     return '.'.join(encoded)
 
 
+def _slash_identity(part):
+    # Quoted strings and JSON scalar spellings retain their types. A bare
+    # non-JSON spelling is a literal string, never an inferred array position.
+    if part.startswith('"') or part in ('true', 'false', 'null') or re.fullmatch(r'-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?', part):
+        value = _json(part)
+        if isinstance(value, (dict, list)):
+            raise IntentError('Array ID must be a scalar')
+        return value
+    if not part or '"' in part:
+        raise IntentError('Incomplete array ID')
+    return value_paths.property_name(part)
+
+
 def _reference(state, reference, array_identities):
     kind = reference.get('kind') if isinstance(reference, dict) else None
     if kind == 'dot':
-        return resolve(state, reference['text'], array_identities)
-    if kind == 'components':
-        return _components(state, reference['parts'], array_identities)
-    if kind == 'typed_components':
-        return _components(state, reference['parts'], array_identities, typed=True)
-    if kind == 'slash':
-        return _components(state, value_paths.tokens(reference['text']), array_identities, slash=True)
-    if kind == 'object_components':
-        value = state
-        for part in reference['parts']:
-            if not isinstance(value, dict) or part not in value:
-                raise IntentError('Typed lines support existing object-field paths only, not array-element selection')
-            value = value[part]
-        return value, reference['parts']
-    raise IntentError('Missing lexical path provenance')
+        result = resolve(state, reference['text'], array_identities)
+    elif kind == 'components':
+        result = _components(state, reference['parts'], array_identities, typed_parts=reference.get('typed_parts'))
+    elif kind == 'typed_components':
+        result = _components(state, reference['parts'], array_identities, typed=True)
+    elif kind == 'slash':
+        result = _components(state, value_paths.tokens(reference['text']), array_identities, slash=True)
+    else:
+        raise IntentError('Missing lexical path provenance')
+    if reference.get('reject_unsafe_fields'):
+        node = state
+        for part in result[1]:
+            if isinstance(node, dict):
+                if part in ('__proto__', 'prototype', 'constructor'):
+                    raise IntentError('Unsafe typed-line object field')
+                node = node[part]
+            else:
+                node = node[int(part)]
+    return result
 
 
 def _operation(state, raw, array_identities):
@@ -232,6 +251,51 @@ def _operation(state, raw, array_identities):
 
 
 def _choose(state, raw, array_identities):
+    # These are state-dependent operation meanings, not alternate text readers.
+    # Grammar recognizes the syntax; values never come from an expected answer.
+    if 'semantic' in raw:
+        semantic = raw['semantic']
+        operation = {key: value for key, value in raw.items() if key != 'semantic'}
+        if semantic == 'literal_add':
+            if operation.get('op') != 'append':
+                raise IntentError('Literal add requires its canonical append operation')
+            if 'unlabeledPathValue' in operation:
+                if set(operation) != {'op', 'unlabeledPathValue'}:
+                    raise IntentError('Invalid literal add fields')
+                candidates = []
+                for candidate in operation['unlabeledPathValue']:
+                    try:
+                        result = _choose(state, {'op': 'append', 'semantic': semantic, **candidate}, array_identities)
+                        if not any(equal(result[0], prior[0]) for prior in candidates):
+                            candidates.append(result)
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                if len(candidates) != 1:
+                    raise IntentError('Literal add path/value requires exactly one current-data interpretation')
+                return candidates[0]
+            if set(operation) != {'op', 'path', 'value'}:
+                raise IntentError('Invalid literal add fields')
+            target, _ = _reference(state, operation['path'], array_identities)
+            return _operation(state, {**operation, 'op': 'append' if isinstance(target, list) else 'update'}, array_identities)
+        if semantic not in ('numeric_delta', 'typed_remove'):
+            raise IntentError('Unknown operation semantics')
+        expected = {'op', 'path', 'value'} if semantic == 'numeric_delta' else {'op', 'path'}
+        if set(operation) != expected:
+            raise IntentError('Invalid semantic operation fields')
+        old, concrete = _reference(state, operation['path'], array_identities)
+        parent = at(state, concrete[:-1]) if concrete else None
+        if semantic == 'numeric_delta':
+            if operation['op'] != 'update' or not isinstance(parent, dict) or type(old) not in (int, float) or type(operation['value']) not in (int, float):
+                raise IntentError('Numeric change requires an existing numeric object field and numeric delta')
+            value = old + operation['value']
+            assert_json(value)
+            operation = {**operation, 'value': value}
+        else:
+            if operation['op'] != 'remove':
+                raise IntentError('Typed removal requires Remove')
+            if isinstance(parent, dict) and not isinstance(old, (dict, list)):
+                operation = {'op': 'update', 'path': operation['path'], 'value': None}
+        return _operation(state, operation, array_identities)
     if 'unlabeledPaths' in raw:
         if set(raw) != {'op', 'unlabeledPaths'} or raw.get('op') not in ('move', 'copy'):
             raise IntentError('Unlabeled source/destination requires Move or Copy')

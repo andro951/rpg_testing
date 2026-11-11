@@ -8,11 +8,12 @@ for(const [op,canonical] of Object.entries({remove:'remove',delete:'remove'}))te
 for(const s of ['(op: remove path: /items/a)','{path: items.a, operation=remove}','[path: ["items","a"], type: remove]'])test('group/order '+s,()=>eq(s,[{op:'remove',path:['items','a']}]));
 test('multiline continuation',()=>eq('op: remove\npath: /items/a',[{op:'remove',path:['items','a']}]));
 test('value and ordering',()=>eq('value: {"score":2} path: /items op: append',[{op:'append',path:['items'],value:{score:2}}]));
+test('set update alias',()=>eq('op:set path:/items/a/score value:2',[{op:'update',path:['items','a','score'],value:2}]));
 test('value type',()=>eq('op:update path:/items/a/score value:3',[{op:'update',path:['items','a','score'],value:3}]));
 test('sequential operations',()=>{const ir=parseIntent('remove path:/items/a; update path:/items/b/score value:4');const custom=convertIntent(ir,base);assert.equal(applyPatch(base,custom).items[0].score,4);assert.deepEqual(convertIntent(ir,base,{json_patch:true}),[{op:'remove',path:'/items/0'},{op:'replace',path:'/items/0/score',value:4}]);});
 for(const op of ['copy','move'])test(op,()=>{const patch=convertIntent(parseIntent(`to:/archive op:${op} from:/items/a`),base);const result=applyPatch(base,patch);assert.equal(result.archive[0].id,'a');assert.equal(result.items.length,op==='copy'?2:1);});
 test('unlabeled uniquely typed roles',()=>{const ir=parseIntent('copy (items.a) (archive)');assert.deepEqual(convertIntent(ir,base)[0],{op:'copy',from:['items','a'],to:['archive']});});
-for(const s of ['remove path:/items/a value:1','op:remove op:copy path:/items/a','op:set path:/items/a value:2','op:insert path:/items before:a value:3','copy (items) (archive)','op:update path:/items/a/score value:"unterminated','op:remove path:/items/missing'])test('reject '+s,()=>assert.throws(()=>convertIntent(parseIntent(s),base)));
+for(const s of ['remove path:/items/a value:1','op:remove op:copy path:/items/a','op:insert path:/items before:a value:3','copy (items) (archive)','op:update path:/items/a/score value:"unterminated','op:remove path:/items/missing'])test('reject '+s,()=>assert.throws(()=>convertIntent(parseIntent(s),base)));
 test('unchanged input',()=>assert.equal(base.items.length,2));
 test('atomic failure',()=>{assert.throws(()=>applyPatch(base,[{op:'remove',path:['items','a']},{op:'remove',path:['missing']}]));assert.equal(base.items.length,2);});
 for(const s of ['(op:remove path:/items/a','op:remove path:/items/a)','[{op:remove path:/items/a},{op:remove path:/items/b}]'])test('outer recovery/list '+s,()=>assert.equal(parseIntent(s)[0].op,'remove'));

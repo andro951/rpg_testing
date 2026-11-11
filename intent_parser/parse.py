@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from .patch import IntentError, assert_json
 from .json_contract import stringify
 
-OPERATIONS = dict(add='append', append='append', insert='append', update='update',
+OPERATIONS = dict(add='append', append='append', insert='append', update='update', set='update', change='update',
                   remove='remove', delete='remove', copy='copy', move='move')
 LABELS = dict(op='op', operation='op', type='op', path='path', **{'from': 'from'},
               source='from', to='to', destination='to', value='value')
@@ -30,6 +30,8 @@ class Node:
     text: str = ''
     open: str = ''
     children: list = field(default_factory=list)
+    start: int = 0
+    end: int = 0
 
     @property
     def group(self):
@@ -153,7 +155,7 @@ def _tokenize(text, operation=False, options=None, grammar=None):
             match = pattern.match(text, index)
             if match and match.end() > index:
                 if not ignore:
-                    result.append(Node(kind, match[0]))
+                    result.append(Node(kind, match[0], start=index, end=match.end()))
                 index = match.end()
                 break
         else:
@@ -313,7 +315,117 @@ def _ast_components(tokens, ast):
 
 
 def parse_record(nodes, options=None):
-    return _convert_components(_components([node for node in nodes if not _sep(node)], options), options)
+    text = ' '.join(_render(node) for node in nodes if not _sep(node))
+    tokens, ast = _grammar_parse(text, 'operation', options)
+    return _convert_operation(text, tokens, ast, options)
+
+
+def _descendants(root):
+    pending = [root]
+    while pending:
+        node = pending.pop()
+        yield node
+        pending.extend(reversed(node.children))
+
+
+def _raw(text, tokens, node):
+    return text[tokens[node.start].start:tokens[node.end - 1].end] if node.end > node.start else ''
+
+
+def _typed_value(text, tokens, root, options):
+    typed = next((node for node in _descendants(root) if node.type.startswith('typed_')), None)
+    if typed is None:
+        value_node = next(node for node in _descendants(root) if node.type == 'json_value')
+        raw = _raw(text, tokens, value_node)
+    elif typed.type == 'typed_text':
+        start = tokens[typed.start + 1].end
+        end = start
+        while end < len(text) and text[end] not in '\r\n\u2028\u2029':
+            end += 1
+        value = text[start:end]
+        mode = options.get('output_format', options.get('outputFormat'))
+        if mode == 'typed_lines' and value.startswith(' '):
+            value = value[1:]
+        if mode in ('literal_line', 'end_marked_line'):
+            if mode == 'end_marked_line':
+                if not value.endswith('|'):
+                    raise IntentError('Text value needs a final end marker')
+                value = value[:-1]
+            escapes = {'\\': '\\', 'n': '\n', 'r': '\r', 't': '\t'}
+            if mode == 'literal_line':
+                escapes.update({'s': ' ', '"': '"'})
+            decoded, offset = [], 0
+            while offset < len(value):
+                char = value[offset]
+                if char == '\\':
+                    offset += 1
+                    if offset == len(value) or value[offset] not in escapes:
+                        raise IntentError('Unsupported text escape')
+                    char = escapes[value[offset]]
+                decoded.append(char)
+                offset += 1
+            value = ''.join(decoded)
+        assert_json(value)
+        return value
+    else:
+        raw = _raw(text, tokens, typed).split(':', 1)[1].strip()
+        if typed.type == 'typed_null':
+            return None
+        if typed.type in ('typed_object', 'typed_list') and not raw:
+            return {} if typed.type == 'typed_object' else []
+        if typed.type == 'typed_number':
+            if not re.fullmatch(r'[+-]?' + NUMBER[2:], raw):
+                raise IntentError('Typed number must be one complete JSON number')
+            raw = raw.removeprefix('+')
+    value = _json(raw)
+    if typed is not None and typed.type == 'typed_json' and isinstance(value, str):
+        raise IntentError('json: does not accept a string value')
+    decoder = options.get('_host_value_decoder')
+    return decoder(raw) if decoder is not None else value
+
+
+def _convert_operation(text, tokens, root, options=None):
+    options = options or {}
+    line = next((node for node in _descendants(root) if node.type in ('line_write', 'line_remove', 'line_transfer')), None)
+    if line is None:
+        result = _convert_components(_ast_components(tokens, root), options)
+    else:
+        nodes = list(_descendants(line))
+        word = tokens[line.start].text.lower()
+        op = _operations(options).get(word)
+        if op is None:
+            raise IntentError('Unsupported line operation')
+        def path(role):
+            node = next(n for n in nodes if n.type == role)
+            slash = next((n for n in _descendants(node) if n.type == 'line_slash_path'), None)
+            if slash is not None:
+                raw = _raw(text, tokens, slash)
+                if line.type == 'line_remove' or any(n.type in ('header_write', 'header_transfer') for n in nodes):
+                    end = tokens[slash.end - 1].end
+                    while end < len(text) and text[end] not in '\r\n\u2028\u2029' and re.fullmatch('[' + WS + ']', text[end]):
+                        end += 1
+                    raw = text[tokens[slash.start].start:end]
+                decoder = options.get('_host_path_decoder')
+                return decoder([Node('RAW_PATH', raw)], options) if decoder is not None else _value_path_tokens(raw)
+            return path_tokens(lex_parse(_raw(text, tokens, node)), options)
+        result = {'op': op}
+        if line.type == 'line_transfer':
+            result.update({'from': path('line_source'), 'to': path('line_destination')})
+        else:
+            result['path'] = path('line_target')
+            if line.type == 'line_write':
+                value_node = next(node for node in nodes if node.type == 'line_value')
+                result['value'] = _typed_value(text, tokens, value_node, options)
+        if word == 'add':
+            result['semantic'] = 'literal_add'
+        if word == 'change':
+            if not any(node.type == 'typed_number' for node in nodes):
+                raise IntentError('change requires number:')
+            result['semantic'] = 'numeric_delta'
+    if result['op'] == 'remove' and options.get('output_format', options.get('outputFormat')) == 'typed_lines':
+        result['semantic'] = 'typed_remove'
+    return result
+
 
 
 def _convert_components(components, options=None):
@@ -339,17 +451,21 @@ def _convert_components(components, options=None):
     if 'op' in fields:
         if len(fields['op']) != 1:
             raise IntentError('Exactly one operation type required')
-        op = operations.get(str(_token_value(fields['op'][0])).lower())
+        word = str(_token_value(fields['op'][0])).lower()
+        op = operations.get(word)
     else:
         positions = [i for i, x in enumerate(unlabeled) if x.type == 'WORD' and x.text.lower() in operations]
         if not positions:
             positions = [i for i, x in enumerate(unlabeled) if x.type == 'STRING' and str(_token_value(x)).lower() in operations]
         if len(positions) != 1:
             raise IntentError('Exactly one unambiguous operation type required')
-        op = operations.get(str(_token_value(unlabeled.pop(positions[0]))).lower())
+        word = str(_token_value(unlabeled.pop(positions[0]))).lower()
+        op = operations.get(word)
     if not op:
         raise IntentError('Unsupported or ambiguous operation alias')
     ir = {'op': op}
+    if word == 'add':
+        ir['semantic'] = 'literal_add'
     for key in ('path', 'from', 'to'):
         if key in fields:
             ir[key] = path_tokens(fields[key], options)
@@ -532,19 +648,35 @@ def parse_intent_with_diagnostics(text, options=None):
     options = options or {}
     if type(text) is not str:
         raise IntentError('Intent text must be a string')
+    assert_json(text)
     if len(text.encode('utf-16-le', errors='surrogatepass')) // 2 > options.get('maxChars', 65536):
         raise IntentError('Intent text size limit exceeded')
     text, diagnostics = unwrap_fence(text)
-    repaired, repair = _repair_outer_wrapper(text, options)
+    # Recognize text bodies before checking grouping: literal quotes/brackets
+    # inside grammar-declared text are data, not program delimiters.
+    repaired, repair = text, None
+    try:
+        tokens, ast = _grammar_parse(text, 'intent', options)
+    except IntentError:
+        repaired, repair = _repair_outer_wrapper(text, options)
+        tokens, ast = _grammar_parse(repaired, 'intent', options)
     if repair:
         diagnostics.append({'code': 'OUTER_GROUP_RECOVERED', 'detail': repair})
-    tokens, ast = _grammar_parse(repaired, 'intent', options)
+    masked = list(repaired)
+    for node in _descendants(ast):
+        if node.type == 'typed_text':
+            start = tokens[node.start + 1].end
+            end = start
+            while end < len(repaired) and repaired[end] not in '\r\n\u2028\u2029':
+                masked[end] = ' '
+                end += 1
+    _repair_outer_wrapper(''.join(masked), options)
     def operations(node):
         records, pending = [], [node]
         while pending:
             current = pending.pop()
             if current.type == 'operation':
-                records.append(_convert_components(_ast_components(tokens, current), options))
+                records.append(_convert_operation(repaired, tokens, current, options))
                 if len(records) > options.get('maxOperations', 256):
                     raise IntentError('Operation count limit exceeded')
             else:
@@ -557,14 +689,43 @@ def parse_intent_with_diagnostics(text, options=None):
     while pending:
         node = pending.pop()
         if node.type == 'op_list':
-            nodes = lex_parse(' '.join(token.text for token in tokens[node.start:node.end]))
-            try:
-                alternate = parse_sequence(nodes, options)
-                if _key(alternate) != _key(operations(node)):
-                    raise IntentError('Ambiguous complete operation interpretations')
-            except IntentError as error:
-                if 'limit exceeded' in str(error) or 'Ambiguous' in str(error):
-                    raise
+            explicit = ('line_write', 'line_remove', 'line_transfer')
+            checks = []
+            if not any(n.type in explicit for n in _descendants(node)):
+                checks.append((' '.join(token.text for token in tokens[node.start:node.end]), operations(node)))
+            else:
+                # Explicit line signatures delimit old optional-field runs.
+                # Retain ambiguity proofs inside mixed programs without ever
+                # feeding literal text back through the old token projection.
+                events, walk = [], list(reversed(node.children))
+                while walk:
+                    current = walk.pop()
+                    if current.type in ('operation', 'op_group'):
+                        events.append(current)
+                    else:
+                        walk.extend(reversed(current.children))
+                run = []
+                def flush():
+                    if run:
+                        start = tokens[run[0].start].start
+                        end = tokens[run[-1].end - 1].end
+                        checks.append((repaired[start:end], [operation for n in run for operation in operations(n)]))
+                        run.clear()
+                for event in events:
+                    if event.type == 'op_group' or any(n.type in explicit for n in _descendants(event)):
+                        flush()
+                    else:
+                        run.append(event)
+                flush()
+            for source, expected in checks:
+                nodes = lex_parse(source)
+                try:
+                    alternate = parse_sequence(nodes, options)
+                    if _key(alternate) != _key(expected):
+                        raise IntentError('Ambiguous complete operation interpretations')
+                except IntentError as error:
+                    if 'limit exceeded' in str(error) or 'Ambiguous' in str(error):
+                        raise
         pending.extend(reversed(node.children))
     return {'operations': result, 'diagnostics': diagnostics}
 

@@ -15,7 +15,7 @@ public static partial class IntentParser
     private static readonly Dictionary<string, string> Operations = new(StringComparer.Ordinal)
     {
         ["add"]="append", ["append"]="append", ["insert"]="append", ["update"]="update",
-        ["remove"]="remove", ["delete"]="remove", ["copy"]="copy", ["move"]="move"
+        ["set"]="update", ["change"]="update", ["remove"]="remove", ["delete"]="remove", ["copy"]="copy", ["move"]="move"
     };
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
@@ -27,13 +27,13 @@ public static partial class IntentParser
     private const string Ws = @"\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
     private const string NumberPattern = @"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?";
     private sealed record LexRule(string Type, Regex Pattern, bool Ignore=false);
-    private sealed record Token(string Type, string Text);
+    private sealed record Token(string Type, string Text, int Start, int End);
     private sealed record Node(string Type, string Text, char Open='\0', List<Node>? Children=null)
     {
         public bool IsGroup => Children is not null;
     }
     private sealed record GrammarNode(string Name, int Start, int End, List<GrammarNode> Children);
-    private sealed record GrammarTree(List<Token> Tokens, GrammarNode Root);
+    private sealed record GrammarTree(List<Token> Tokens, GrammarNode Root, string Text);
     private static readonly JsonDocument GrammarSpec = LoadGrammarSpec();
     private static JsonDocument LoadGrammarSpec()
     {
@@ -72,8 +72,8 @@ public static partial class IntentParser
             string type=token.GetProperty("type").GetString()!,source=token.GetProperty("source").GetString()!;
             if(options.PathSyntax=="value_patch")
             {
-                if(type=="UPDATE") source=@"(?:update|replace)\b";
-                if(type=="Q_UPDATE") source="\"(?:update|replace)\"";
+                if(type=="UPDATE") source=@"(?:update|replace|set)\b";
+                if(type=="Q_UPDATE") source="\"(?:update|replace|set)\"";
             }
             var flags=RegexOptions.CultureInvariant|RegexOptions.ECMAScript;
             if(token.GetProperty("flags").GetString()!.Contains('i')) flags|=RegexOptions.IgnoreCase;
@@ -157,7 +157,7 @@ public static partial class IntentParser
         Schedule(rules.GetProperty(start),0,children,result=>end=result);
         while(work.Count>0) work.Pop()();
         if(end!=tokens.Count) throw new InvalidOperationException("No complete "+name+" grammar parse");
-        return new GrammarTree(tokens,new GrammarNode(start,0,end.Value,children));
+        return new GrammarTree(tokens,new GrammarNode(start,0,end.Value,children),text);
     }
     private static IEnumerable<GrammarNode> GrammarDescendants(GrammarNode root)
     {
@@ -170,6 +170,8 @@ public static partial class IntentParser
     }
     private static string GrammarText(GrammarTree tree,GrammarNode node)
         => string.Join(" ",tree.Tokens.Skip(node.Start).Take(node.End-node.Start).Select(t=>t.Text));
+    private static string GrammarRaw(GrammarTree tree,GrammarNode node)
+        => node.Start==node.End?"":tree.Text[tree.Tokens[node.Start].Start..tree.Tokens[node.End-1].End];
     private static List<Token> Lex(string text, List<LexRule> rules)
     {
         List<Token> result = new();
@@ -181,7 +183,7 @@ public static partial class IntentParser
                 Match match=rule.Pattern.Match(text,offset);
                 if (!match.Success || match.Length==0) continue;
                 offset+=match.Length; found=true;
-                if (!rule.Ignore) result.Add(new Token(rule.Type,match.Value));
+                if (!rule.Ignore) result.Add(new Token(rule.Type,match.Value,offset-match.Length,offset));
                 break;
             }
             if (!found) throw new InvalidOperationException($"Unexpected character at index {offset}");
@@ -331,8 +333,104 @@ public static partial class IntentParser
         var tree=ParseGrammar("operation",string.Join(" ",xs.Select(Render)),options);
         return ConvertOperation(tree,tree.Root,options);
     }
+    private static JsonNode? TypedValue(GrammarTree tree,GrammarNode root,IntentOptions options)
+    {
+        var typed=GrammarDescendants(root).FirstOrDefault(n=>n.Name.StartsWith("typed_",StringComparison.Ordinal));
+        if(typed is null)
+        {
+            var value=GrammarDescendants(root).First(n=>n.Name=="json_value");
+            return ParseStrictJson(GrammarRaw(tree,value));
+        }
+        if(typed.Name=="typed_text")
+        {
+            int start=tree.Tokens[typed.Start+1].End;
+            int end=start;
+            while(end<tree.Text.Length && tree.Text[end] is not ('\r' or '\n' or '\u2028' or '\u2029')) end++;
+            string text=tree.Text[start..end];
+            if(options.OutputFormat=="typed_lines" && text.StartsWith(' ')) text=text[1..];
+            if(options.OutputFormat is "literal_line" or "end_marked_line")
+            {
+                if(options.OutputFormat=="end_marked_line")
+                {
+                    if(!text.EndsWith('|')) throw new InvalidOperationException("Text value needs a final end marker");
+                    text=text[..^1];
+                }
+                var decoded=new System.Text.StringBuilder();
+                for(int i=0;i<text.Length;i++)
+                {
+                    if(text[i]!='\\') { decoded.Append(text[i]); continue; }
+                    if(++i==text.Length) throw new InvalidOperationException("Incomplete text escape");
+                    decoded.Append(text[i] switch {
+                        '\\'=>'\\', 'n'=>'\n', 'r'=>'\r', 't'=>'\t',
+                        's' when options.OutputFormat=="literal_line"=>' ',
+                        '"' when options.OutputFormat=="literal_line"=>'"',
+                        _=>throw new InvalidOperationException("Invalid text escape")
+                    });
+                }
+                text=decoded.ToString();
+            }
+            var value=JsonValue.Create(text);
+            JsonContract.AssertJson(value);
+            return value;
+        }
+        string raw=GrammarRaw(tree,typed);
+        string payload=raw[(raw.IndexOf(':')+1)..].Trim();
+        if(typed.Name=="typed_null") return null;
+        if(typed.Name=="typed_object" && payload.Length==0) return new JsonObject();
+        if(typed.Name=="typed_list" && payload.Length==0) return new JsonArray();
+        if(typed.Name=="typed_number")
+        {
+            if(!Regex.IsMatch(payload,@"^(?:"+NumberPattern+@"|\+(?!-)"+NumberPattern+@")$"))
+                throw new InvalidOperationException("Typed numbers require a complete finite JSON number");
+            if(payload.StartsWith('+')) payload=payload[1..];
+        }
+        var result=ParseStrictJson(payload);
+        if(typed.Name=="typed_json" && result is JsonValue scalar && scalar.TryGetValue<string>(out _))
+            throw new InvalidOperationException("json: does not accept a string value");
+        return result;
+    }
+    private static JsonObject ConvertLineOperation(GrammarTree tree,GrammarNode root,IntentOptions options)
+    {
+        var nodes=GrammarDescendants(root).ToList();
+        string word=tree.Tokens[root.Start].Text.ToLowerInvariant();
+        string op=CanonicalOperation(word,options)??throw new InvalidOperationException("Unsupported line operation");
+        JsonArray Path(string role)
+        {
+            var node=nodes.First(n=>n.Name==role);
+            var slash=GrammarDescendants(node).FirstOrDefault(n=>n.Name=="line_slash_path");
+            if(slash is not null)
+            {
+                int start=tree.Tokens[slash.Start].Start,end=tree.Tokens[slash.End-1].End;
+                if(root.Name=="line_remove" || nodes.Any(n=>n.Name is "header_write" or "header_transfer"))
+                    while(end<tree.Text.Length && tree.Text[end] is not ('\r' or '\n' or '\u2028' or '\u2029')
+                        && Regex.IsMatch(tree.Text[end].ToString(),"^["+Ws+"]$")) end++;
+                return ValuePathTokens(tree.Text[start..end]);
+            }
+            return PathTokens(LexParse(GrammarRaw(tree,node)).Where(n=>!IsSep(n)).ToList(),options);
+        }
+        JsonObject result=new(){["op"]=op};
+        if(root.Name=="line_transfer")
+        {
+            result["from"]=Path("line_source"); result["to"]=Path("line_destination");
+        }
+        else
+        {
+            result["path"]=Path("line_target");
+            if(root.Name=="line_write") result["value"]=TypedValue(tree,nodes.First(n=>n.Name=="line_value"),options);
+        }
+        if(word=="add") result["semantic"]="literal_add";
+        if(word=="change")
+        {
+            if(!nodes.Any(n=>n.Name=="typed_number")) throw new InvalidOperationException("change requires a typed number value");
+            result["semantic"]="numeric_delta";
+        }
+        if(op=="remove" && options.OutputFormat=="typed_lines") result["semantic"]="typed_remove";
+        return result;
+    }
     private static JsonObject ConvertOperation(GrammarTree tree,GrammarNode root,IntentOptions options)
     {
+        var line=GrammarDescendants(root).FirstOrDefault(n=>n.Name is "line_write" or "line_remove" or "line_transfer");
+        if(line is not null) return ConvertLineOperation(tree,line,options);
         var components=Components(tree,root);
         Dictionary<string,List<Node>> fields=new(StringComparer.Ordinal); List<Node> unlabeled=new();
         foreach (var items in components)
@@ -355,21 +453,24 @@ public static partial class IntentParser
                 var candidate=candidates[0]; fields[candidate.key].RemoveAt(candidate.index); unlabeled.Add(candidate.node);
             }
         }
-        string? op;
+        string? op; string originalWord;
         if (fields.TryGetValue("op",out var operation))
         {
             if (operation.Count!=1) throw new InvalidOperationException("Exactly one operation type required");
-            op=CanonicalOperation(TokenValue(operation[0]),options);
+            originalWord=TokenValue(operation[0]);
+            op=CanonicalOperation(originalWord,options);
         }
         else
         {
             var positions=Enumerable.Range(0,unlabeled.Count).Where(i=>IsOperation(unlabeled[i],options)).ToList();
             if (positions.Count==0) positions=Enumerable.Range(0,unlabeled.Count).Where(i=>unlabeled[i].Type=="STRING" && CanonicalOperation(TokenValue(unlabeled[i]),options) is not null).ToList();
             if (positions.Count!=1) throw new InvalidOperationException("Exactly one unambiguous operation type required");
-            op=CanonicalOperation(TokenValue(unlabeled[positions[0]]),options); unlabeled.RemoveAt(positions[0]);
+            originalWord=TokenValue(unlabeled[positions[0]]);
+            op=CanonicalOperation(originalWord,options); unlabeled.RemoveAt(positions[0]);
         }
         if (op is null) throw new InvalidOperationException("Unsupported or ambiguous operation alias");
         JsonObject ir=new() { ["op"]=op };
+        if(originalWord.Equals("add",StringComparison.OrdinalIgnoreCase)) ir["semantic"]="literal_add";
         foreach (string key in new[]{"path","from","to"}) if (fields.TryGetValue(key,out var value)) ir[key]=PathTokens(value,options);
         if (fields.TryGetValue("value",out var literal)) ir["value"]=ValueOf(literal);
         if (op is "append" or "update" && unlabeled.Count>0)
@@ -422,10 +523,22 @@ public static partial class IntentParser
             if (op=="remove" && ir.ContainsKey("value")) throw new InvalidOperationException("Remove cannot carry a value");
             if (op!="remove" && !ir.ContainsKey("value") && !ir.ContainsKey("unlabeledPathValue")) throw new InvalidOperationException("Missing value");
         }
+        if(op=="remove" && options.OutputFormat=="typed_lines") ir["semantic"]="typed_remove";
         return ir;
     }
-    private static (string text,string? repair) RepairOuterWrapper(string text, IntentOptions options)
+    private static (string text,string? repair) RepairOuterWrapper(string text, IntentOptions options, GrammarTree? tree=null)
     {
+        string original=text;
+        // Only grammar-proven text values are opaque to structural checks.
+        var masked=text.ToCharArray();
+        if(tree is not null)
+            foreach(var node in GrammarDescendants(tree.Root).Where(n=>n.Name=="typed_text"))
+            {
+                int start=tree.Tokens[node.Start].Start,textEnd=tree.Tokens[node.Start+1].End;
+                while(textEnd<text.Length && text[textEnd] is not ('\r' or '\n' or '\u2028' or '\u2029')) textEnd++;
+                Array.Fill(masked,' ',start,textEnd-start);
+            }
+        text=new string(masked);
         List<(char c,int index)> stack=new(), unmatched=new(); bool quoted=false,escaped=false;
         for (int i=0;i<text.Length;i++)
         {
@@ -441,11 +554,11 @@ public static partial class IntentParser
         }
         if (quoted) throw new InvalidOperationException("Unterminated quoted value");
         int first=Regex.Match(text,"[^"+Ws+"]").Index;
-        if (stack.Count==1 && unmatched.Count==0 && stack[0].index==first) return (text+Opens[stack[0].c],"missing outer closer");
+        if (stack.Count==1 && unmatched.Count==0 && stack[0].index==first) return (original+Opens[stack[0].c],"missing outer closer");
         int end=text.Length; while(end>0 && Regex.IsMatch(text[end-1].ToString(),"^["+Ws+"]$")) end--;
-        if (stack.Count==0 && unmatched.Count==1 && unmatched[0].index==end-1) return (Opens.Single(p=>p.Value==unmatched[0].c).Key+text,"missing outer opener");
+        if (stack.Count==0 && unmatched.Count==1 && unmatched[0].index==end-1) return (Opens.Single(p=>p.Value==unmatched[0].c).Key+original,"missing outer opener");
         if (stack.Count>0 || unmatched.Count>0) throw new InvalidOperationException("Unbalanced inner grouping cannot be safely recovered");
-        return (text,null);
+        return (original,null);
     }
     private static List<JsonObject> ParseSequence(List<Node> xs,IntentOptions options)
     {
@@ -506,9 +619,18 @@ public static partial class IntentParser
         var fence=Regex.Match(text,"^["+Ws+"]*```(?:json)?[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n```[ \\t]*["+Ws+"]*$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant);
         JsonArray diagnostics=new();
         if(fence.Success) { text=fence.Groups[1].Value; diagnostics.Add(new JsonObject(){["code"]="MARKDOWN_FENCE_REMOVED",["detail"]="single enclosing JSON code fence"}); }
-        var repaired=RepairOuterWrapper(text,options);
-        if(repaired.repair is not null) diagnostics.Add(new JsonObject(){["code"]="OUTER_GROUP_RECOVERED",["detail"]=repaired.repair});
-        var tree=ParseGrammar("intent",repaired.text,options);
+        GrammarTree tree;
+        try { tree=ParseGrammar("intent",text,options); }
+        catch(InvalidOperationException)
+        {
+            var repaired=RepairOuterWrapper(text,options);
+            if(repaired.repair is null) throw;
+            text=repaired.text;
+            tree=ParseGrammar("intent",text,options);
+            diagnostics.Add(new JsonObject(){["code"]="OUTER_GROUP_RECOVERED",["detail"]=repaired.repair});
+        }
+        // Successful grammar parses still enforce the configured depth bound.
+        RepairOuterWrapper(text,options,tree);
         List<JsonObject> OperationsIn(GrammarNode node)
         {
             List<JsonObject> result=new();
@@ -520,15 +642,46 @@ public static partial class IntentParser
             return result;
         }
         var records=OperationsIn(tree.Root);
-        foreach(var node in GrammarDescendants(tree.Root).Where(n=>n.Name=="op_list"))
+        void VerifyBoundaries(string source,List<JsonObject> expected)
         {
-            var nodes=LexParse(GrammarText(tree,node));
             try
             {
-                var alternate=ParseSequence(nodes,options); var expected=OperationsIn(node);
+                var alternate=ParseSequence(LexParse(source),options);
                 if(JsonSerializer.Serialize(alternate)!=JsonSerializer.Serialize(expected)) throw new InvalidOperationException("Ambiguous complete operation interpretations");
             }
             catch(Exception e) when((e is InvalidOperationException or JsonException or ArgumentException) && !e.Message.Contains("limit exceeded") && !e.Message.Contains("Ambiguous")) { }
+        }
+        foreach(var node in GrammarDescendants(tree.Root).Where(n=>n.Name=="op_list"))
+        {
+            if(!GrammarDescendants(node).Any(n=>n.Name.StartsWith("line_",StringComparison.Ordinal)))
+            {
+                VerifyBoundaries(GrammarText(tree,node),OperationsIn(node));
+                continue;
+            }
+            // Explicit line operations and groups delimit generic runs. Never
+            // re-tokenize opaque text while proving generic newline boundaries.
+            List<GrammarNode> run=new();
+            void Flush()
+            {
+                if(run.Count==0) return;
+                string source=tree.Text[tree.Tokens[run[0].Start].Start..tree.Tokens[run[^1].End-1].End];
+                VerifyBoundaries(source,run.Select(n=>ConvertOperation(tree,n,options)).ToList());
+                run.Clear();
+            }
+            Stack<GrammarNode> pending=new(); pending.Push(node);
+            while(pending.Count>0)
+            {
+                var current=pending.Pop();
+                if(current.Name=="op_group") { Flush(); continue; }
+                if(current.Name=="operation")
+                {
+                    if(GrammarDescendants(current).Any(n=>n.Name is "line_write" or "line_remove" or "line_transfer")) Flush();
+                    else run.Add(current);
+                    continue;
+                }
+                for(int i=current.Children.Count-1;i>=0;i--) pending.Push(current.Children[i]);
+            }
+            Flush();
         }
         return new JsonObject(){["operations"]=new JsonArray(records.Select(x=>(JsonNode)x).ToArray()),["diagnostics"]=diagnostics};
     }

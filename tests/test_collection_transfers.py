@@ -192,14 +192,14 @@ class CollectionTransferTests(unittest.TestCase):
             host.normalize_response('copy: /source/"constructor"\nto: /constructor',
                                     initial, 'typed_lines', declarations)
 
-    def test_explicit_v2_contract_and_frozen_v1_rejected_before_normalization(self):
+    def test_explicit_v3_contract_and_frozen_v1_rejected_before_normalization(self):
         from tests.test_array_identities_intent import fixture as scoring_fixture
         test = scoring_fixture()
-        self.assertEqual(host.VERSION, 'array-identities-intent-v2')
+        self.assertEqual(host.VERSION, 'array-identities-intent-v3')
         variant = test['variants'][0]
         variant['result']['evaluator']['version'] = 'array-identities-intent-v1'
         self.assertIs(selected(variant['result']), host)
-        with self.assertRaisesRegex(ValueError, 'stale'):
+        with self.assertRaisesRegex(ValueError, '[Rr]etired|stale'):
             validate_test(test)
         with patch.object(host, 'normalize_response', side_effect=AssertionError('Must not rescore v1')):
             result = evaluate(test, variant, {'patch': '[]'})

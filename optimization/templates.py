@@ -190,7 +190,7 @@ def projection(case, candidate, remote=False):
                 for s in steps(variant['steps'])]
     evaluator = variant.get('result', {}).get('evaluator', {})
     identity_contract = ({'array_identities': copy.deepcopy(test['source'].get('array_identities'))}
-                         if isinstance(evaluator, dict) and evaluator.get('version') in ('array-identities-intent-v1', 'array-identities-intent-v2') else {})
+                         if isinstance(evaluator, dict) and evaluator.get('version') in ('array-identities-intent-v1', 'array-identities-intent-v2', 'array-identities-intent-v3') else {})
     return digest({**identity_contract, 'bindings': bindings(case), 'earlier': [messages(test, s, {k: '<actual prior output>' for k in s.get('uses', [])}, variant) for s in earlier],
                    'workflow': workflow,
                    'controls': controls, 'contract': variant['result'], 'oracle': test.get('expected_state'),

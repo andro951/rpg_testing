@@ -149,11 +149,11 @@ class ArrayIdentityTests(unittest.TestCase):
             self.assertEqual(summarize(record)['objective_outcome'], 'UNSCORED')
             self.assertIn('configuration error', summarize(record)['reason'])
 
-    def test_legacy_inference_remains_separate(self):
+    def test_legacy_inference_is_explicitly_retired(self):
         self.assertEqual(legacy.VERSION, 'schema-free-intent-v1')
         self.assertNotEqual(host.VERSION, legacy.VERSION)
-        with self.assertRaisesRegex(ValueError, 'ambiguous'):
-            legacy.validate_data({'items': [{'id': 'a', 'owner_id': 'x'}]})
+        with self.assertRaisesRegex(ValueError, '[Rr]etired'):
+            legacy.normalize_response('[]', {'items': [{'id': 'a', 'owner_id': 'x'}]})
         host.validate_data({'items': [{'id': 'a', 'owner_id': 'x'}]}, [mapping(field='id')])
 
 

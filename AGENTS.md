@@ -1,11 +1,17 @@
 ## Current template-builder contract (2026-11-10, supersedes older builder/schema instructions)
 
 - Editable sources: prompt_builder/templates/{common,input_format,output_format,test_cases}. Old test_builder was removed at the user’s request; do not restore it.
-- Current root suite is all 21 cases across six active structured output formats and three input views (one case has two views): 372 distinct prompts / 372 observations per model at one repetition, array-identities-intent-v2. The required coverage catalog and active format metadata define all-tests; never describe an explicit subset as all tests. Two-line text is historical and free format experimental, selectable explicitly. Preserve historical definitions/evidence and do not reuse old evaluator pins.
+- Current root suite is all 21 cases across six active structured output formats and three input views (one case has two views): 372 distinct prompts / 372 observations per model at one repetition, array-identities-intent-v3. The required coverage catalog and active format metadata define all-tests; never describe an explicit subset as all tests. Two-line text is historical and free format experimental, selectable explicitly. Preserve historical definitions/evidence and do not reuse old evaluator pins.
 - Per-case array_identities.json is an ID-only pseudo-schema, frozen in source.array_identities. Use it for validation and, by the user’s later explicit approval, internally to choose array IDs for id_keyed_arrays and full_paths input conversion only. Never insert the mapping or a schema description into prompts or template/OPRO bindings. Normal JSON presentation does not require it. named_tables keeps its separate data-only ID convention. No full shape schemas or expected answers enter prompt assembly/normalization. General uniqueness/unordered restrictions apply.
 - Expected patches are diagnostic only; pass/fail is final-state equality with unordered database arrays. Operation arrays remain ordered. Preserve frozen historic grading.
 - Edit text in files once, rebuild with python -m prompt_builder --output build/prompt-suite; --install activates after archiving old definitions. No automatic inference.
 - Legacy byte-parity evidence is archives/prompt-builder-parity; final schema-free prompts intentionally differ.
+
+# Shared intent evaluation (2026-11-11)
+
+- All current output formats use the same intent grammar. Do not add independent format-specific response decoders or restore retired Ember/field-value readers. Format options may specify literal text encoding, not bypass the parser.
+- Historical scores/raw responses stay frozen. Retired contracts are viewable evidence, not runnable under new semantics; v1/v2 evaluator pins must fail before inference or normalization. Do not silently rescore or rewrite old results.
+- The current desktop missing-eight run was frozen before this migration. Never change its evaluator in place or relabel it as v3.
 
 # Development rules
 

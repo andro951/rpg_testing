@@ -1,8 +1,8 @@
 {
   "version": 1,
   "sourceHashes": {
-    "intent": "8756049ee49517c3f0f1242b2a2fe1e863aad708ea1532de4c7169ccf5ec01ef",
-    "operation": "af5b3c422fff5b98700a54bee69b0cfcf803f3569f6b46ced230ba3433ce8e0a",
+    "intent": "b7cc0688e3e886618eb630d6b04cf3efa62858fd2be3139c309d2edfbada7106",
+    "operation": "60f1410230f9c299bfc706e088aac2f6c05790f663a54b1ad64bb9e298321c07",
     "tokens": "b9fc8c6853ac6a8fe9d7d2544e005969faaed6b418ae58ca0e81ddff27a43cc2"
   },
   "grammars": {
@@ -13,6 +13,7 @@
           "|",
           [
             "fenced_program",
+            "no_change",
             "op_list"
           ]
         ],
@@ -20,8 +21,30 @@
           ",",
           [
             "FENCE_OPEN",
-            "op_list",
+            "NEWLINE",
+            "program_body",
             "FENCE_CLOSE"
+          ]
+        ],
+        "program_body": [
+          "|",
+          [
+            "no_change",
+            "op_list"
+          ]
+        ],
+        "no_change": [
+          ",",
+          [
+            [
+              "*",
+              "NEWLINE"
+            ],
+            "NONE",
+            [
+              "*",
+              "NEWLINE"
+            ]
           ]
         ],
         "op_list": [
@@ -118,9 +141,279 @@
         "operation": [
           "|",
           [
+            "line_transfer",
+            "line_remove",
             "remove",
             "write",
+            "line_write",
             "move_copy"
+          ]
+        ],
+        "line_write": [
+          "|",
+          [
+            "header_write",
+            "inline_write"
+          ]
+        ],
+        "header_write": [
+          ",",
+          [
+            "line_write_name",
+            "COLON",
+            "line_target",
+            "NEWLINE",
+            "line_value"
+          ]
+        ],
+        "inline_write": [
+          ",",
+          [
+            "line_write_name",
+            "line_target",
+            "COLON",
+            "line_value"
+          ]
+        ],
+        "line_remove": [
+          ",",
+          [
+            "remove_name",
+            "COLON",
+            "line_target"
+          ]
+        ],
+        "line_transfer": [
+          "|",
+          [
+            "header_transfer",
+            "arrow_transfer"
+          ]
+        ],
+        "header_transfer": [
+          ",",
+          [
+            "cm_name",
+            "COLON",
+            "line_source",
+            "NEWLINE",
+            "to_label",
+            "COLON",
+            "line_destination"
+          ]
+        ],
+        "arrow_transfer": [
+          ",",
+          [
+            "cm_name",
+            "line_source",
+            "ARROW",
+            "line_destination"
+          ]
+        ],
+        "line_write_name": [
+          "|",
+          [
+            "ADD_UPDATE",
+            "ADD",
+            "UPDATE",
+            "CHANGE"
+          ]
+        ],
+        "line_target": "line_path",
+        "line_source": "line_path",
+        "line_destination": "line_path",
+        "line_path": [
+          "|",
+          [
+            "line_slash_path",
+            "path"
+          ]
+        ],
+        "line_slash_path": [
+          ",",
+          [
+            "SLASH",
+            "slash_segment",
+            [
+              "*",
+              [
+                ",",
+                [
+                  "SLASH",
+                  "slash_segment"
+                ]
+              ]
+            ]
+          ]
+        ],
+        "slash_segment": [
+          "+",
+          "slash_atom"
+        ],
+        "slash_atom": [
+          "|",
+          [
+            "path_part",
+            "PATH_SEPARATOR",
+            "TEXT_LABEL",
+            "NUMBER_LABEL",
+            "BOOLEAN_LABEL",
+            "OBJECT_LABEL",
+            "LIST_LABEL",
+            "JSON_LABEL",
+            "VALUE_LABEL",
+            "TO_LABEL",
+            "FROM_LABEL",
+            "PATH_LABEL",
+            "OP_LABEL"
+          ]
+        ],
+        "line_value": [
+          "|",
+          [
+            "typed_text",
+            "typed_number",
+            "typed_boolean",
+            "typed_null",
+            "typed_object",
+            "typed_list",
+            "typed_json",
+            "labeled_json",
+            "json_value"
+          ]
+        ],
+        "typed_text": [
+          ",",
+          [
+            "TEXT_LABEL",
+            "COLON",
+            [
+              "*",
+              "text_atom"
+            ]
+          ]
+        ],
+        "typed_number": [
+          ",",
+          [
+            "NUMBER_LABEL",
+            "COLON",
+            [
+              "?",
+              "PLUS"
+            ],
+            "NUMBER"
+          ]
+        ],
+        "typed_boolean": [
+          ",",
+          [
+            "BOOLEAN_LABEL",
+            "COLON",
+            "BOOLEAN"
+          ]
+        ],
+        "typed_null": [
+          ",",
+          [
+            "NULL",
+            "COLON"
+          ]
+        ],
+        "typed_object": [
+          ",",
+          [
+            "OBJECT_LABEL",
+            "COLON",
+            [
+              "?",
+              "json_object"
+            ]
+          ]
+        ],
+        "typed_list": [
+          ",",
+          [
+            "LIST_LABEL",
+            "COLON",
+            [
+              "?",
+              "json_array"
+            ]
+          ]
+        ],
+        "typed_json": [
+          ",",
+          [
+            "JSON_LABEL",
+            "COLON",
+            "json_value"
+          ]
+        ],
+        "labeled_json": [
+          ",",
+          [
+            "value_label",
+            "COLON",
+            "json_value"
+          ]
+        ],
+        "text_atom": [
+          "|",
+          [
+            "STRING",
+            "NUMBER",
+            "WORD",
+            "ADD_UPDATE",
+            "ADD",
+            "UPDATE",
+            "CHANGE",
+            "REMOVE",
+            "MOVE",
+            "COPY",
+            "BOOLEAN",
+            "NULL",
+            "NONE",
+            "TEXT_LABEL",
+            "NUMBER_LABEL",
+            "BOOLEAN_LABEL",
+            "OBJECT_LABEL",
+            "LIST_LABEL",
+            "JSON_LABEL",
+            "VALUE_LABEL",
+            "OP_LABEL",
+            "PATH_LABEL",
+            "FROM_LABEL",
+            "TO_LABEL",
+            "Q_OP_LABEL",
+            "Q_PATH_LABEL",
+            "Q_FROM_LABEL",
+            "Q_TO_LABEL",
+            "Q_VALUE_LABEL",
+            "Q_ADD_UPDATE",
+            "Q_ADD",
+            "Q_UPDATE",
+            "Q_REMOVE",
+            "Q_MOVE",
+            "Q_COPY",
+            "DELIMITER",
+            "ARROW",
+            "COLON",
+            "SLASH",
+            "PATH_SEPARATOR",
+            "LPAREN",
+            "RPAREN",
+            "LBRACE",
+            "RBRACE",
+            "LBRACKET",
+            "RBRACKET",
+            "SEP_COMMA",
+            "SEMICOLON",
+            "PLUS",
+            "RAW_CHAR",
+            "FENCE_OPEN",
+            "FENCE_CLOSE"
           ]
         ],
         "remove": [
@@ -694,7 +987,25 @@
             "MOVE",
             "COPY",
             "BOOLEAN",
-            "NULL"
+            "NULL",
+            "NONE",
+            "CHANGE",
+            "TEXT_LABEL",
+            "NUMBER_LABEL",
+            "BOOLEAN_LABEL",
+            "OBJECT_LABEL",
+            "LIST_LABEL",
+            "JSON_LABEL",
+            "OP_LABEL",
+            "PATH_LABEL",
+            "FROM_LABEL",
+            "TO_LABEL",
+            "VALUE_LABEL",
+            "Q_OP_LABEL",
+            "Q_PATH_LABEL",
+            "Q_FROM_LABEL",
+            "Q_TO_LABEL",
+            "Q_VALUE_LABEL"
           ]
         ],
         "path_delimiter": [
@@ -716,7 +1027,8 @@
           "|",
           [
             "COLON",
-            "DELIMITER"
+            "DELIMITER",
+            "ARROW"
           ]
         ],
         "field_gap": [
@@ -841,8 +1153,62 @@
       },
       "tokens": [
         {
+          "type": "TEXT_LABEL",
+          "source": "text\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "NUMBER_LABEL",
+          "source": "number\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "BOOLEAN_LABEL",
+          "source": "boolean\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "OBJECT_LABEL",
+          "source": "object\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "LIST_LABEL",
+          "source": "list\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "JSON_LABEL",
+          "source": "json\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "NONE",
+          "source": "none\\b",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "CHANGE",
+          "source": "change\\b",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "PLUS",
+          "source": "\\+",
+          "flags": "",
+          "tag": "KEEP"
+        },
+        {
           "type": "FENCE_OPEN",
-          "source": "```(?:json)?[ \\t]*\\r?\\n",
+          "source": "```(?:json)?[ \\t]*(?=\\r?\\n)",
           "flags": "i",
           "tag": "KEEP"
         },
@@ -932,7 +1298,7 @@
         },
         {
           "type": "Q_UPDATE",
-          "source": "\"update\"",
+          "source": "\"(?:update|set)\"",
           "flags": "i",
           "tag": "KEEP"
         },
@@ -968,7 +1334,7 @@
         },
         {
           "type": "UPDATE",
-          "source": "update\\b",
+          "source": "(?:update|set)\\b",
           "flags": "i",
           "tag": "KEEP"
         },
@@ -1015,8 +1381,14 @@
           "tag": "KEEP"
         },
         {
+          "type": "ARROW",
+          "source": "->",
+          "flags": "",
+          "tag": "KEEP"
+        },
+        {
           "type": "DELIMITER",
-          "source": "=>|->|=",
+          "source": "=>|=",
           "flags": "",
           "tag": "KEEP"
         },
@@ -1095,6 +1467,12 @@
         {
           "type": "NEWLINE",
           "source": "\\r\\n|[\\r\\n\\u2028\\u2029]",
+          "flags": "",
+          "tag": "KEEP"
+        },
+        {
+          "type": "RAW_CHAR",
+          "source": "[^\\s]",
           "flags": "",
           "tag": "KEEP"
         },
@@ -1130,9 +1508,279 @@
         "operation": [
           "|",
           [
+            "line_transfer",
+            "line_remove",
             "remove",
             "write",
+            "line_write",
             "move_copy"
+          ]
+        ],
+        "line_write": [
+          "|",
+          [
+            "header_write",
+            "inline_write"
+          ]
+        ],
+        "header_write": [
+          ",",
+          [
+            "line_write_name",
+            "COLON",
+            "line_target",
+            "NEWLINE",
+            "line_value"
+          ]
+        ],
+        "inline_write": [
+          ",",
+          [
+            "line_write_name",
+            "line_target",
+            "COLON",
+            "line_value"
+          ]
+        ],
+        "line_remove": [
+          ",",
+          [
+            "remove_name",
+            "COLON",
+            "line_target"
+          ]
+        ],
+        "line_transfer": [
+          "|",
+          [
+            "header_transfer",
+            "arrow_transfer"
+          ]
+        ],
+        "header_transfer": [
+          ",",
+          [
+            "cm_name",
+            "COLON",
+            "line_source",
+            "NEWLINE",
+            "to_label",
+            "COLON",
+            "line_destination"
+          ]
+        ],
+        "arrow_transfer": [
+          ",",
+          [
+            "cm_name",
+            "line_source",
+            "ARROW",
+            "line_destination"
+          ]
+        ],
+        "line_write_name": [
+          "|",
+          [
+            "ADD_UPDATE",
+            "ADD",
+            "UPDATE",
+            "CHANGE"
+          ]
+        ],
+        "line_target": "line_path",
+        "line_source": "line_path",
+        "line_destination": "line_path",
+        "line_path": [
+          "|",
+          [
+            "line_slash_path",
+            "path"
+          ]
+        ],
+        "line_slash_path": [
+          ",",
+          [
+            "SLASH",
+            "slash_segment",
+            [
+              "*",
+              [
+                ",",
+                [
+                  "SLASH",
+                  "slash_segment"
+                ]
+              ]
+            ]
+          ]
+        ],
+        "slash_segment": [
+          "+",
+          "slash_atom"
+        ],
+        "slash_atom": [
+          "|",
+          [
+            "path_part",
+            "PATH_SEPARATOR",
+            "TEXT_LABEL",
+            "NUMBER_LABEL",
+            "BOOLEAN_LABEL",
+            "OBJECT_LABEL",
+            "LIST_LABEL",
+            "JSON_LABEL",
+            "VALUE_LABEL",
+            "TO_LABEL",
+            "FROM_LABEL",
+            "PATH_LABEL",
+            "OP_LABEL"
+          ]
+        ],
+        "line_value": [
+          "|",
+          [
+            "typed_text",
+            "typed_number",
+            "typed_boolean",
+            "typed_null",
+            "typed_object",
+            "typed_list",
+            "typed_json",
+            "labeled_json",
+            "json_value"
+          ]
+        ],
+        "typed_text": [
+          ",",
+          [
+            "TEXT_LABEL",
+            "COLON",
+            [
+              "*",
+              "text_atom"
+            ]
+          ]
+        ],
+        "typed_number": [
+          ",",
+          [
+            "NUMBER_LABEL",
+            "COLON",
+            [
+              "?",
+              "PLUS"
+            ],
+            "NUMBER"
+          ]
+        ],
+        "typed_boolean": [
+          ",",
+          [
+            "BOOLEAN_LABEL",
+            "COLON",
+            "BOOLEAN"
+          ]
+        ],
+        "typed_null": [
+          ",",
+          [
+            "NULL",
+            "COLON"
+          ]
+        ],
+        "typed_object": [
+          ",",
+          [
+            "OBJECT_LABEL",
+            "COLON",
+            [
+              "?",
+              "json_object"
+            ]
+          ]
+        ],
+        "typed_list": [
+          ",",
+          [
+            "LIST_LABEL",
+            "COLON",
+            [
+              "?",
+              "json_array"
+            ]
+          ]
+        ],
+        "typed_json": [
+          ",",
+          [
+            "JSON_LABEL",
+            "COLON",
+            "json_value"
+          ]
+        ],
+        "labeled_json": [
+          ",",
+          [
+            "value_label",
+            "COLON",
+            "json_value"
+          ]
+        ],
+        "text_atom": [
+          "|",
+          [
+            "STRING",
+            "NUMBER",
+            "WORD",
+            "ADD_UPDATE",
+            "ADD",
+            "UPDATE",
+            "CHANGE",
+            "REMOVE",
+            "MOVE",
+            "COPY",
+            "BOOLEAN",
+            "NULL",
+            "NONE",
+            "TEXT_LABEL",
+            "NUMBER_LABEL",
+            "BOOLEAN_LABEL",
+            "OBJECT_LABEL",
+            "LIST_LABEL",
+            "JSON_LABEL",
+            "VALUE_LABEL",
+            "OP_LABEL",
+            "PATH_LABEL",
+            "FROM_LABEL",
+            "TO_LABEL",
+            "Q_OP_LABEL",
+            "Q_PATH_LABEL",
+            "Q_FROM_LABEL",
+            "Q_TO_LABEL",
+            "Q_VALUE_LABEL",
+            "Q_ADD_UPDATE",
+            "Q_ADD",
+            "Q_UPDATE",
+            "Q_REMOVE",
+            "Q_MOVE",
+            "Q_COPY",
+            "DELIMITER",
+            "ARROW",
+            "COLON",
+            "SLASH",
+            "PATH_SEPARATOR",
+            "LPAREN",
+            "RPAREN",
+            "LBRACE",
+            "RBRACE",
+            "LBRACKET",
+            "RBRACKET",
+            "SEP_COMMA",
+            "SEMICOLON",
+            "PLUS",
+            "RAW_CHAR",
+            "FENCE_OPEN",
+            "FENCE_CLOSE"
           ]
         ],
         "remove": [
@@ -1706,7 +2354,25 @@
             "MOVE",
             "COPY",
             "BOOLEAN",
-            "NULL"
+            "NULL",
+            "NONE",
+            "CHANGE",
+            "TEXT_LABEL",
+            "NUMBER_LABEL",
+            "BOOLEAN_LABEL",
+            "OBJECT_LABEL",
+            "LIST_LABEL",
+            "JSON_LABEL",
+            "OP_LABEL",
+            "PATH_LABEL",
+            "FROM_LABEL",
+            "TO_LABEL",
+            "VALUE_LABEL",
+            "Q_OP_LABEL",
+            "Q_PATH_LABEL",
+            "Q_FROM_LABEL",
+            "Q_TO_LABEL",
+            "Q_VALUE_LABEL"
           ]
         ],
         "path_delimiter": [
@@ -1728,7 +2394,8 @@
           "|",
           [
             "COLON",
-            "DELIMITER"
+            "DELIMITER",
+            "ARROW"
           ]
         ],
         "field_gap": [
@@ -1853,8 +2520,62 @@
       },
       "tokens": [
         {
+          "type": "TEXT_LABEL",
+          "source": "text\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "NUMBER_LABEL",
+          "source": "number\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "BOOLEAN_LABEL",
+          "source": "boolean\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "OBJECT_LABEL",
+          "source": "object\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "LIST_LABEL",
+          "source": "list\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "JSON_LABEL",
+          "source": "json\\b(?=[ \\t]*:)",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "NONE",
+          "source": "none\\b",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "CHANGE",
+          "source": "change\\b",
+          "flags": "i",
+          "tag": "KEEP"
+        },
+        {
+          "type": "PLUS",
+          "source": "\\+",
+          "flags": "",
+          "tag": "KEEP"
+        },
+        {
           "type": "FENCE_OPEN",
-          "source": "```(?:json)?[ \\t]*\\r?\\n",
+          "source": "```(?:json)?[ \\t]*(?=\\r?\\n)",
           "flags": "i",
           "tag": "KEEP"
         },
@@ -1944,7 +2665,7 @@
         },
         {
           "type": "Q_UPDATE",
-          "source": "\"update\"",
+          "source": "\"(?:update|set)\"",
           "flags": "i",
           "tag": "KEEP"
         },
@@ -1980,7 +2701,7 @@
         },
         {
           "type": "UPDATE",
-          "source": "update\\b",
+          "source": "(?:update|set)\\b",
           "flags": "i",
           "tag": "KEEP"
         },
@@ -2027,8 +2748,14 @@
           "tag": "KEEP"
         },
         {
+          "type": "ARROW",
+          "source": "->",
+          "flags": "",
+          "tag": "KEEP"
+        },
+        {
           "type": "DELIMITER",
-          "source": "=>|->|=",
+          "source": "=>|=",
           "flags": "",
           "tag": "KEEP"
         },
@@ -2107,6 +2834,12 @@
         {
           "type": "NEWLINE",
           "source": "\\r\\n|[\\r\\n\\u2028\\u2029]",
+          "flags": "",
+          "tag": "KEEP"
+        },
+        {
+          "type": "RAW_CHAR",
+          "source": "[^\\s]",
           "flags": "",
           "tag": "KEEP"
         },
