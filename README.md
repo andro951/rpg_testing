@@ -98,7 +98,7 @@ The current app is **[workbench/](workbench/)**, using its own native `llama-ser
 | Web UI / API | [workbench/web/](workbench/web/), [server.py](workbench/server.py) |
 | Queue, execution and resume | [controller.py](workbench/controller.py), [scheduler.py](workbench/scheduler.py), [workflows.py](workbench/workflows.py), [planning.py](workbench/planning.py) |
 | Native inference and model setup | [native.py](workbench/native.py), [model_manager.py](workbench/model_manager.py), [runtimes.py](workbench/runtimes.py), [inventory.py](workbench/inventory.py), [preflight.py](workbench/preflight.py) |
-| Perchance adapter | [perchance.py](workbench/perchance.py), [perchance_setup.py](workbench/perchance_setup.py), [perchance_trials.py](workbench/perchance_trials.py), [tools/perchance-text/](tools/perchance-text/) |
+| Perchance adapter | [perchance.py](workbench/perchance.py), [perchance_connection.py](workbench/perchance_connection.py), [perchance_setup.py](workbench/perchance_setup.py), [perchance_trials.py](workbench/perchance_trials.py), [tools/perchance-text/](tools/perchance-text/) |
 | Optimization and coverage | [optimization/](optimization/), [workbench/coverage_worker.py](workbench/coverage_worker.py), [workbench/unity.py](workbench/unity.py) |
 | Results, detailed diagnostics and test review | [reporting/](reporting/), [evaluation/](evaluation/), [workbench/judgements.py](workbench/judgements.py), [test_judgements.json](test_judgements.json) |
 | Software tests and verification tools | [tests/](tests/), [scripts/](scripts/), [.github/workflows/](.github/workflows/) |

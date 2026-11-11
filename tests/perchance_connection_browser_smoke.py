@@ -1,5 +1,6 @@
 """Normal browser -> CDP -> hosted iframe, with a simulated text service only."""
 import errno
+import json
 import os
 import socket
 import subprocess
@@ -125,17 +126,49 @@ def main():
                 assert backend.frame.evaluate('() => lastSeed') == 42
                 assert first['forwarded_sampling'] == {'seed': 42}
                 assert first['applied_sampling'] is None and first['seed_reproducibility'] == 'unverified'
+                backend.context.add_cookies([{'name': 'fixture', 'value': 'retained', 'url': url}])
                 backend.close()
-                assert connection.listening(port), 'Disconnect must leave the normal browser running'
+                assert child[-1].poll() is not None, 'Owned browser must exit before cleanup returns'
+                assert not connection.listening(port), 'A finished run must not leave a browser window'
+                assert (Path(settings['perchance_profile'])).is_dir(), 'Keep authentication profile'
                 backend = connection.ControlledBrowserBackend(settings); backend.open()
                 assert backend.page.url == page_url
-                assert backend.frame.evaluate('() => calls') == 1, 'Hosted page must survive reconnect'
+                assert backend.frame.evaluate('() => calls') == 0, 'New run must not retain a stale hosted page'
+                assert any(c['name'] == 'fixture' and c['value'] == 'retained' for c in backend.context.cookies())
                 second = backend.generate([{'role': 'user', 'content': 'Second fixture prompt'}], {'seed': 104771}, None, threading.Event())
-                assert second['text'] == ' RAW\n' and backend.frame.evaluate('() => calls') == 2
+                assert second['text'] == ' RAW\n' and backend.frame.evaluate('() => calls') == 1
                 assert backend.frame.evaluate('() => lastSeed') == 104771
                 assert second['forwarded_sampling'] == {'seed': 104771}
-                launch.assert_called_once()
+                assert launch.call_count == 2
                 assert backend.environment['browser_connection'] == 'normal-browser-cdp-v1'
+                backend.close()
+                assert not connection.listening(port)
+                # Startup exceptions exercise production cleanup before open()
+                # returns, with no request and no browser left for the next run.
+                backend = connection.ControlledBrowserBackend({**settings, 'perchance_ready_seconds': 0})
+                try:
+                    backend.open()
+                except RuntimeError as exc:
+                    assert 'text plugin' in str(exc)
+                else:
+                    raise AssertionError('Expected a simulated plugin-readiness failure')
+                assert child[-1].poll() is not None
+                assert not connection.listening(port)
+                # Independently launch a fixture-owned stand-in for an existing
+                # user's browser. The production backend must not claim it.
+                fixture_launch(executable, settings['perchance_profile'], port, url)
+                connection.wait_for_browser(port, lambda: False)
+                marker = Path(settings['perchance_profile']) / 'rpg-cdp-owner.json'
+                marker.write_text(json.dumps({'port': port, 'profile': str(Path(settings['perchance_profile']).resolve())}))
+                backend = connection.ControlledBrowserBackend(settings); backend.open()
+                own_page = backend.page
+                old_pages = [page for page in backend.context.pages if page != own_page]
+                assert old_pages, 'Expected the pre-existing launch page'
+                backend.close()
+                assert own_page.is_closed()
+                assert all(not page.is_closed() for page in old_pages)
+                assert connection.listening(port), 'Leave the existing browser open'
+                assert child[-1].poll() is None
             except Exception:
                 browser_stderr.flush()
                 report_browser_failure(executable, child, browser_stderr.name)
@@ -144,7 +177,7 @@ def main():
                 shutdown_fixture_browser(backend, child)
     finally:
         server.shutdown(); server.server_close(); thread.join(5)
-    print('PASS: separately launched normal browser, CDP attachment, iframe worker, raw text/chunks, disconnect, preserved page and reconnect without relaunch. Text service SIMULATED; real browser/CDP/HTTP.')
+    print('PASS: owned browser exits, attached session closes only its own tab, repeated runs retain cookies without accumulating windows, and startup failure cleans up. Text service SIMULATED; real browser/CDP/HTTP.')
 
 
 if __name__ == '__main__':main()

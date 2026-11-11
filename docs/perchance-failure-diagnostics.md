@@ -24,7 +24,7 @@ A subsequent browser startup was blocked before any generation by Cloudflare's e
 
 ## Working connection and repair
 
-The user subsequently supplied successful comparison artifacts from the EmberAdventures harness: its normal Edge/CDP session produced text through both the unchanged RPG worker and the exact RPG role-labeled instruction. The Workbench now uses the normal-browser/CDP transport in `workbench/perchance_connection.py`, including both targeted Perchance and the final Run-all phase. It retains a dedicated RPG profile, separate loopback CDP port, hosted page and browser across requests/runs. It leaves manual verification visible on the host and keeps startup readiness distinct from successful generation. The provider adapter/worker, serializer, 300-second deadline, raw evidence and observation IDs are unchanged. Connection implementation/version metadata is captured separately in the environment.
+The user subsequently supplied successful comparison artifacts from the EmberAdventures harness: its normal Edge/CDP session produced text through both the unchanged RPG worker and the exact RPG role-labeled instruction. The Workbench now uses the normal-browser/CDP transport in `workbench/perchance_connection.py`, including both targeted Perchance and the final Run-all phase. It retains a dedicated RPG profile and separate loopback CDP port. Within a run, requests reuse the hosted page. A run now closes the browser it launched when finished, cancelled, or failed, while retaining the profile and cookies. An already-open browser is not owned by the new run: only a new run-created tab is used and closed. Startup readiness remains distinct from successful generation. The provider adapter/worker, serializer, 300-second deadline, raw evidence and observation IDs are unchanged. Connection implementation/version metadata is captured separately in the environment.
 
 One harmless live request through the revised connection completed in **4.410 seconds**, with natural stop, nonempty final text and streamed chunks. Complete response evidence is saved at `tools/perchance-text/diagnostics/2026-10-08-cdp-response.json`, separate from benchmark results. This establishes successful text generation on this PC with the revised connection. It does not identify which exact launch flag, profile/session state or service restriction caused the previous path to stall. The existing failure popup and export diagnostics remain in place.
 
@@ -62,3 +62,34 @@ decline, approval, explicit cancellation and terminal resume. The UI smoke's
 installer and inference were simulated; its browser/HTTP path was real. Logs and
 the actual Edge probe report are under `.local/perchance-probe-cleanup-*`.
 A two-file Git patch for the host is `.local/perchance-browser-setup-fix.patch`.
+
+
+## Run-owned window cleanup (2026-11-11)
+
+`ControlledBrowserBackend` captures the browser process it launches and verifies
+that CDP reports the same browser PID before it may send `Browser.close`. A
+stale profile/port marker alone never authorizes whole-browser shutdown. If a
+known browser already exists, the run creates its own tab instead of reusing a
+pre-existing page; the existing browser and other tabs remain open.
+
+The same cleanup runs after success, startup failure, ordinary errors, and Stop.
+It closes the verified browser through CDP, waits for exit, and falls back to
+terminating then killing only the captured child process with bounded waits.
+There is no global browser/process-name kill and no persistent-profile deletion.
+The marker is removed only if it is still this session's marker. Cleanup is
+idempotent. Cleanup failures are reported, and cannot hide an existing run
+exception. Abrupt OS/process termination cannot execute Python cleanup; leftover
+windows from older runs remain user-owned and are not closed retroactively.
+
+Cookies survive for later runs; the hosted page does not need to survive a
+finished run. During connection verification the window remains available while
+waiting for manual verification, then follows the same ownership cleanup. If
+verification times out, invoke Verify Perchance connection again rather than
+expecting a closed run's window to remain available. This lifecycle change does
+not change prompts, sampling, scoring, provider observation IDs, or saved results.
+
+Unit tests cover PID ownership, stale/handoff processes, existing tabs, repeated
+cleanup, startup errors/cancellation, timeout partials, shutdown escalation, and
+cleanup failures. The local CDP smoke uses only a simulated HTTP text service: it
+checks browser exit, pre-existing tab protection, cookie retention, repeated runs,
+and startup failure. It never contacts Perchance.
