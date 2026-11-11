@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from evaluation.catalog import catalog, registration
+from evaluation.catalog import catalog, registration, definition_source_sha256
 from evaluation.core import assess, assess_record, resolve, ResolutionError
 from evaluation.__main__ import replay, readable
 from workbench.domain import ResultStore, code_fingerprint, read_json, digest
@@ -98,7 +98,9 @@ class CoverageTests(unittest.TestCase):
         for entry in entries:
             source = ROOT/entry['path']
             test = read_json(source)
-            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), entry['source_sha256'])
+            source_hash = (definition_source_sha256(source) if entry['scope'] == 'active'
+                           else hashlib.sha256(source.read_bytes()).hexdigest())
+            self.assertEqual(source_hash, entry['source_sha256'])
             self.assertEqual(entry['variants'], [v['id'] for v in test['variants']])
             if entry['family'] != 'dialogue':
                 objective.update((test['id'], v['id']) for v in test['variants'])

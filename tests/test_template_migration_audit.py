@@ -70,6 +70,34 @@ class TemplateMigrationAuditTests(unittest.TestCase):
         path.write_bytes(self.before['experiments/frozen/response.txt'].replace(b'\n', b'\r\n'))
         self.assertEqual(self.run_audit()['immutable_evidence_files_checked'], 5)
 
+    def test_normalized_catalog_hash_accepts_lf_and_crlf_checkout(self):
+        path = self.root / 'test_specs' / (self.current['id'] + '.json')
+        raw = path.read_bytes().replace(b'\r\n', b'\n')
+        catpath = self.root / 'evaluation/catalog.json'
+        catalog = json.loads(catpath.read_text())
+        catalog['definitions'][0]['source_sha256'] = hashlib.sha256(raw).hexdigest()
+        write_json(catpath, catalog)
+        for ending in (raw, raw.replace(b'\n', b'\r\n')):
+            with self.subTest(crlf=b'\r\n' in ending):
+                path.write_bytes(ending)
+                self.assertEqual(self.run_audit()['active_definitions_checked'], 1)
+
+    def test_stale_crlf_hash_and_unhashed_formatting_change_still_fail(self):
+        path = self.root / 'test_specs' / (self.current['id'] + '.json')
+        raw = path.read_bytes().replace(b'\r\n', b'\n')
+        path.write_bytes(raw)
+        catpath = self.root / 'evaluation/catalog.json'
+        catalog = json.loads(catpath.read_text())
+        catalog['definitions'][0]['source_sha256'] = hashlib.sha256(raw.replace(b'\n', b'\r\n')).hexdigest()
+        write_json(catpath, catalog)
+        with self.assertRaisesRegex(AssertionError, 'Catalog source hash is stale'):
+            self.run_audit()
+        catalog['definitions'][0]['source_sha256'] = hashlib.sha256(raw).hexdigest()
+        write_json(catpath, catalog)
+        path.write_bytes(b' ' + raw)  # Same JSON semantics, different saved bytes.
+        with self.assertRaisesRegex(AssertionError, 'Catalog source hash is stale'):
+            self.run_audit()
+
     def test_changed_archived_bytes_fail(self):
         (self.root / 'archives/pre-template-builder/prompt-review/old_case.txt').write_text('Edited review\n')
         with self.assertRaisesRegex(AssertionError, 'Archived baseline bytes changed'):

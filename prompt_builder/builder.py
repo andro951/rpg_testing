@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from evaluation import array_identities_intent as evaluator
+from evaluation.catalog import definition_source_sha256
 from workbench.domain import digest, read_json, safe_id, validate_test, write_json
 from .presentation import render, has_array, SERIALIZERS
 from .template_text import assemble, read_text
@@ -283,7 +284,7 @@ def install(output,repository=None):
     for name,test in generated.items():
         path=current/name
         entries.append({'id':test['id'],'path':path.relative_to(repository).as_posix(),'scope':'active','family':'database',
-                        'source_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'specific_requirements':test['description'],
+                        'source_sha256':definition_source_sha256(path),'specific_requirements':test['description'],
                         'variants':[v['id']for v in test['variants']]})
         groups[test['id']]={};timing[test['id']]={}
         for v in test['variants']:

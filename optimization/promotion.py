@@ -140,10 +140,10 @@ def rebuild(root):
         write_json(root/'optimization/sharing.json',build(root))
     catalog_path=root/'evaluation/catalog.json'
     if catalog_path.exists():
-        import hashlib
+        from evaluation.catalog import definition_source_sha256
         catalog=read_json(catalog_path)
         for entry in catalog['definitions']:
-            if entry['id'] in changed:entry['source_sha256']=hashlib.sha256((root/entry['path']).read_bytes()).hexdigest()
+            if entry['id'] in changed:entry['source_sha256']=definition_source_sha256(root/entry['path'])
         write_json(catalog_path,catalog)
     manifest_path=root/'prompts/patch-suite/manifest.json'
     if manifest_path.exists():
