@@ -27,7 +27,7 @@ Change shared rules here, format wording in its format folder, or case text in i
 
 ## Select or add
 
-`common/selection.json` selects the default 13 cases, three input views, and JSON-dot output. `python -m prompt_builder --list` discovers available folders. A new case or a copied output folder using an existing decoder requires no Python edit: change its files and select its folder. Extra unreferenced text files are not silently inserted. An entirely new serialization or response syntax still needs a compatible serializer/reader in code; wording alone cannot implement one.
+`common/selection.json` selects all 21 required cases, three input views and all six active structured outputs. `common/coverage.json` lists required coverage independently, so dropping a case or format cannot silently redefine “all.” The output folder’s `format.json` marks active, experimental or historical status. `python -m prompt_builder --list` discovers available folders. A new case or a copied output folder using an existing decoder requires no Python edit: change its files and select its folder. Extra unreferenced text files are not silently inserted. An entirely new serialization or response syntax still needs a compatible serializer/reader in code; wording alone cannot implement one.
 
 Example from the repository root:
 
@@ -36,7 +36,7 @@ python -m prompt_builder --output build/prompt-suite
 python -m prompt_builder --output build/all-formats --input-formats normal_json id_keyed_arrays full_paths named_tables --output-formats json_dot json_slash path_list literal_line end_marked_line two_line_text typed_lines free_format
 ```
 
-The default creates 13 test definitions, 38 unique prompts, and 114 observations per model at three repetitions. Compilation does not call a model. All eight output choices support the 13 current cases. The current `typed_lines` reader includes ID-selected updates, complete object appends and array-element removals, covering the nine case/output pairs excluded by its earlier version. Legacy readers retain their original restrictions. If a newly added case is unsupported, compilation lists the reason rather than changing it into an easier task. `free_format` prescribes no output syntax, so parser recovery is not a complete semantic judgment of unrecognized prose.
+The default creates 126 case/output definitions, 372 distinct prompts, and 372 observations per model at one repetition. There are 62 applicable case/input pairs: 20 cases × three views plus the no-array update × two views. Compilation does not call a model. All eight available readers support the 21 current cases; the standard suite selects six structured formats. The current `typed_lines` reader includes ID-selected updates, complete object appends, array-element removals and custom Move/Copy transfers. Legacy readers retain their original restrictions. Unsupported requested case/format combinations must fail the complete build with their reasons, not silently disappear. An explicit subset build reports all omissions and cannot replace the full installed suite without an explicit subset-install override. Adding an active case or format folder requires including it in defaults, not silently omitting it. `free_format` prescribes no output syntax, so parser recovery is not a complete semantic judgment of unrecognized prose.
 
 ## Important boundaries
 

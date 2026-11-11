@@ -131,28 +131,21 @@ class CoverageTests(unittest.TestCase):
             rebuild(self.root)
         self.assertFalse(path.exists())
 
-    def test_schema_free_promotion_preserves_contract_and_rejects_literal_ids(self):
-        from evaluation.schema_free_intent import configuration
+    def test_retired_schema_free_promotion_requires_new_contract(self):
         from optimization.promotion import apply
         from tests.helpers.frozen_prompts import definition
         test = definition('db_v3_update_record', 'dot_patch_v1')
         del test['state_schema']
         for variant in test['variants']:
             variant['result'] = {'step': 'patch', 'representation': 'dot_patch_v1',
-                                 'evaluator': configuration(), 'output_format': 'json_dot'}
+                                 'evaluator': {'version': 'schema-free-intent-v1', 'fingerprint': 'historical'}, 'output_format': 'json_dot'}
         candidate = {'system': 'General instructions: ${task_requirements}',
                      'user': '${presentation_notes}\n${current_state}\n${new_information}\n${prior_outputs}'}
         recipe = {'candidate': candidate, 'candidate_digest': digest(candidate),
                   'base_definition_digest': digest(test), 'review_status': 'accepted',
                   'validation': {'complete': True, 'required': 9, 'passes': 9},
                   'session_id': 'synthetic', 'approval_basis': 'Unit-test fixture only'}
-        promoted = apply(test, recipe)
-        self.assertNotIn('state_schema', promoted)
-        self.assertEqual([v['result'] for v in promoted['variants']], [v['result'] for v in test['variants']])
-        self.assertEqual(promoted['expected_state'], test['expected_state'])
-        candidate['system'] += ' Select item-17.'
-        recipe['candidate_digest'] = digest(candidate)
-        with self.assertRaisesRegex(ValueError, 'literal fixture element ID'):
+        with self.assertRaisesRegex(ValueError, 'Retired response contract schema-free-intent-v1'):
             apply(test, recipe)
 
     def test_missing_model_and_provider_are_honestly_blocked(self):

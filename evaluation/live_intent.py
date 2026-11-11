@@ -145,10 +145,20 @@ def _operation(state, schema, raw):
     if op not in ('update', 'append', 'remove'):
         raise IntentError('This research host permits only Update, Add and Remove; no Move/Copy')
     fields = {'op', 'path'} if op == 'remove' else {'op', 'path', 'value'}
+    literal_add = raw.get('semantic') == 'literal_add' and op == 'append'
+    if literal_add:
+        fields.add('semantic')
     if set(raw) != fields:
         raise IntentError('Missing or extra operation fields')
+    path = _path(state, schema, raw['path'])
+    if literal_add:
+        # Resolve through the same lexical/schema boundary as ordinary paths.
+        # The lowerer still rejects missing fields, root replacement and whole
+        # element replacement, and validates the value against the schema.
+        target, _, _ = dot_paths.resolve(state, schema, path)
+        op = 'append' if isinstance(target, list) else 'update'
     normalized = {'op': {'update': 'replace', 'append': 'add', 'remove': 'remove'}[op],
-                  'path': _path(state, schema, raw['path'])}
+                  'path': path}
     if op != 'remove':
         normalized['value'] = copy.deepcopy(raw['value'])
     concrete = dot_paths.lower_operation(state, normalized, schema)
@@ -164,7 +174,10 @@ def _choose(state, schema, raw):
     candidates = []
     for candidate in raw['unlabeledPathValue']:
         try:
-            result = _operation(state, schema, {'op': raw['op'], **candidate})
+            trial = {'op': raw['op'], **candidate}
+            if 'semantic' in raw:
+                trial['semantic'] = raw['semantic']
+            result = _operation(state, schema, trial)
             if all(digest(result[0]) != digest(prior[0]) for prior in candidates):
                 candidates.append(result)
         except (ValueError, KeyError, TypeError, ValidationError, SchemaError):

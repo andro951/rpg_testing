@@ -47,7 +47,9 @@ Errors derive from `ValueError` (`IntentError`). Parser/patch return values use 
 same field names as JavaScript and C#, not renamed Python-only schemas.
 
 Exact enclosing JSON/bare Markdown fences are removed with diagnostics. Quoted operations and quoted transfer paths are accepted when roles are unique.
-Generic `replace` and `set` aliases are not supported; the current CSC592 host
+Generic `set` is an Update alias. Literal `add` is resolved against current state:
+append to a collection, or update an existing object field. `append`/`insert`
+remain collection-only. Generic `replace` is not supported; the CSC592 host
 explicitly maps its approved `replace` name to Update.
 
 Options are `json_patch` (false), `idKey` (`"id"`), `maxChars` (65,536 UTF-16 code
@@ -69,13 +71,30 @@ be intact, finite and within the safe integer range. Underflowing nonzero numeri
 literals, duplicate JSON keys, invalid Unicode surrogates, cycles and non-JSON
 Python objects reject. Failure never mutates the caller's state.
 
+## Structured text values
+
+All current model-response formats use the shared grammar, including path-list,
+literal/end-marked lines, typed lines, and two-line JSON values. The
+`output_format` option chooses only declared text decoding: `typed_lines` raw
+text after one separator space, `literal_line` documented escapes, or
+`end_marked_line` escaped text ending at the required final pipe. With no codec
+option, text preserves its exact immediate remainder. Paths, transfers, typed
+values and explicit `none` are recognized by grammar productions.
+
+Parsed numeric changes and typed removals carry `numeric_delta` and
+`typed_remove` semantic annotations for the state-aware host. Native standalone
+conversion rejects these annotations. The `literal_add` annotation is lowered
+by native conversion; concrete custom patches contain no unresolved semantics.
+See [the shared contract](CONTRACT.md) for identity and safety requirements.
+
 ## Offline use and verification
 
 ```sh
 python -m intent_parser prepared-records.json
 python -m intent_parser prepared-records.json --json-patch
 python -m evaluation.intent_replay --source results --id-key id
-python -m unittest tests.test_intent_parser tests.test_intent_replay -v
+python -m unittest tests.test_intent_parser tests.test_intent_replay tests.test_unified_intent_grammar -v
+DOTNET=dotnet python intent-parser-csharp/unified-formats-test.py
 python -m unittest discover -s tests -v
 ```
 

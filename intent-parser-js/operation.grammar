@@ -1,4 +1,34 @@
-operation : remove | write | move_copy
+operation : line_transfer | line_remove | remove | write | line_write | move_copy
+// Explicit delimiters identify path/value roles without host-side line readers.
+line_write : header_write | inline_write
+header_write : line_write_name COLON line_target NEWLINE line_value
+inline_write : line_write_name line_target COLON line_value
+line_remove : remove_name COLON line_target
+line_transfer : header_transfer | arrow_transfer
+header_transfer : cm_name COLON line_source NEWLINE to_label COLON line_destination
+arrow_transfer : cm_name line_source ARROW line_destination
+line_write_name : ADD_UPDATE | ADD | UPDATE | CHANGE
+line_target : line_path
+line_source : line_path
+line_destination : line_path
+line_path : line_slash_path | path
+// Slash headers retain exact spaces and dots in object field names. Quoted
+// selectors remain indivisible JSON strings, including embedded literal /.
+line_slash_path : SLASH slash_segment (SLASH slash_segment)*
+slash_segment : slash_atom+
+slash_atom : path_part | PATH_SEPARATOR | TEXT_LABEL | NUMBER_LABEL | BOOLEAN_LABEL | OBJECT_LABEL | LIST_LABEL | JSON_LABEL | VALUE_LABEL | TO_LABEL | FROM_LABEL | PATH_LABEL | OP_LABEL
+line_value : typed_text | typed_number | typed_boolean | typed_null | typed_object | typed_list | typed_json | labeled_json | json_value
+typed_text : TEXT_LABEL COLON text_atom*
+typed_number : NUMBER_LABEL COLON PLUS? NUMBER
+typed_boolean : BOOLEAN_LABEL COLON BOOLEAN
+typed_null : NULL COLON
+typed_object : OBJECT_LABEL COLON json_object?
+typed_list : LIST_LABEL COLON json_array?
+typed_json : JSON_LABEL COLON json_value
+labeled_json : value_label COLON json_value
+// Text is grammar-recognized through the physical line boundary, including
+// unmatched quotes/brackets. Conversion only decodes its declared value codec.
+text_atom : STRING | NUMBER | WORD | ADD_UPDATE | ADD | UPDATE | CHANGE | REMOVE | MOVE | COPY | BOOLEAN | NULL | NONE | TEXT_LABEL | NUMBER_LABEL | BOOLEAN_LABEL | OBJECT_LABEL | LIST_LABEL | JSON_LABEL | VALUE_LABEL | OP_LABEL | PATH_LABEL | FROM_LABEL | TO_LABEL | Q_OP_LABEL | Q_PATH_LABEL | Q_FROM_LABEL | Q_TO_LABEL | Q_VALUE_LABEL | Q_ADD_UPDATE | Q_ADD | Q_UPDATE | Q_REMOVE | Q_MOVE | Q_COPY | DELIMITER | ARROW | COLON | SLASH | PATH_SEPARATOR | LPAREN | RPAREN | LBRACE | RBRACE | LBRACKET | RBRACKET | SEP_COMMA | SEMICOLON | PLUS | RAW_CHAR | FENCE_OPEN | FENCE_CLOSE
 remove : remove_component field_gap target_component | target_component field_gap remove_component
 write : add | update
 add : add_component field_gap array_target_component field_gap value_component | add_component field_gap value_component field_gap array_target_component | array_target_component field_gap add_component field_gap value_component | array_target_component field_gap value_component field_gap add_component | value_component field_gap add_component field_gap array_target_component | value_component field_gap array_target_component field_gap add_component
@@ -31,10 +61,10 @@ explicit_path : grouped_path | json_string
 scalar_path : SLASH? path_part (separator path_part)*
 grouped_path : LPAREN json_space path_parts RPAREN | LBRACKET json_space path_parts RBRACKET | LBRACE json_space path_parts RBRACE
 path_parts : (path_part json_space (path_delimiter json_space)?)*
-path_part : json_string | NUMBER | WORD | ADD_UPDATE | ADD | UPDATE | REMOVE | MOVE | COPY | BOOLEAN | NULL
+path_part : json_string | NUMBER | WORD | ADD_UPDATE | ADD | UPDATE | REMOVE | MOVE | COPY | BOOLEAN | NULL | NONE | CHANGE | TEXT_LABEL | NUMBER_LABEL | BOOLEAN_LABEL | OBJECT_LABEL | LIST_LABEL | JSON_LABEL | OP_LABEL | PATH_LABEL | FROM_LABEL | TO_LABEL | VALUE_LABEL | Q_OP_LABEL | Q_PATH_LABEL | Q_FROM_LABEL | Q_TO_LABEL | Q_VALUE_LABEL
 path_delimiter : SLASH | PATH_SEPARATOR | SEP_COMMA
 separator : SLASH | PATH_SEPARATOR
-delimiter : COLON | DELIMITER
+delimiter : COLON | DELIMITER | ARROW
 field_gap : (SEP_COMMA | NEWLINE)*
 json_value : json_object | json_array | json_string | NUMBER | BOOLEAN | NULL
 json_object : LBRACE json_space members? RBRACE
@@ -45,7 +75,16 @@ json_array : LBRACKET json_space elements? RBRACKET
 elements : json_value json_space (SEP_COMMA json_space json_value json_space)*
 json_space : NEWLINE*
 json_string : STRING | Q_ADD_UPDATE | Q_ADD | Q_UPDATE | Q_REMOVE | Q_MOVE | Q_COPY
-FENCE_OPEN : /```(?:json)?[ \t]*\r?\n/i (KEEP)
+TEXT_LABEL : /text\b(?=[ \t]*:)/i (KEEP)
+NUMBER_LABEL : /number\b(?=[ \t]*:)/i (KEEP)
+BOOLEAN_LABEL : /boolean\b(?=[ \t]*:)/i (KEEP)
+OBJECT_LABEL : /object\b(?=[ \t]*:)/i (KEEP)
+LIST_LABEL : /list\b(?=[ \t]*:)/i (KEEP)
+JSON_LABEL : /json\b(?=[ \t]*:)/i (KEEP)
+NONE : /none\b/i (KEEP)
+CHANGE : /change\b/i (KEEP)
+PLUS : /\+/ (KEEP)
+FENCE_OPEN : /```(?:json)?[ \t]*(?=\r?\n)/i (KEEP)
 FENCE_CLOSE : /```/ (KEEP)
 SEMICOLON : /;/ (KEEP)
 Q_OP_LABEL : /"(?:op|operation|type)"(?=\s*(?::|=|->))/i (KEEP)
@@ -60,13 +99,13 @@ Q_VALUE_LABEL : /"(?:value)"(?=\s*(?::|=|->))/i (KEEP)
 VALUE_LABEL : /(?:value)\b(?=\s*(?::|=|->))/i (KEEP)
 Q_ADD_UPDATE : /"add"/i (KEEP)
 Q_ADD : /"(?:append|insert)"/i (KEEP)
-Q_UPDATE : /"update"/i (KEEP)
+Q_UPDATE : /"(?:update|set)"/i (KEEP)
 Q_REMOVE : /"(?:remove|delete)"/i (KEEP)
 Q_MOVE : /"move"/i (KEEP)
 Q_COPY : /"copy"/i (KEEP)
 ADD_UPDATE : /add\b/i (KEEP)
 ADD : /(?:append|insert)\b/i (KEEP)
-UPDATE : /update\b/i (KEEP)
+UPDATE : /(?:update|set)\b/i (KEEP)
 REMOVE : /(?:remove|delete)\b/i (KEEP)
 MOVE : /move\b/i (KEEP)
 COPY : /copy\b/i (KEEP)
@@ -74,7 +113,8 @@ STRING : /"(?:[^"\\\r\n]|\\.)*"/ (KEEP)
 NUMBER : /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/ (KEEP)
 BOOLEAN : /(?:true|false)\b/ (KEEP)
 NULL : /null\b/ (KEEP)
-DELIMITER : /=>|->|=/ (KEEP)
+ARROW : /->/ (KEEP)
+DELIMITER : /=>|=/ (KEEP)
 COLON : /:/ (KEEP)
 SLASH : /\// (KEEP)
 PATH_SEPARATOR : /\./ (KEEP)
@@ -88,3 +128,4 @@ RBRACKET : /\]/ (KEEP)
 SEP_COMMA : /,/ (KEEP)
 HORIZONTAL_SPACE : /[^\S\r\n\u2028\u2029]+/ (IGNORE)
 NEWLINE : /\r\n|[\r\n\u2028\u2029]/ (KEEP)
+RAW_CHAR : /[^\s]/ (KEEP)

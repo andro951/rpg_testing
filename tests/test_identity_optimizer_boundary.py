@@ -21,14 +21,18 @@ class IdentityOptimizerBoundaryTests(unittest.TestCase):
                            'messages': [{'role': 'user', 'content': 'PROMPT_RETAINED'}]}]}
 
     def test_identity_diagnostics_redacted_without_mutating_evidence(self):
-        record = self.record()
-        original = copy.deepcopy(record)
-        packet = EvidencePacket()
-        item = packet.trial(record)
-        self.assertNotIn('SECRET_ID_FIELD_AND_PATH', json.dumps(item))
-        self.assertIn('MODEL_OUTPUT_RETAINED', json.dumps(item))
-        self.assertIn('PROMPT_RETAINED', json.dumps(packet.prompts))
-        self.assertEqual(record, original)
+        for version in ('array-identities-intent-v1', 'array-identities-intent-v2', 'array-identities-intent-v3'):
+            with self.subTest(version=version):
+                record = self.record()
+                record['variant_definition']['result']['evaluator']['version'] = version
+                record['score']['evaluation']['version'] = version
+                original = copy.deepcopy(record)
+                packet = EvidencePacket()
+                item = packet.trial(record)
+                self.assertNotIn('SECRET_ID_FIELD_AND_PATH', json.dumps(item))
+                self.assertIn('MODEL_OUTPUT_RETAINED', json.dumps(item))
+                self.assertIn('PROMPT_RETAINED', json.dumps(packet.prompts))
+                self.assertEqual(record, original)
 
     def test_legacy_diagnostics_remain_exact(self):
         record = self.record()

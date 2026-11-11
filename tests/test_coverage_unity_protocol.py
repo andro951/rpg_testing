@@ -122,15 +122,15 @@ class SubmissionProtocolTests(unittest.TestCase):
 root=pathlib.Path(sys.argv[1]).resolve()
 import workbench.coverage_worker, workbench.domain
 import intent_parser, evaluation.hosts, evaluation.output_formats
-from evaluation import schema_free_intent
+from evaluation import array_identities_intent
 from workbench.domain import validate_test
 for name,module in list(sys.modules.items()):
     if name.split('.')[0] in ('workbench','optimization','evaluation','intent_parser','prompt_builder') and getattr(module,'__file__',None):
         assert pathlib.Path(module.__file__).resolve().is_relative_to(root), (name,module.__file__)
 assert (root/'intent_parser/grammar-spec.json').is_file()
-score=schema_free_intent.normalize_response('[{"op":"replace","path":"value","value":2}]', {'value':1})
+score=array_identities_intent.normalize_response('[{"op":"replace","path":"value","value":2}]', {'value':1}, 'json_dot', [])
 assert score['final_state']=={'value':2}
-test={'schema_version':2,'id':'isolated','workflow':'steps','timeout_seconds':120,'source':{'initial_state':{'value':1}},'expected_state':{'value':2},'variants':[{'id':'json','steps':[{'id':'patch','type':'generate','prompt':'Synthetic isolated import test','output':{'type':'text'}}],'result':{'step':'patch','representation':'dot_patch_v1','evaluator':schema_free_intent.configuration(),'output_format':'json_dot'}}]}
+test={'schema_version':2,'id':'isolated','workflow':'steps','timeout_seconds':120,'source':{'initial_state':{'value':1},'array_identities':[]},'expected_state':{'value':2},'variants':[{'id':'json','steps':[{'id':'patch','type':'generate','prompt':'Synthetic isolated import test','output':{'type':'text'}}],'result':{'step':'patch','representation':'dot_patch_v1','evaluator':array_identities_intent.configuration(),'output_format':'json_dot'}}]}
 validate_test(test)
 print('isolated bundle import and evaluator passed')
 '''

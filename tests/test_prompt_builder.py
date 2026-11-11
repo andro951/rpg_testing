@@ -14,9 +14,9 @@ class PromptBuilderTests(unittest.TestCase):
     def test_default_counts_and_no_schema_hints(self):
         with tempfile.TemporaryDirectory() as temp:
             result=build(temp)
-            self.assertEqual((result['prompt_count'],result['observations_per_model']),(38,114))
+            self.assertEqual((result['prompt_count'],result['observations_per_model']),(372,372))
             self.assertEqual(result['model_runs_started_by_builder'],0)
-            self.assertEqual(len(list((Path(temp)/'test_specs').glob('*.json'))),13)
+            self.assertEqual(len(list((Path(temp)/'test_specs').glob('*.json'))),126)
             for path in (Path(temp)/'test_specs').glob('*.json'):
                 test=read_json(path)
                 self.assertNotIn('state_schema',test)
@@ -43,7 +43,7 @@ class PromptBuilderTests(unittest.TestCase):
                         self.assertTrue(result['exact_match'],result)
                         self.assertTrue(result['expected_patch_match'],result)
                         count+=1
-        self.assertEqual((count,unsupported),(408,0))
+        self.assertEqual((count,unsupported),(664,0))
     def test_edit_file_and_new_case_and_format_without_code(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)/'templates';shutil.copytree(ROOT,root)
@@ -102,6 +102,7 @@ class PromptBuilderTests(unittest.TestCase):
             self.assertNotIn('id_field',json.dumps(expected))
         case=load_case('update_record_field')
         case['array_identities']=[{'path':['items'],'id_field':'count'}]
+        case['expected_patch']=[]  # Presentation-only case: the old selectors no longer apply.
         test=compile_test(case,'json_dot',input_formats=['normal_json'])
         self.assertEqual(test['source']['array_identities'],case['array_identities'])
 
@@ -128,8 +129,10 @@ class PromptBuilderTests(unittest.TestCase):
                 result=evaluate(test,variant,{'patch':'[]'})
                 self.assertTrue(result['exact_match'],result)
             self.assertEqual(json.loads(test['variants'][0]['prompt_bindings']['current_state']),case['starting_data'])
-            converted=json.loads(test['variants'][1]['prompt_bindings']['current_state'])
-            self.assertEqual(converted['$object']['records']['$array'],{records[0][field]:{'$object':records[0]}})
+            converted=keyed(case['starting_data'],case['array_identities'])
+            self.assertEqual(converted['records'],{records[0][field]:records[0]})
+            self.assertEqual(test['variants'][1]['prompt_bindings']['current_state'],
+                             render(case['starting_data'],'id_keyed_arrays',case['array_identities']))
             self.assertIn('records.'+records[0][field]+': <object>',test['variants'][2]['prompt_bindings']['current_state'])
             with self.assertRaisesRegex(ValueError,'ID-dependent presentation'):
                 prompt(case,'named_tables','json_dot')
@@ -140,6 +143,7 @@ class PromptBuilderTests(unittest.TestCase):
         case=load_case('update_record_field')
         before={mode:prompt(case,mode,'json_dot',with_parts=True) for mode in discover()['input_format']}
         case['array_identities']=[{'path':['items'],'id_field':'count'}]
+        case['expected_patch']=[]  # Presentation-only case: the old selectors no longer apply.
         for mode in ('normal_json','named_tables'):
             self.assertEqual(before[mode],prompt(case,mode,'json_dot',with_parts=True))
         for mode in ('id_keyed_arrays','full_paths'):
@@ -151,8 +155,8 @@ class PromptBuilderTests(unittest.TestCase):
             self.assertEqual(actual[-1]['content'].replace(bindings['current_state'],'DATA'),
                              previous[-1]['content'].replace(old_bindings['current_state'],'DATA'))
             compile_test(case,'json_dot',input_formats=[mode])
-        converted=json.loads(prompt(case,'id_keyed_arrays','json_dot',with_parts=True)[1]['current_state'])
-        self.assertEqual(list(converted['$object']['items']['$array']),['3','8','2','6'])
+        converted=keyed(case['starting_data'],case['array_identities'])
+        self.assertEqual(list(converted['items']),['3','8','2','6'])
         self.assertIn('items.8.item_id: "item-17"',prompt(case,'full_paths','json_dot',with_parts=True)[1]['current_state'])
         with self.assertRaisesRegex(ValueError,'disagrees with validator identity'):
             compile_test(case,'json_dot',input_formats=['named_tables'])
@@ -178,11 +182,11 @@ class PromptBuilderTests(unittest.TestCase):
     def test_rebuild_removes_deselected_and_failed_build_keeps_previous(self):
         with tempfile.TemporaryDirectory() as temp:
             output=Path(temp)/'build'
-            build(output,cases=['update_field'])
-            build(output,cases=['no_change'])
+            build(output,cases=['update_field'],output_formats=['json_dot'])
+            build(output,cases=['no_change'],output_formats=['json_dot'])
             self.assertEqual([p.stem for p in (output/'test_specs').glob('*.json')],['no_change__json_dot'])
             before=(output/'manifest.json').read_bytes()
-            with self.assertRaises(ValueError):build(output,cases=['does_not_exist'])
+            with self.assertRaises(ValueError):build(output,cases=['does_not_exist'],output_formats=['json_dot'])
             self.assertEqual(before,(output/'manifest.json').read_bytes())
             self.assertTrue(list((Path(temp)/'build.history').glob('*/test_specs/update_field__json_dot.json')))
     def test_selection_skip_is_a_real_editable_setting(self):
@@ -198,10 +202,10 @@ class PromptBuilderTests(unittest.TestCase):
             build(output,cases=['update_field'])
             spec=output/'test_specs/update_field__json_dot.json'
             stale=output/'test_specs/stale.json';stale.write_bytes(spec.read_bytes())
-            with self.assertRaisesRegex(ValueError,'inventory'):install(output,repo)
+            with self.assertRaisesRegex(ValueError,'inventory'):install(output,repo,allow_subset=True)
             stale.unlink()
             preview=next((output/'prompts').rglob('*.messages.json'));preview.write_text('[]')
-            with self.assertRaisesRegex(ValueError,'preview'):install(output,repo)
+            with self.assertRaisesRegex(ValueError,'preview'):install(output,repo,allow_subset=True)
             self.assertEqual(marker.read_text(),'unrelated')
             self.assertFalse((repo/'test_specs').exists())
     def test_install_known_pass_fixtures_use_each_formats_real_syntax(self):
@@ -210,7 +214,7 @@ class PromptBuilderTests(unittest.TestCase):
             output=Path(temp)/'build';repo=Path(temp)/'repo';repo.mkdir()
             for name,value in {'evaluation/catalog.json':{'definitions':[]},'evaluation/fixtures.json':{'fixtures':[]},'reporting/grouping_metadata.json':{},'reporting/timing_expectations.json':{}}.items():write_json(repo/name,value)
             build(output,cases=['update_field'],output_formats=discover()['output_format'])
-            install(output,repo)
+            install(output,repo,allow_subset=True)
             fixtures=read_json(repo/'evaluation/fixtures.json')['fixtures']
             self.assertEqual(len(fixtures),16)
             for row in fixtures:
@@ -221,9 +225,9 @@ class PromptBuilderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             output=Path(temp)/'build';repo=Path(temp)/'repo';repo.mkdir()
             for name,value in {'evaluation/catalog.json':{'definitions':[]},'evaluation/fixtures.json':{'fixtures':[]},'reporting/grouping_metadata.json':{},'reporting/timing_expectations.json':{}}.items():write_json(repo/name,value)
-            build(output,cases=['update_field']);install(output,repo)
+            build(output,cases=['update_field']);install(output,repo,allow_subset=True)
             prior={p.relative_to(repo).as_posix():p.read_bytes() for folder in ['test_specs','prompts/current-suite'] for p in (repo/folder).rglob('*') if p.is_file()}
-            build(output,cases=['no_change']);install(output,repo)
+            build(output,cases=['no_change']);install(output,repo,allow_subset=True)
             snapshots=list((repo/'archives/template-builds').iterdir())
             self.assertEqual(len(snapshots),1)
             for name,raw in prior.items():self.assertEqual((snapshots[0]/name).read_bytes(),raw,name)
@@ -236,7 +240,11 @@ class PromptBuilderTests(unittest.TestCase):
     def test_presentations_do_not_erase_container_type(self):
         data={'empty_array':[],'empty_object':{},'values':['a'],'$array':{'$object':False}}
         identities=[{'path':['empty_array'],'id_field':'sku'},{'path':['values'],'id_field':None}]
-        self.assertEqual(keyed(data,identities),{'$object':{'empty_array':{'$array':{}},'empty_object':{'$object':{}},'values':{'$array':{'a':'a'}},'$array':{'$object':{'$object':False}}}})
+        view=render(data,'id_keyed_arrays',identities)
+        self.assertIn('"empty_array": []',view)
+        self.assertIn('"empty_object": {}',view)
+        self.assertIn('"values": [\n    "a": "a"\n  ]',view)
+        self.assertIn('"$array": {\n    "$object": false\n  }',view)
         lines=render(data,'full_paths',identities)
         self.assertIn('values: <array>',lines);self.assertIn('empty_array: []',lines);self.assertIn('empty_object: {}',lines)
         self.assertIn('Table',render(data,'named_tables'))

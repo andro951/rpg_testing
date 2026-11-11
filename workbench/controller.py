@@ -234,6 +234,14 @@ class Controller(ModelManager):
         from .perchance import model
         return self.catalog()+([] if self.demo else [model()])
     def build_preflight(self,preparation=None,selection=None,track_progress=True):
+        from prompt_builder.coverage import runtime_report
+        try:
+            coverage=runtime_report(self.root,selection,load_tests(self.root/'test_specs'))
+        except (ValueError,OSError,KeyError,TypeError) as exc:
+            plan={'pending':0,'complete':0,'model_loads':0,'groups':[]}
+            return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'selection':selection,
+                    'issues':[preflight.issue('suite_coverage',str(exc))],'plan':plan,
+                    'note':'Current suite coverage could not be verified. No inference was started.'},plan
         from . import perchance
         from .perchance_setup import skipped
         omit_perchance=skipped(self,selection,preparation)
@@ -241,8 +249,12 @@ class Controller(ModelManager):
             return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'selection':selection,
                     'issues':[],'plan':{'pending':0,'complete':0,'groups':[]},
                     'note':'Perchance was skipped for this run. Its unfinished observations remain pending.'}, {'pending':0,'complete':0,'groups':[]}
-        if perchance.selected(selection):return perchance.preflight(self,preparation,selection)
+        if perchance.selected(selection):
+            report,plan=perchance.preflight(self,preparation,selection)
+            report['coverage']=coverage
+            return report,plan
         report,plan=preflight.build(self,preparation,track_progress=track_progress,selection=selection)
+        report['coverage']=coverage
         # Overview Run all includes the remote baseline only on the assigned tier.
         gpu=report.get('gpu',{})
         from .domain import device_tier

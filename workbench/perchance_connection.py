@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from urllib.request import ProxyHandler, build_opener
 
@@ -124,15 +125,28 @@ def probe(executable):
 
 
 class ControlledBrowserBackend(perchance.BrowserBackend):
-    """Inherited request serializer/worker; normal visible browser kept between runs."""
+    """Own only the browser process or new tabs created by this session."""
     def __init__(self, settings):
         settings = dict(settings)
         profile = Path(settings['perchance_profile'])
         if profile.name == 'perchance-profile':
             settings['perchance_profile'] = str(profile.with_name('perchance-controlled-profile'))
         super().__init__(settings)
+        self.browser = self.child = None
+        self._owns_browser = False
+        self._owned_pages = []
+        self._owner_marker = None
 
     def open(self):
+        try:
+            self._open()
+        except BaseException:
+            # Startup can fail before CDP attaches or before reset finishes.
+            # Still reap our captured child, without touching an existing browser.
+            self.close()
+            raise
+
+    def _open(self):
         from playwright.sync_api import sync_playwright
         self.profile = Path(self.settings['perchance_profile']).resolve()
         self.profile.mkdir(parents=True, exist_ok=True)
@@ -141,15 +155,30 @@ class ControlledBrowserBackend(perchance.BrowserBackend):
         marker = self.profile / 'rpg-cdp-owner.json'
         owner = json.loads(marker.read_text(encoding='utf-8')) if marker.exists() else None
         if listening(port):
-            if owner != {'port': port, 'profile': str(self.profile)}:
+            if not isinstance(owner, dict) or owner.get('port') != port or owner.get('profile') != str(self.profile):
                 raise RuntimeError(f'Perchance CDP port {port} is already in use by another browser. Close that browser or choose another Perchance CDP port; RPG will not attach to it.')
         else:
-            launch(perchance.browser_executable(self.settings), self.profile, port,
-                   perchance.validate_url(self.settings.get('perchance_url', perchance.DEFAULT_URL)))
-            write_json(marker, {'port': port, 'profile': str(self.profile)})
+            self.child = launch(perchance.browser_executable(self.settings), self.profile, port,
+                                perchance.validate_url(self.settings.get('perchance_url', perchance.DEFAULT_URL)))
         wait_for_browser(port, lambda: self.cancel_requested)
         self.playwright = sync_playwright().start()
         self.browser = self.playwright.chromium.connect_over_cdp(address, timeout=10000)
+        if self.child is not None:
+            # A port/profile marker alone is not ownership: it can be stale, and
+            # Chrome may hand off a launch to an already-running profile. Never
+            # send Browser.close unless CDP identifies our live Popen child.
+            session = self.browser.new_browser_cdp_session()
+            try:
+                processes = session.send('SystemInfo.getProcessInfo')['processInfo']
+            finally:
+                session.detach()
+            if self.child.poll() is not None or not any(
+                    item.get('type') == 'browser' and item.get('id') == self.child.pid for item in processes):
+                raise RuntimeError('Cannot verify ownership of the Perchance browser; existing windows were left untouched.')
+            self._owns_browser = True
+            self._owner_marker = {'port': port, 'profile': str(self.profile),
+                                  'pid': self.child.pid, 'session': uuid.uuid4().hex}
+            write_json(marker, self._owner_marker)
         if not self.browser.contexts:
             raise RuntimeError('Perchance controlled browser has no default context')
         self.context = self.browser.contexts[0]
@@ -157,10 +186,18 @@ class ControlledBrowserBackend(perchance.BrowserBackend):
 
     def reset(self):
         url = perchance.validate_url(self.settings.get('perchance_url', perchance.DEFAULT_URL))
-        self.page = next((page for page in self.context.pages if not page.is_closed() and page.url.rstrip('/') == url.rstrip('/')), None)
-        if self.page is None:
-            self.page = self.context.new_page()
-            self.page.goto(url, wait_until='domcontentloaded', timeout=60000)
+        if self.page is None or self.page.is_closed():
+            # Reuse the launch page only in our own browser. When attaching to
+            # an existing browser, a private tab makes timeout/cancel safe too.
+            self.page = next((page for page in self.context.pages
+                              if self._owns_browser and not page.is_closed()
+                              and page.url.rstrip('/') == url.rstrip('/')), None)
+            if self.page is None:
+                self.page = self.context.new_page()
+                self._owned_pages.append(self.page)
+                self.page.goto(url, wait_until='domcontentloaded', timeout=60000)
+            else:
+                self._owned_pages.append(self.page)
         self.frame = None
         until = time.monotonic() + self.settings.get('perchance_ready_seconds', 90)
         while time.monotonic() < until:
@@ -182,19 +219,66 @@ class ControlledBrowserBackend(perchance.BrowserBackend):
                     self.last_frame_error = str(exc)
             self.page.wait_for_timeout(100)
         if 'verification' in self.page.title().lower() or 'just a moment' in self.page.title().lower():
-            raise RuntimeError('Perchance security verification blocked startup. Complete verification in the browser on the host PC, then explicitly resume. No generation ran.')
+            raise RuntimeError('Perchance security verification blocked startup. Use Verify Perchance connection to reopen the host window and complete verification, then explicitly resume. No generation ran.')
         raise RuntimeError('Perchance page did not expose its text plugin in the controlled browser; check the host browser. Plugin availability does not verify generation.')
 
     def close(self):
-        #Disconnect only. Cookies, the normal browser and its hosted page remain available.
-        if self.playwright:
-            self.playwright.stop()
-        self.context = self.page = self.frame = self.playwright = None
-        self.browser = None
+        errors = []
+        if self._owns_browser and self.browser is not None:
+            try:
+                # Playwright Browser.close on a CDP connection just detaches.
+                # The protocol command closes this session's verified browser.
+                self.browser.new_browser_cdp_session().send('Browser.close')
+            except Exception:
+                pass  # The captured child below is the bounded fallback.
+        else:
+            for page in self._owned_pages:
+                try:
+                    if not page.is_closed():
+                        page.close()
+                except Exception as exc:
+                    errors.append(f'could not close a run-owned tab: {exc}')
+        if self.child is not None:
+            try:
+                try:
+                    self.child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.child.terminate()
+                    try:
+                        self.child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self.child.kill()
+                        self.child.wait(timeout=5)
+                if self._owner_marker is not None:
+                    marker = self.profile / 'rpg-cdp-owner.json'
+                    if marker.exists() and json.loads(marker.read_text(encoding='utf-8')) == self._owner_marker:
+                        marker.unlink()
+            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                errors.append(f'could not finish owned browser cleanup: {exc}')
+        try:
+            if self.playwright is not None:
+                self.playwright.stop()
+        except Exception as exc:
+            errors.append(f'could not disconnect browser transport: {exc}')
+        finally:
+            self.context = self.page = self.frame = self.playwright = None
+            self.browser = self.child = None
+            self._owns_browser = False
+            self._owned_pages = []
+            self._owner_marker = None
+        if errors:
+            message = 'Perchance browser cleanup failed: ' + '; '.join(errors)
+            if sys.exc_info()[0] is not None:
+                print(message, file=sys.stderr)  # Preserve the original run/startup failure.
+            else:
+                raise RuntimeError(message)
 
 
 def run(app, report, pending, **kwargs):
-    return perchance.run(app, report, pending, backend_factory=ControlledBrowserBackend, **kwargs)
+    try:
+        return perchance.run(app, report, pending, backend_factory=ControlledBrowserBackend, **kwargs)
+    finally:
+        app.backend = None
 
 
 def verify_connection(app):
@@ -207,4 +291,7 @@ def verify_connection(app):
         app.log('perchance_connection', canonical(backend.environment))
         app.message = 'Perchance text plugin is available in the controlled browser. No generation request was made; generation has not been verified.'
     finally:
-        backend.close(); app.backend = None
+        try:
+            backend.close()
+        finally:
+            app.backend = None

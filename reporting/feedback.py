@@ -17,20 +17,13 @@ def response_expectation(test, variant):
     from workbench.workflows import evaluate
     result = variant.get('result', {})
     representation = result.get('representation', 'answers')
+    from evaluation.retired_contracts import reason
+    retired = reason(result)
+    if retired:
+        return {'kind': 'unavailable', 'reason': retired}
     if representation == 'answers':
         return {'kind': 'exact_answers', 'answers': copy.deepcopy(variant.get('expected_answers', {}))}
     step = result.get('step')
-    from evaluation import schema_free_intent
-    selected = result.get('evaluator')
-    if isinstance(selected, dict) and selected.get('version') == schema_free_intent.VERSION:
-        try:
-            reference = schema_free_intent.apply_patch(test['source']['initial_state'], variant['expected_patch'])
-            if schema_free_intent.equal(schema_free_intent.unordered(reference['final_state']), schema_free_intent.unordered(test['expected_state'])):
-                return {'kind': 'reference', 'text': json.dumps(reference['normalized_patch'], ensure_ascii=False),
-                        'label': 'Reference normalized patch; equivalent valid responses are accepted by final state, ignoring array order.'}
-        except (ValueError, KeyError, TypeError):
-            pass
-        return {'kind': 'unavailable', 'reason': 'No valid reference normalized patch is available.'}
     candidates = []
     if 'expected_patch' in variant:
         value = variant['expected_patch']
@@ -65,7 +58,12 @@ def summarize(record):
     checks = copy.deepcopy(assessment['checks'])
     relevant = [check for check in checks if check['status'] == FAIL and check.get('affects_verdict', True)]
     verdict = assessment['objective_outcome']
-    if verdict == 'PASS':
+    if assessment.get('contract_status') == 'retired' and record.get('score', {}).get('status') == 'configuration_error':
+        reason = 'Evaluator configuration error: ' + str(assessment.get('primary_reason') or '')
+    elif assessment.get('assessment_mode') == 'saved_score_only':
+        reason = ('Historical saved score preserved; no regrading was performed. ' +
+                  str(assessment.get('primary_reason') or ''))
+    elif verdict == 'PASS':
         reason = ('Matches the expected final state; array order and reference-patch equality do not affect pass/fail.'
                   if record.get('score', {}).get('array_order') == 'irrelevant' else
                   'Matches the required answer or final state and operation contract.')
@@ -86,6 +84,7 @@ def summarize(record):
         reason = next((check['explanation'] for check in checks if check['status'] == NOT_EVALUATED),
                       'No scored objective verdict is available.')
     return {'evaluator_version': assessment['evaluator_version'], 'objective_outcome': verdict,
+            **{key: assessment[key] for key in ('contract_status', 'assessment_mode') if key in assessment},
             'execution_outcome': assessment['execution_outcome'], 'reason': reason,
             'score_comparison': assessment['score_comparison'], 'checks': checks,
             'steps': assessment.get('steps', []),

@@ -137,6 +137,12 @@ def revalidate(source, output, test_id, validator):
                 if len(variants) != 1:
                     raise ValueError('Captured definition must contain exactly one matching variant')
                 variant = variants[0]
+            from .retired_contracts import reason
+            retired = reason(variant.get('result', {}))
+            if retired:
+                skipped.append({'case_id': record.get('case_id'), 'source_record_checksum': record.get('sha256'),
+                                'reason': retired, 'contract_status': 'retired'})
+                continue
             if not selected.applicable(variant.get('result', {}).get('representation')):
                 skipped.append({'case_id': record.get('case_id'), 'source_record_checksum': record.get('sha256'),
                                 'reason': 'not_applicable'})

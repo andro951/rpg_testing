@@ -113,17 +113,18 @@ class CurrentLiveIntentTests(unittest.TestCase):
         parsed=normalize_response('update path:["a.b"] value:3',initial,schema)
         self.assertEqual(parsed['final_state'],{'a.b':3,'a':{'b':2}})
 
-    def test_no_positional_or_rfc_bridge_or_generic_set_replace_alias(self):
+    def test_no_positional_or_rfc_bridge_and_explicit_alias_scope(self):
         for text in [
             'update path:"items.0.count" value:2',
             '[{"op":"replace","path":"/items/0/count","value":2}]',
-            'set path:"items.a%2Eb.count" value:2',
             'move from:["items","a.b"] to:["values"]',
             'copy from:["items","a.b"] to:["values"]',
         ]:
             with self.subTest(text=text):
                 self.assertFalse(self.run_response(text)['valid'])
-        for op in ('set','replace'):
+        self.assertTrue(self.run_response('set path:"items.a%2Eb.count" value:2')['valid'])
+        self.assertEqual(parse_intent('set path:["x"] value:2'), [{'op': 'update', 'path': ['x'], 'value': 2}])
+        for op in ('replace',):
             with self.assertRaises(ValueError):
                 parse_intent(op+' path:["x"] value:2')
 
@@ -240,11 +241,11 @@ class CurrentLiveIntentTests(unittest.TestCase):
             with self.assertRaises(ValueError):prepare(source,output,VERSION)
             with self.assertRaises(ValueError):prepare(source,source/'inside',VERSION)
 
-    def test_other_copied_representation_dependencies_preserve_native_semantics(self):
+    def test_retired_field_value_contract_is_not_an_alternate_decoder(self):
         initial=self.strict['source']['initial_state'];schema=self.strict['state_schema']
-        text='set: items.a%2Eb.count\nvalue: 2'
-        self.assertEqual(apply(initial,text,'field_value_v2',schema),self.strict['expected_state'])
-        with self.assertRaises(ValueError):apply(initial,'set: items.0.count\nvalue: 2','field_value_v2',schema)
+        for text in ('set: items.a%2Eb.count\nvalue: 2', 'set: items.0.count\nvalue: 2'):
+            with self.assertRaisesRegex(ValueError, 'Retired response contract field_value_v2'):
+                apply(initial,text,'field_value_v2',schema)
 
     def test_controller_session_persistence_and_resume_use_new_parser(self):
         from workbench.controller import Controller

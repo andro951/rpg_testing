@@ -8,4 +8,5 @@ public sealed record IntentOptions(
     int MaxDepth = 64,
     int MaxOperations = 256,
     int MaxBoundaryAttempts = 4096,
-    string? PathSyntax = null);
+    string? PathSyntax = null,
+    string? OutputFormat = null);

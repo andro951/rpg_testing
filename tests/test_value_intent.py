@@ -74,7 +74,6 @@ class ValueIntentTests(unittest.TestCase):
             {'op':'remove','path':'/items/"a/b"/count'},
             {'op':'replace','path':'/items/"a/b"','value':{'key':'a/b','count':8}},
             {'op':'replace','path':'/items','value':[]},
-            {'op':'add','path':'/items/"a/b"/count','value':8},
             {'op':'add','path':'/items','value':{'key':'b','count':8}},
             {'op':'add','path':'/items','value':{'key':'new'}},
             {'op':'replace','path':'/items/"a/b"/count','value':'wrong type'},
@@ -84,6 +83,14 @@ class ValueIntentTests(unittest.TestCase):
         for operation in bad:
             with self.subTest(operation=operation):
                 self.assertFalse(self.run_raw(json.dumps([operation]))['accepted'])
+
+    def test_literal_add_uses_existing_target_type_but_append_stays_strict(self):
+        for spelling, accepted in (('add', True), ('append', False), ('insert', False)):
+            raw = json.dumps([{'op': spelling, 'path': '/items/"a/b"/count', 'value': 8}])
+            result = self.run_raw(raw)
+            self.assertEqual(result['accepted'], accepted, result)
+            if accepted:
+                self.assertEqual(result['finalState']['items'][0]['count'], 8)
 
     def test_unlabeled_transfers_use_current_schema_state_not_order(self):
         result = self.run_raw('move ["storage"] ["items","a/b"]')

@@ -1,6 +1,16 @@
 """Explicit per-definition registrations and variant coverage, outside inference identity."""
+import hashlib
 from pathlib import Path
 from workbench.domain import read_json
+
+
+def definition_source_sha256(path):
+    """Hash definition text as Git stores it: normalize CRLF to LF only.
+
+    Do not parse/reserialize JSON or alter prompt strings, whitespace, BOMs or
+    lone carriage returns. Historical registrations retain their saved hashes.
+    """
+    return hashlib.sha256(Path(path).read_bytes().replace(b'\r\n', b'\n')).hexdigest()
 
 
 def catalog():

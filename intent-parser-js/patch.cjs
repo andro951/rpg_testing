@@ -37,13 +37,21 @@ function setOwn(obj,key,value){Object.defineProperty(obj,key,{value,writable:tru
 function deleteResolved(r){if(r.parent===null)throw Error('Root removal unsupported');if(Array.isArray(r.parent))r.parent.splice(r.key,1);else delete r.parent[r.key];}
 function identity(value,idKey){if(value!==null&&typeof value==='object'){if(!own(value,idKey))return undefined;if(value[idKey]!==null&&typeof value[idKey]==='object')throw Error('Object identities must be scalar JSON values');return JSON.stringify(value[idKey]);}return JSON.stringify(value);}
 function checkIdAppend(array,value,idKey,exclude=-1){const id=identity(value,idKey);if(id!==undefined&&array.some((v,i)=>i!==exclude&&identity(v,idKey)===id))throw Error('Duplicate collection identity');}
+function lowerLiteralAdd(op,state,options){
+ if(op.semantic!=='literal_add')return op;
+ const target=resolve(state,op.path,options);
+ if(Array.isArray(target.node))op.op='append';
+ else if(target.parent!==null&&!Array.isArray(target.parent)&&typeof target.parent==='object')op.op='update';
+ else throw Error('Literal add requires a collection or existing object field');
+ delete op.semantic;return op;
+}
 function concrete(op,state,options){
  op=clone(op);
  if(op.unlabeledPathValue){
   const valid=[];
   for(const candidate of op.unlabeledPathValue){
-   const trial={op:op.op,...candidate};
-   try{execute(clone(state),trial,options);valid.push(trial);}catch{}
+   const trial={op:op.op,...candidate};if(own(op,'semantic'))trial.semantic=op.semantic;
+   try{lowerLiteralAdd(trial,state,options);execute(clone(state),trial,options);valid.push(trial);}catch{}
   }
   if(valid.length!==1)throw Error('Unlabeled path/value must resolve uniquely');
   return valid[0];
@@ -54,7 +62,7 @@ function concrete(op,state,options){
   [op.from,op.to]=Array.isArray(a.node)?[op.unlabeledPaths[1],op.unlabeledPaths[0]]:op.unlabeledPaths;
   delete op.unlabeledPaths;
  }
- return op;
+ return lowerLiteralAdd(op,state,options);
 }
 function execute(state,op,options){
  const idKey=options.idKey??'id';
@@ -97,6 +105,7 @@ function execute(state,op,options){
 function validateShape(op){
  if(!op||typeof op!=='object'||!['append','update','remove','copy','move'].includes(op.op))throw Error('Invalid operation');
  const two=['copy','move'].includes(op.op), allowed=two?['op','from','to','unlabeledPaths']:['op','path',...(op.op==='remove'?[]:['value','unlabeledPathValue'])];
+ if(own(op,'semantic')){if(op.semantic!=='literal_add'||op.op!=='append')throw Error('Unsupported operation semantic');allowed.push('semantic');}
  if(Object.keys(op).some(k=>!allowed.includes(k)))throw Error('Unexpected operation field');
  for(const k of ['path','from','to'])if(own(op,k)&&(!Array.isArray(op[k])||!op[k].every(x=>x===null||['string','number','boolean'].includes(typeof x))))throw Error('Path must contain scalar JSON tokens');
  if(two){if(op.unlabeledPaths&&(!Array.isArray(op.unlabeledPaths)||op.unlabeledPaths.length!==2||!op.unlabeledPaths.every(p=>Array.isArray(p)&&p.every(x=>x===null||['string','number','boolean'].includes(typeof x)))))throw Error('Invalid unlabeled paths');if(!op.unlabeledPaths&&(!op.from||!op.to))throw Error('Missing directional path');}
@@ -110,7 +119,7 @@ function convertIntent(ir,input,{json_patch=false,idKey='id'}={}){
 }
 function applyPatch(input,patch,options={}){
  const state=clone(input);
- for(const op of patch){validateShape(op);if(op.unlabeledPaths||op.unlabeledPathValue)throw Error('Custom patch must have resolved roles');execute(state,op,options);}
+ for(const op of patch){validateShape(op);if(op.unlabeledPaths||op.unlabeledPathValue||own(op,'semantic'))throw Error('Custom patch must have resolved roles and semantics');execute(state,op,options);}
  return state;
 }
 module.exports={convertIntent,applyPatch,resolve,assertJSON};

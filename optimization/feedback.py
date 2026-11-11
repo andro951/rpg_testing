@@ -11,7 +11,7 @@ def _identity_failure(record):
     selected = record.get('variant_definition', {}).get('result', {}).get('evaluator', {})
     score = record.get('score', {}).get('evaluation', {})
     version = selected.get('version') if isinstance(selected, dict) else None
-    if (version or score.get('version')) != 'array-identities-intent-v1':
+    if (version or score.get('version')) not in ('array-identities-intent-v1', 'array-identities-intent-v2', 'array-identities-intent-v3'):
         return False
     if score.get('failure_stage') in ('normalization', 'configuration'):
         return True

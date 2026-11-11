@@ -7,7 +7,7 @@ const grammar=fs.readFileSync(path.join(__dirname,'intent.grammar'),'utf8');
 const forge=new GF(grammar);
 const tokenForge=new GF(fs.readFileSync(path.join(__dirname,'tokens.grammar'),'utf8'));
 const operationForge=new GF(fs.readFileSync(path.join(__dirname,'operation.grammar'),'utf8'));
-const operations=Object.assign(Object.create(null),{add:'append',append:'append',insert:'append',update:'update',remove:'remove',delete:'remove',copy:'copy',move:'move'});
+const operations=Object.assign(Object.create(null),{add:'append',append:'append',insert:'append',update:'update',set:'update',remove:'remove',delete:'remove',copy:'copy',move:'move'});
 const labels=Object.assign(Object.create(null),{op:'op',operation:'op',type:'op',path:'path',from:'from',source:'from',to:'to',destination:'to',value:'value'});
 const opens={'(' : ')','[':']','{':'}'};
 function simplify(x){
@@ -93,16 +93,16 @@ function convertOperation(ast){
   });
   if(candidates.length===1){const {k,i,x}=candidates[0];fields[k].splice(i,1);unlabeled.push(x);}
  }
- let op;
- if(fields.op){if(fields.op.length!==1)throw Error('Exactly one operation type required');op=operations[String(tokenValue(fields.op[0])).toLowerCase()];}
+ let op,verb;
+ if(fields.op){if(fields.op.length!==1)throw Error('Exactly one operation type required');verb=String(tokenValue(fields.op[0])).toLowerCase();op=operations[verb];}
  else{
   let positions=unlabeled.map((x,i)=>x.type==='WORD'&&operations[x.text.toLowerCase()]?i:-1).filter(i=>i>=0);
   if(!positions.length)positions=unlabeled.map((x,i)=>x.type==='STRING'&&operations[String(tokenValue(x)).toLowerCase()]?i:-1).filter(i=>i>=0);
   if(positions.length!==1)throw Error('Exactly one unambiguous operation type required');
-  op=operations[String(tokenValue(unlabeled.splice(positions[0],1)[0])).toLowerCase()];
+  verb=String(tokenValue(unlabeled.splice(positions[0],1)[0])).toLowerCase();op=operations[verb];
  }
  if(!op)throw Error('Unsupported or ambiguous operation alias');
- const ir={op};
+ const ir={op};if(verb==='add')ir.semantic='literal_add';
  for(const k of ['path','from','to'])if(fields[k])ir[k]=pathTokens(fields[k]);
  if(fields.value)ir.value=valueOf(fields.value);
  if(['append','update'].includes(op)&&unlabeled.length){
@@ -139,6 +139,85 @@ function convertOperation(ast){
  }
  return ir;
 }
+// Grammar nodes define roles; offsets only preserve lexically ignored whitespace.
+function astChildren(n){return Array.isArray(n)?n:n&&n.nodes?[n.nodes]:[];}
+function astLeaves(n){const result=[],stack=[n];while(stack.length){const x=stack.pop();if(x&&x.type&&Object.hasOwn(x,'value'))result.push(x);else stack.push(...astChildren(x).slice().reverse());}return result;}
+function rules(n,name){const result=[],stack=[n];while(stack.length){const x=stack.pop();if(Array.isArray(x)&&x[0]==='RULE'&&x[2]===name)result.push(x);else stack.push(...astChildren(x).slice().reverse());}return result;}
+function sourceContext(ast,source){
+ const offsets=new Map();let cursor=0;
+ for(const token of astLeaves(ast)){const start=source.indexOf(token.value,cursor);if(start<0)throw Error('Cannot locate grammar token');offsets.set(token,{start,end:start+token.value.length});cursor=start+token.value.length;}
+ function raw(node){const xs=astLeaves(node);return xs.length?source.slice(offsets.get(xs[0]).start,offsets.get(xs.at(-1)).end):'';}
+ function textSpan(node){const colon=astLeaves(node).find(t=>t.type==='COLON');const start=offsets.get(colon).end;const rest=source.slice(start);const newline=rest.search(/[\r\n\u2028\u2029]/);return {start,end:newline<0?source.length:start+newline};}
+ return {raw,textSpan,source,offsets};
+}
+function decodeText(raw,format){
+ if(format==='typed_lines')return raw.startsWith(' ')?raw.slice(1):raw;
+ if(!['literal_line','end_marked_line'].includes(format))return raw;
+ if(format==='end_marked_line'){if(!raw.endsWith('|'))throw Error('Text requires final | marker');raw=raw.slice(0,-1);}
+ const escapes={'\\':'\\',n:'\n',r:'\r',t:'\t'};
+ if(format==='literal_line'){escapes.s=' ';escapes['"']='"';}
+ let value='';for(let i=0;i<raw.length;i++){if(raw[i]!=='\\'){value+=raw[i];continue;}const next=raw[++i];if(!Object.hasOwn(escapes,next))throw Error('Unsupported text escape');value+=escapes[next];}
+ return value;
+}
+function linePath(node,context,header=false){
+ const slash=rules(node,'line_slash_path')[0];
+ if(!slash)return pathTokens(lexParse(context.raw(node)));
+ const tokens=astLeaves(slash),separators=tokens.filter(t=>t.type==='SLASH');
+ const lastEnd=context.offsets.get(tokens.at(-1)).end;
+ let end=lastEnd;
+ if(header)end+=(context.source.slice(end).match(/^[^\S\r\n\u2028\u2029]*/)[0].length);
+ return separators.map((separator,index)=>{
+  const start=context.offsets.get(separator).end;
+  const raw=context.source.slice(start,index+1<separators.length?context.offsets.get(separators[index+1]).start:end);
+  if(raw.startsWith('"')){if(!raw.endsWith('"'))throw Error('Quoted path selector must end at the path delimiter');const value=valueOf(lexParse(raw));if(typeof value!=='string')throw Error('Invalid quoted path segment');return value;}
+  if(/^(?:-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null)$/.test(raw))return valueOf(lexParse(raw));
+  if(/~(?:[^01]|$)/.test(raw))throw Error('Invalid path escape');
+  const decoded=raw.replace(/~1/g,'/').replace(/~0/g,'~');safety.unicode(decoded);return decoded;
+ });
+}
+function lineValue(node,context,options){
+ const kinds=['typed_text','typed_number','typed_boolean','typed_null','typed_object','typed_list','typed_json','labeled_json'];
+ const kind=kinds.find(k=>rules(node,k).length);
+ if(kind==='typed_text'){const span=context.textSpan(rules(node,kind)[0]);const value=decodeText(context.source.slice(span.start,span.end),options.output_format);safety.unicode(value);return value;}
+ if(kind==='typed_null')return null;
+ const target=kind?rules(node,kind)[0]:node;
+ const tokens=astLeaves(target);
+ if(kind==='typed_number'){
+  let raw=context.raw(target).split(':').slice(1).join(':').trim();
+  if(raw.startsWith('+')){if(!/[0-9]/.test(raw[1]??''))throw Error('Invalid positive number sign');raw=raw.slice(1);}
+  const value=valueOf(lexParse(raw));
+  if(typeof value!=='number')throw Error('Typed number requires a JSON number');
+  return value;
+ }
+ const json=kind==='typed_object'?rules(target,'json_object')[0]:kind==='typed_list'?rules(target,'json_array')[0]:rules(target,'json_value')[0];
+ if(!json&&kind==='typed_object')return {};
+ if(!json&&kind==='typed_list')return [];
+ const value=valueOf(lexParse(json?context.raw(json):kind?tokens.slice(2).map(t=>t.value).join(' '):context.raw(target)));
+ if(kind==='typed_json'&&typeof value==='string')throw Error('Typed json cannot carry text');
+ return value;
+}
+function convertGrammarOperation(ast,context,options){
+ const line=['line_write','line_remove','line_transfer'].find(name=>rules(ast,name).length);
+ let ir;
+ if(!line)ir=convertOperation(ast);
+ else{
+  const body=rules(ast,line)[0];
+  const name=astLeaves(body)[0].value.replace(/^"|"$/g,'').toLowerCase();
+  ir={op:name==='change'?'update':operations[name]};
+  if(!ir.op)throw Error('Unsupported operation');
+  if(name==='add')ir.semantic='literal_add';
+  if(line==='line_transfer'){const header=rules(body,'header_transfer').length>0;ir.from=linePath(rules(body,'line_source')[0],context,header);ir.to=linePath(rules(body,'line_destination')[0],context,header);}
+  else ir.path=linePath(rules(body,'line_target')[0],context,line==='line_remove'||rules(body,'header_write').length>0);
+  if(line==='line_write'){
+   const valueNode=rules(body,'line_value')[0];
+   ir.value=lineValue(valueNode,context,options);
+   if(name==='change'){if(!rules(valueNode,'typed_number').length)throw Error('Change requires typed number');ir.semantic='numeric_delta';}
+  }
+ }
+ if(ir.op==='remove'&&options.output_format==='typed_lines')ir.semantic='typed_remove';
+ return ir;
+}
+
 function repairOuterWrapper(text,{maxDepth=64}={}){
  // Only one unmatched outer wrapper is recoverable. Never repair an inner JSON value.
  const stack=[];let quoted=false,escaped=false;const unmatched=[];
@@ -203,17 +282,29 @@ function unwrapFence(text){const m=/^\s*```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n``
 function parseIntentWithDiagnostics(text,options={}){
  if(typeof text!=='string')throw Error('Intent text must be a string');
  if(text.length>(options.maxChars??65536))throw Error('Intent text size limit exceeded');
- const unwrapped=unwrapFence(text),repaired=repairOuterWrapper(unwrapped.text,options);
- const diagnostics=[...unwrapped.diagnostics,...(repaired.repair?[{code:'OUTER_GROUP_RECOVERED',detail:repaired.repair}]:[])];
- let ast;const previous=GF.makeFullAST;GF.makeFullAST=true;
- try{ast=forge.parse(repaired.text);}catch(error){throw Error('No complete operation sequence: '+error.message);}finally{GF.makeFullAST=previous;}
+ const unwrapped=unwrapFence(text);
+ let ast,source=unwrapped.text,repair=null;
+ const previous=GF.makeFullAST;GF.makeFullAST=true;
+ try{
+  try{ast=forge.parse(source);}catch(error){
+   const repaired=repairOuterWrapper(source,options);
+   if(!repaired.repair)throw error;
+   source=repaired.text;repair=repaired.repair;ast=forge.parse(source);
+  }
+ }catch(error){throw Error('No complete operation sequence: '+error.message);}finally{GF.makeFullAST=previous;}
+ const context=sourceContext(ast,source);
+ // Raw text is data, not grouping syntax. Validate depth outside its spans.
+ let masked=source;
+ for(const node of rules(ast,'typed_text')){const {start,end}=context.textSpan(node);masked=masked.slice(0,start)+' '.repeat(end-start)+masked.slice(end);}
+ if(repairOuterWrapper(masked,options).repair)throw Error('Unbalanced grouping');
+ const diagnostics=[...unwrapped.diagnostics,...(repair?[{code:'OUTER_GROUP_RECOVERED',detail:repair}]:[])];
  function children(node){return Array.isArray(node)?node:node&&typeof node==='object'&&node.nodes?[node.nodes]:[];}
  function leaves(node){const result=[],stack=[node];while(stack.length){const n=stack.pop();if(n&&typeof n==='object'&&n.type&&Object.hasOwn(n,'value'))result.push(n.value);else stack.push(...children(n).slice().reverse());}return result;}
  function operations(node){
   const result=[],stack=[node];
   while(stack.length){const current=stack.pop();
    if(Array.isArray(current)&&current[0]==='RULE'&&current[2]==='operation'){
-    result.push(convertOperation(current));
+    result.push(convertGrammarOperation(current,context,options));
     if(result.length>(options.maxOperations??256))throw Error('Operation count limit exceeded');
    }else stack.push(...children(current).slice().reverse());
   }
@@ -224,14 +315,31 @@ function parseIntentWithDiagnostics(text,options={}){
  // GrammarForge is ordered-choice, not an ambiguity-enumerating parser. Keep
  // this bounded proof for newline partitions: accepting the first parse alone
  // could silently choose a different operation list. It never repairs input.
+ function explicit(node){return ['line_write','line_transfer','line_remove'].some(name=>rules(node,name).length);}
+ function prove(nodes,expected){
+  try{
+   const alternate=parseSequence(nodes,options);
+   if(options.output_format==='typed_lines')for(const op of alternate)if(op.op==='remove')op.semantic='typed_remove';
+   if(JSON.stringify(alternate)!==JSON.stringify(expected))throw Error('Ambiguous complete operation interpretations');
+  }catch(error){if(/limit exceeded|Ambiguous/.test(error.message))throw error;}
+ }
  function checkLists(node){
   const stack=[node];while(stack.length){const current=stack.pop();
    if(Array.isArray(current)&&current[0]==='RULE'&&current[2]==='op_list'){
-    const nodes=lexParse(leaves(current).join(' '));
-    try{
-     const alternate=parseSequence(nodes,options),expected=operations(current);
-     if(JSON.stringify(alternate)!==JSON.stringify(expected))throw Error('Ambiguous complete operation interpretations');
-    }catch(error){if(/limit exceeded|Ambiguous/.test(error.message))throw error;}
+    if(!explicit(current))prove(lexParse(leaves(current).join(' ')),operations(current));
+    else{
+     // Explicit grammar records and groups delimit generic runs. Check every
+     // old-style run without relexing text bodies or changing their boundaries.
+     const events=[],pending=[current];
+     while(pending.length){const event=pending.pop();
+      if(Array.isArray(event)&&event[0]==='RULE'&&['operation','op_group'].includes(event[2]))events.push(event);
+      else pending.push(...children(event).slice().reverse());
+     }
+     let run=[];
+     function flush(){if(run.length){prove(lexParse(context.raw(run)),run.map(op=>convertGrammarOperation(op,context,options)));run=[];}}
+     for(const event of events){if(event[2]==='op_group'||explicit(event))flush();else run.push(event);}
+     flush();
+    }
    }
    stack.push(...children(current).slice().reverse());
   }

@@ -1,4 +1,6 @@
-# Current research scope
+# Historical November 3 research scope
+
+Superseded by Isaac’s November 9/11 five-operation requirement. The current suite has 21 cases including custom Move/Copy; see `docs/schema-free-evaluation.md`. The counts and restrictions below describe this historical experiment only.
 
 The current requirements cover fixed-schema updates to existing fields and addition or removal of uniquely identified array elements. A separate model-generated Move or Copy and RemoveAll are outside this scope.
 

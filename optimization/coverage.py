@@ -18,7 +18,10 @@ APPROVAL = 'Standing user authorization: successful built-in OPRO promotes revie
 
 
 def scope(root):
+    root = Path(root)
     tests = load_tests(root / 'test_specs')
+    from prompt_builder.coverage import runtime_report
+    runtime_report(root, tests=tests)
     return {'workflow': code_fingerprint(), 'definitions': [
         {'test_id': t['id'], 'variant_id': v['id'], 'definition': digest(experiment_spec(t, v)),
          'messages': digest(messages(t, v['steps'][0], {}, v)), 'repetitions': t.get('repetitions', 1)}
@@ -127,7 +130,7 @@ def promote(app, session_id):
 
 
 def finish_promotion(root, state):
-    if state['status'] != 'promoting':
+    if state['status'] != 'promoting' and not state.get('promotion_incomplete'):
         return
     for tid, after in state['promotion']['after'].items():
         p = root / 'test_specs' / (tid + '.json')
@@ -140,6 +143,8 @@ def finish_promotion(root, state):
     from .promotion import rebuild
     rebuild(root)
     state['scope'] = scope(root); state['suite_digest'] = digest(state['scope'])
+    state.pop('promotion_incomplete', None)
+    state.pop('scope_validation_error', None)
     state.update(status='pending', message='Promoted from the saved base definitions. Full configured-model coverage pending.')
     save(root, state)
 
@@ -190,10 +195,23 @@ def advance_once(app, key):
     with HostLock(app.data / 'coverage.lock'):
         state = read_state(app.root, key)
         with review_lock(app.root):
-            finish_promotion(app.root, state)
-            if digest(scope(Path(state.get('suite_root',app.root)))) != state['suite_digest']:
-                state.update(status='blocked', message='Current suite changed; frozen coverage preserved.')
-                save(app.root, state); return state
+            try:
+                finish_promotion(app.root, state)
+                current_scope = scope(Path(state.get('suite_root', app.root)))
+                if digest(current_scope) != state['suite_digest']:
+                    state.update(status='blocked', scope_validation_error='Current suite differs from the frozen coverage scope',
+                                 message='Current suite changed; frozen coverage preserved. Explicit resume is required after repair.')
+                    save(app.root, state); return state
+            except Cancelled:
+                raise
+            except Exception as exc:
+                if state['status'] == 'promoting':
+                    state['promotion_incomplete'] = True
+                state.update(status='blocked', scope_validation_error=str(exc),
+                             message='Coverage scope verification blocked: '+str(exc)+'. No workers advanced; saved scope and receipts preserved.')
+                save(app.root, state)
+                return state
+            state.pop('scope_validation_error', None)
         for worker in state['workers']:
             if app.cancel_event.is_set():
                 state.update(status='stopped', message='Stopped; terminal evidence preserved.'); save(app.root, state); return state
@@ -244,7 +262,7 @@ def resume(app, key, retry_blocked=False):
             save(app.root,state)
     while True:
         state=advance_once(app,key)
-        if not any(w.get('status') in ('queued','running') for w in state['workers']):return state
+        if state.get('status')=='blocked' or not any(w.get('status') in ('queued','running') for w in state['workers']):return state
         app.message=state['message']
         app.state='running'
         app.set_progress('coverage','Waiting for submitted model coverage',detail='; '.join(w['id']+': '+w.get('status','pending') for w in state['workers']))
@@ -263,10 +281,14 @@ def after_success(app, session_id):
         key=digest({'session':session_id,'candidate':ranked[0]['candidate']})
         if (directory(app.root,key)/'state.json').exists():
             state=read_state(app.root,key)
-            state['message']='Promotion interrupted: '+str(exc)+'. Saved transaction requires resume.'
+            if state['status']=='promoting':state['promotion_incomplete']=True
+            state.update(status='blocked',scope_validation_error=str(exc),
+                         message='Promotion interrupted: '+str(exc)+'. Saved transaction requires explicit resume.')
         else:
+            # A failed scope cannot be retried here or represented as a full snapshot.
+            # Save the diagnostic even when no verified suite could be frozen.
             state={'id':key,'session_id':session_id,'candidate_digest':digest(ranked[0]['candidate']),
-                'status':'blocked','scope':scope(app.root),'suite_digest':digest(scope(app.root)),
+                'status':'blocked','scope_validation_error':str(exc),
                 'workers':[],'message':'Promotion blocked: '+str(exc)}
         save(app.root,state);app.coverage_id=key;app.message=state['message'];return state
     if key:
@@ -284,5 +306,6 @@ def restore_pending(app):
     """Reconnect monitoring on normal app restart; explicit stopped work stays stopped."""
     for path in sorted((app.root/'coverage_results').glob('*/state.json')):
         state=read_state(app.root,path.parent.name)
+        if state.get('scope_validation_error'):continue
         if state['status'] in ('pending','promoting') or (state['status']!='stopped' and any(w.get('status') in ('queued','running','checking') for w in state['workers'])):
             app.start('coverage',{'id':state['id']});return state['id']

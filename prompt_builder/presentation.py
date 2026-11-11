@@ -41,18 +41,33 @@ SERIALIZERS = ('normal_json','id_keyed_arrays','full_paths','named_tables')
 def has_array(value):
     return isinstance(value,list) or isinstance(value,dict) and any(has_array(v) for v in value.values())
 
+class _IdentityArray(dict):
+    """Internal array marker; never emitted as a data field or JSON wrapper."""
+
+
 def keyed(value,array_identities=None):
-    """Use only declared array identities; retain all fields and container types."""
+    """Use declared IDs as array keys while retaining the original container kind."""
     declarations=IdentityMap(array_identities)
     declarations.validate(value)
     def walk(node,path):
-        # Tag BOTH container kinds: user data can contain any field, even "$array".
         if isinstance(node,list):
             field=declarations.field(node,path)
-            return {'$array':{scalar_text(v[field] if field is not None else v):walk(v,path+(None,)) for v in node}}
-        if isinstance(node,dict):return {'$object':{k:walk(v,path+(k,)) for k,v in node.items()}}
+            return _IdentityArray((scalar_text(v[field] if field is not None else v),walk(v,path+(None,))) for v in node)
+        if isinstance(node,dict):return {k:walk(v,path+(k,)) for k,v in node.items()}
         return node
     return walk(value,())
+
+def _render_keyed(value,depth=0):
+    """Render the non-JSON ID-keyed view, escaping fields, IDs and values as JSON."""
+    if not isinstance(value,dict):
+        return json.dumps(value,ensure_ascii=False,allow_nan=False)
+    opening,closing = ('[',']') if isinstance(value,_IdentityArray) else ('{','}')
+    if not value:return opening+closing
+    indent='  '*(depth+1)
+    entries=[indent+json.dumps(k,ensure_ascii=False,allow_nan=False)+': '+_render_keyed(v,depth+1)
+             for k,v in value.items()]
+    return opening+'\n'+',\n'.join(entries)+'\n'+'  '*depth+closing
+
 
 def full_paths(value,array_identities=None,path=''):
     """Use declared identities for array path parts, never positional indices."""
@@ -111,7 +126,7 @@ def named_tables(value):
 def render(value,serializer,array_identities=None):
     assert_json(value)
     if serializer=='normal_json':return json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False)
-    if serializer=='id_keyed_arrays':return json.dumps(keyed(value,array_identities),ensure_ascii=False,indent=2,allow_nan=False)
+    if serializer=='id_keyed_arrays':return _render_keyed(keyed(value,array_identities))
     if serializer=='full_paths':return '\n'.join(full_paths(value,array_identities))
     if serializer=='named_tables':
         validate_display(value)

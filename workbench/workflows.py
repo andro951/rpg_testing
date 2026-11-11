@@ -62,7 +62,7 @@ def messages(test,step,values,variant=None):
         msgs=[{'role':'system','content':base+' '+_legacy_presentation_instruction(mode)}]
         source=test['source']
         evaluator=variant.get('result',{}).get('evaluator')
-        if isinstance(evaluator,dict) and evaluator.get('version') == 'array-identities-intent-v1':
+        if isinstance(evaluator,dict) and evaluator.get('version') in ('array-identities-intent-v1', 'array-identities-intent-v2', 'array-identities-intent-v3'):
             source={key:value for key,value in source.items() if key != 'array_identities'}
         if 'new_information_override' in variant:
             source={**source,'new_information':variant['new_information_override']}
@@ -119,6 +119,9 @@ def condition(rule,values):
 
 def evaluate(test,variant,values):
     result=variant.get('result',{});representation=result.get('representation','answers')
+    from evaluation.retired_contracts import reason, configuration_score
+    if reason(result):
+        return {**configuration_score(result), 'objective_checks': []}
     if representation=='answers':
         expected=variant.get('expected_answers',{})
         checks={k:equal(values.get(k),v) and k in values for k,v in expected.items()}
@@ -167,13 +170,7 @@ def evaluate(test,variant,values):
             try:
                 if normalization_error is not None:raise ValueError(normalization_error)
                 patch=normalized_response if normalized_response is not None else values.get(result.get('step'))
-                if representation=='ember_text_v1':
-                    from .ember_text import decode
-                    patch=decode(patch,test['source']['initial_state'],test['state_schema'])
-                elif representation=='field_value_v2':
-                    from .field_values import decode
-                    patch=decode(patch,test['source']['initial_state'],test['state_schema'])
-                elif isinstance(patch,str):patch=parse(patch)
+                if isinstance(patch,str):patch=parse(patch)
                 actual_ops=[item.get('op') for item in patch] if isinstance(patch,list) and all(isinstance(item,dict) for item in patch) else []
                 match=actual_ops==required_ops
             except Exception:
@@ -187,13 +184,7 @@ def evaluate(test,variant,values):
             try:
                 if normalization_error is not None:raise ValueError(normalization_error)
                 response=normalized_response if normalized_response is not None else values.get(result.get('step'))
-                if representation=='ember_text_v1':
-                    from .ember_text import decode
-                    response=decode(response,test['source']['initial_state'],test['state_schema'])
-                elif representation=='field_value_v2':
-                    from .field_values import decode
-                    response=decode(response,test['source']['initial_state'],test['state_schema'])
-                elif isinstance(response,str):response=parse(response)
+                if isinstance(response,str):response=parse(response)
                 problems=sorted(e.message for e in Draft202012Validator(result['response_schema']).iter_errors(response))
             except Exception as exc:problems=[str(exc)]
             result_score['response_schema_valid']=not problems
@@ -216,6 +207,8 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progr
     """No disk writes. Include all request work in pipeline time; score afterward."""
     from jsonschema import Draft202012Validator
     from jsonschema.exceptions import ValidationError
+    from evaluation.retired_contracts import require_supported
+    require_supported(variant.get('result', {}))
     if 'evaluator' in variant.get('result', {}):
         from evaluation.hosts import selected
         selected(variant['result']).validate_selection(test, variant)
