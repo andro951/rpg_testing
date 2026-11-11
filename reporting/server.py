@@ -20,6 +20,10 @@ def render_page(root, snapshot, evidence_view=False, judgement_api=None, optimiz
     report=({'matrix':{'records':copy.deepcopy(snapshot['matrix']['records'])},'evidence':{}}
             if evidence_view else copy.deepcopy(snapshot))
     annotate(report['matrix'],JudgementStore(root).read()) if not evidence_view else None
+    comparison_path = Path(root) / '.local' / 'reports' / 'format-comparison.csv'
+    if not evidence_view and comparison_path.exists():
+        from .format_comparison import load_comparison
+        report['format_comparison'] = load_comparison(comparison_path)
     if judgement_api:report['judgement_api']=judgement_api
     if optimization_api:report['optimization_api']=optimization_api
     report['result_tab_url']='/result/'

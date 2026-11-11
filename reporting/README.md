@@ -49,3 +49,12 @@ Regenerate the table with `Open_Results_Table.bat`. Cell tooltips include the ev
 
 
 Result-tab compatibility: updated servers advertise their dedicated /result/ page. A viewer already running from an earlier version serves the updated JavaScript on refresh but lacks that route; the table therefore opens its existing page with a result hash instead and fetches complete evidence from the original endpoint. Refreshing the table after updating the code is sufficient. Browser smoke coverage includes this running-old-viewer case, click-through, totals navigation, full text and reloads.
+
+
+### Input/output format comparison tab
+
+The existing results table now has a separate **Input × output formats** tab. Rows come from available input/output format pairs, not a fixed list or row count. Models are columns. **Cell display** switches all cells between percentages and passed/scored fractions. Timeouts count as unsuccessful; missing, invalid, unscored and infrastructure outcomes do not enter the denominator. Hover for both forms and exclusions.
+
+The default saved-evidence view follows Evidence scope and Find test and preserves original saved scores and configuration identities. For an explicitly evaluated current-series composite, pass `--format-results <summary.csv>` when generating the report, or keep that CSV at `.local/reports/format-comparison.csv` for subsequent local regenerations and the Workbench viewer. The required columns are model, model_id, case, input_format, output_format, outcome, and repetition. Duplicate conditions and invalid outcomes fail validation. Imported comparison grading stays separate from original evidence; the tab labels this source, and its selector can return to original saved scores. Replace the summary input when importing a later completed run; format additions/removals then appear automatically without code changes.
+
+Tests: `python -m unittest tests.test_format_comparison -v` and `python -m tests.format_comparison_browser_smoke`.

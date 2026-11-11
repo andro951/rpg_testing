@@ -227,10 +227,15 @@ def main(argv=None):
     parser.add_argument('--source', type=Path, default=Path('results'), help='results directory or evidence ZIP')
     parser.add_argument('--specs', type=Path, default=Path('test_specs'))
     parser.add_argument('--output', type=Path, default=Path('.local/reports/statistics.html'))
+    parser.add_argument('--format-results', type=Path, help='Optional current-series CSV for the format comparison tab')
     args = parser.parse_args(argv)
     records, problems = load_evidence(args.source)
     specs = [read_json(path) for path in sorted(args.specs.glob('*.json'))]
     report = build_report(records, specs, problems=problems)
+    comparison_path = args.format_results or args.specs.parent / '.local' / 'reports' / 'format-comparison.csv'
+    if args.format_results or comparison_path.exists():
+        from .format_comparison import load_comparison
+        report['format_comparison'] = load_comparison(comparison_path)
     annotate(report['matrix'], JudgementStore(args.specs.parent).read())
     if args.source.is_dir():
         for cid, summary in report['matrix']['records'].items():

@@ -377,3 +377,126 @@ const ResultsMatrix = {
     }
 };
 //#endregion
+
+
+// Input/output format aggregation is a tab in this report, not a separate page.
+const FormatComparison = {
+    Active: false,
+    Labels: {normal_json: "Normal JSON", raw_json: "Normal JSON", id_keyed_arrays: "ID-keyed arrays", full_paths: "Full paths", json_dot: "JSON dot paths", json_slash: "JSON slash paths", path_list: "Path list", literal_line: "Literal line", typed_lines: "Typed lines", end_marked_line: "End-marked line"},
+    Label: value => FormatComparison.Labels[value] || value.replaceAll("_", " "),
+    Initialize: parent => {
+        const tabs = StatisticsReport.Element("div", parent);
+        tabs.setAttribute("role", "tablist");
+        tabs.setAttribute("aria-label", "Results views");
+        tabs.style.cssText = "display:flex;gap:8px;flex-basis:100%;margin:8px 0";
+        FormatComparison.Tabs = [false, true].map(active => {
+            const tab = StatisticsReport.Element("button", tabs, active ? "Input × output formats" : "Results");
+            tab.setAttribute("role", "tab");
+            tab.id = active ? "format-comparison-tab" : "results-tab";
+            tab.style.cssText = "padding:10px 16px;border:1px solid #94a3b8;border-radius:6px;cursor:pointer;font:inherit";
+            tab.addEventListener("click", () => { FormatComparison.Active = active; StatisticsReport.Render(); });
+            return tab;
+        });
+        const controls = StatisticsReport.Element("div", parent);
+        controls.style.cssText = "display:flex;gap:16px;flex-wrap:wrap;align-items:center";
+        controls.hidden = true;
+        FormatComparison.Controls = controls;
+        const options = StatisticsReport.Data.format_comparison ? [["comparison", "Current-series comparison"], ["saved", "Saved evidence (original scores)"]] : [["saved", "Saved evidence (original scores)"]];
+        FormatComparison.Source = StatisticsReport.Select(controls, "Comparison data", options);
+        FormatComparison.Display = StatisticsReport.Select(controls, "Cell display", [["percent", "Percentage"], ["fraction", "Fraction (passed / scored)"]]);
+        FormatComparison.Display.id = "format-cell-display";
+    },
+    UpdateTabs: () => FormatComparison.Tabs.forEach((tab, index) => {
+        const selected = Boolean(index) === FormatComparison.Active;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.style.background = selected ? "#dbeafe" : "#f8fafc";
+        tab.style.fontWeight = selected ? "700" : "400";
+    }),
+    // Both axes are discovered from the chosen data, including unrecorded active rows.
+    Build: () => {
+        const imported = FormatComparison.Source.value === "comparison" ? StatisticsReport.Data.format_comparison : null;
+        if (imported) {
+            const groups = new Map();
+            for (const item of imported.observations) {
+                const key = JSON.stringify([item.input, item.output]);
+                if (!groups.has(key)) groups.set(key, {input: item.input, output: item.output, items: []});
+                groups.get(key).items.push(item);
+            }
+            return { models: imported.models, groups: [...groups.values()], imported: true, note: imported.note };
+        }
+        const scope = ResultsMatrix.Scope.value;
+        const search = ResultsMatrix.Search.value.trim().toLowerCase();
+        const rows = StatisticsReport.Data.matrix.rows.filter(row => row.formats && (scope === "all" || row.current === (scope === "current")) && `${row.name} ${row.test_id} ${row.variant_id}`.toLowerCase().includes(search));
+        const groups = new Map();
+        for (const row of rows) {
+            const key = JSON.stringify([row.formats.input, row.formats.output]);
+            if (!groups.has(key)) groups.set(key, {...row.formats, items: []});
+            groups.get(key).items.push(row);
+        }
+        return { models: StatisticsReport.Data.matrix.models, groups: [...groups.values()], imported: false,
+            note: "Original saved scores, aggregated across the selected evidence scope and search. All judgement statuses are included. Historical runs and differing configurations are descriptive, not a controlled ranking." };
+    },
+    Counts: (group, model, imported) => {
+        if (!imported) return ResultsMatrix.Counts(group.items.map(row => row.cells[model.id] || ResultsMatrix.Empty));
+        const counts = {pass: 0, fail: 0, timeout: 0, error: 0, aborted: 0, skipped: 0, invalid: 0, unscored: 0, parser_gap: 0, not_run: 0, observations: 0};
+        const items = new Map(group.items.filter(item => item.model === model.id).map(item => [item.id, item]));
+        for (const item of items.values()) { counts[item.outcome]++; counts.observations++; }
+        return counts;
+    },
+    Render: () => {
+        const parent = StatisticsReport.Content;
+        parent.setAttribute("role", "tabpanel");
+        parent.setAttribute("aria-labelledby", "format-comparison-tab");
+        const data = FormatComparison.Build();
+        const order = {normal_json: 0, raw_json: 0, id_keyed_arrays: 1, full_paths: 2};
+        data.groups.sort((a, b) => (order[a.input] ?? 99) - (order[b.input] ?? 99) || ResultsMatrix.Compare(a.input, b.input) || ResultsMatrix.Compare(a.output, b.output));
+        StatisticsReport.Element("h2", parent, "Input/output format comparison");
+        StatisticsReport.Element("p", parent, `${data.groups.length} input/output combinations · ${data.models.length} model columns. Rows follow the formats available in the selected data.`).id = "format-comparison-summary";
+        StatisticsReport.Element("p", parent, data.note);
+        StatisticsReport.Element("p", parent, "Pass rate = passed / (passed + failed + timed out). Missing, unscored, invalid and infrastructure outcomes are excluded and shown in tooltips. Denominators can differ where an input presentation does not apply. Use Cell display to switch all cells; hover for both values.");
+        const wrap = StatisticsReport.Element("div", parent);
+        wrap.style.cssText = "overflow-x:auto;max-width:100%";
+        const table = StatisticsReport.Element("table", wrap);
+        table.id = "format-comparison-table";
+        table.style.cssText = "border-collapse:separate;border-spacing:2px;font-size:14px;min-width:700px;width:100%";
+        const header = StatisticsReport.Element("tr", StatisticsReport.Element("thead", table));
+        ["Input → output", ...data.models.map(model => model.label)].forEach((label, index) => {
+            const cell = StatisticsReport.Element("th", header, label);
+            cell.scope = "col";
+            cell.style.cssText = "padding:10px;background:#e2e8f0;position:sticky;top:0;z-index:2;max-width:200px;overflow-wrap:anywhere";
+            if (index) cell.title = data.models[index - 1].id;
+        });
+        const body = StatisticsReport.Element("tbody", table);
+        for (const group of data.groups) {
+            const row = StatisticsReport.Element("tr", body);
+            row.dataset.inputFormat = group.input;
+            row.dataset.outputFormat = group.output;
+            const label = StatisticsReport.Element("th", row, `${FormatComparison.Label(group.input)} → ${FormatComparison.Label(group.output)}`);
+            label.scope = "row";
+            label.style.cssText = "text-align:left;padding:9px;background:#f1f5f9;white-space:nowrap";
+            for (const model of data.models) {
+                const count = FormatComparison.Counts(group, model, data.imported);
+                const scored = count.pass + count.fail + count.timeout;
+                const fraction = `${count.pass}/${scored}`;
+                const percent = scored ? `${(count.pass / scored * 100).toFixed(1)}%` : "—";
+                const cell = StatisticsReport.Element("td", row, scored ? (FormatComparison.Display.value === "fraction" ? fraction : percent) : "—");
+                cell.dataset.model = model.id;
+                cell.dataset.passed = String(count.pass);
+                cell.dataset.scored = String(scored);
+                cell.style.cssText = "text-align:center;padding:9px;font-variant-numeric:tabular-nums;font-weight:600";
+                cell.style.background = scored ? ResultsMatrix.RateColor(count.pass / scored) : ResultsMatrix.Palette.missing;
+                cell.title = `${model.label}: ${scored ? `${fraction} = ${percent}` : "No scored observations"}\n${ResultsMatrix.CountsText(count)}`;
+                cell.setAttribute("aria-label", cell.title);
+                if (!data.imported) {
+                    const ids = [...new Set(group.items.flatMap(item => item.cells[model.id]?.primary_ids || []))];
+                    if (ids.length) {
+                        cell.tabIndex = 0; cell.setAttribute("role", "button"); cell.style.cursor = "pointer";
+                        cell.addEventListener("click", () => ResultsMatrix.Inspect(ids));
+                        cell.addEventListener("keydown", event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); ResultsMatrix.Inspect(ids); } });
+                    }
+                }
+            }
+        }
+        if (!data.groups.length) StatisticsReport.Element("p", parent, "No input/output format rows match this data and filter selection.");
+    }
+};

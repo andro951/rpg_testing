@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from reporting.grouping import row_grouping
+from reporting.format_comparison import format_pair
 from reporting.timing import annotate as annotate_timing
 from workbench.domain import digest, experiment_spec
 from workbench.perchance_trials import observation_aliases, model_conditions
@@ -74,7 +75,7 @@ def build_matrix(records, specs, fingerprint):
         row = rows.setdefault(key, {'id': key, 'test_id': test_id, 'variant_id': variant_id,
             'name': labels[0], 'comparison_id': digest(test), 'definition_id': digest(definition),
             'judgement': {'status': 'needs_review', 'blocked': False},
-            'variant_name': labels[1], 'grouping': row_grouping(test, variant, test_id, variant_id),
+            'variant_name': labels[1], 'formats': format_pair(test, variant), 'grouping': row_grouping(test, variant, test_id, variant_id),
             'repetition': repetition, 'current': current, 'revision': digest([definition, workflow])[:8], 'cells': {}})
         return row
 

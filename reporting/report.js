@@ -39,6 +39,7 @@ const StatisticsReport = {
         filters.style.display = "flex";
         filters.style.flexWrap = "wrap";
         filters.style.gap = "16px";
+        FormatComparison.Initialize(filters);
         ResultsMatrix.Initialize(filters);
         StatisticsReport.Content = StatisticsReport.Element("main", document.body);
         StatisticsReport.Render();
@@ -504,7 +505,17 @@ const StatisticsReport = {
     Render: () => {
         StatisticsReport.EvidenceRequest = (StatisticsReport.EvidenceRequest || 0) + 1;
         StatisticsReport.Content.replaceChildren();
-        ResultsMatrix.Render();
+        const formats = FormatComparison.Active;
+        for (const control of ResultsMatrix.Controls)
+            control.hidden = formats && FormatComparison.Source.value === "comparison";
+        ResultsMatrix.Rows.parentElement.hidden = formats;
+        FormatComparison.Controls.hidden = !formats;
+        FormatComparison.Controls.style.display = formats ? "flex" : "none";
+        StatisticsReport.Content.removeAttribute("role");
+        StatisticsReport.Content.removeAttribute("aria-labelledby");
+        FormatComparison.UpdateTabs();
+        if (formats) FormatComparison.Render();
+        else ResultsMatrix.Render();
     }
 };
 
