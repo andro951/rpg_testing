@@ -15,6 +15,8 @@
 
 # Development rules
 
+- November 11 result-sync requirement: after every requested desktop model run, automatically commit and push only that run's saved synthetic result evidence on the current branch. The supported Controller.run path journals exact result paths and handles normal completion, Stop and errors; inspect its result_sync status. Retry transport without inference with `python -m workbench.result_sync --root .`. Never sweep pre-existing changes, deletions, logs, settings or credentials into a result commit, and never force-push or auto-resolve divergence. Ad hoc assistant-run batches must use Controller.run or explicitly enroll their intended ResultStore saves with workbench.result_sync. Arbitrary shell scripts and immutable older run snapshots are not automatically hooked.
+
 - November 9 and November 11 scope correction: Isaac explicitly requires testing custom Move and Copy as well as Update/Append/Remove. Restore the full 21-case suite, with four cases per operation plus no-change. This supersedes the November 3 narrower 13-case scope. Do not infer that Move/Copy are obsolete from archived source locations. Preserve all archived tests and results, but use current schema-free templates, explicit ID mapping and current evaluator identity for new work. No broad model run is implied by a builder change; only run the user-requested scope.
 
 

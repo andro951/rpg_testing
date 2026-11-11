@@ -124,3 +124,48 @@ measure causal slowdown and can miss memory-bandwidth pressure or a completely
 starved benchmark. This companion is separate from the application GUI; do not
 claim that the installed GUI automatically launches it or that every platform
 provides these process-level measurements.
+
+## Automatic desktop result commits (November 11, 2026)
+
+Every real `Controller.run` now records the exact `ResultStore.save` paths for
+that run and commits/pushes those files when the run exits. This covers GUI Run,
+direct desktop batch calls, standalone Perchance selections, combined local and
+Perchance runs, and configured desktop coverage calls through the controller.
+Stop and exceptions still synchronize already-saved completed, skipped, error or
+aborted evidence; unfinished inference is never invented or rerun for Git.
+Demo results never publish. Old `publish_results=false` settings do not disable
+this new requirement, and the old optional worker-branch Publisher is no longer
+called by scheduler checkpoints. No raw logs or machine configuration are copied.
+
+The desktop stays on its current branch. Git commits contain only the exact
+journaled result files, with content hashes and result checksums verified before
+publication. Unrelated staged/unstaged changes, old result deletions, unrelated
+new result files and source edits remain untouched. Pre-existing dirty or staged
+edits to an enrolled result, later content changes, a changed branch/destination,
+or a diverged local/remote branch block synchronization for review. There is no
+automatic merge, rebase, reset, force-push or broad add. The expected origin push
+URL is pinned by hash without saving its potentially credential-bearing text.
+
+Inference completion and Git synchronization are separate states. The UI shows
+pending Git work and a **Retry result commit / push** button. Direct controller
+callers receive `result_sync_status` and a console warning. A local receipt under
+`.local/workbench/result-sync` survives restart, including an already-created
+commit whose push failed. Retry occurs before the next run and on run exit; it
+never starts model inference. A freshly opened Workbench restores pending status.
+Use `python -m workbench.result_sync --root .` for an explicit transport-only
+retry (exit 2 means pending). Git requests disable interactive prompts, time out
+after 45 seconds each, and attempt a failed batch once per retry invocation.
+Fix authentication or reconcile branch divergence normally, then retry. Do not
+delete receipts to conceal failed publication. If the receipt itself cannot be
+written, the model response remains saved and a visible warning requires review.
+
+A running Workbench must be restarted to load this code, only after its active
+operation finishes. Do not interrupt inference merely to enable the new workflow.
+Isolated frozen coverage snapshots without their own Git checkout retain their
+results locally and report pending transport; the collector remains responsible
+for bringing that evidence into the main checkout. Existing immutable snapshots,
+legacy `rpgbench.runner`/`run_worker.py` (a separate historical result protocol),
+and arbitrary ad hoc shell scripts are not retroactively hooked. Assistant-run
+batches must use `Controller.run` or explicitly enroll `ResultStore` saves using
+`ResultSync.begin`, `RecordingStore`, and `ResultSync.retry` with the same exact
+path/content protections. No new inference was performed to validate this change.

@@ -49,8 +49,8 @@ const issues=$('issues');issues.replaceChildren();if(s.report){const c=s.report.
 queueMicrotask(()=>offerAutomaticRepair(s.report).catch(e=>showAlert(e.message,'Automatic repair failed')));const plan=$('plan');plan.replaceChildren();for(const g of p?.groups||[]){const n=el('div',undefined,'plan-item');n.append(el('b',g.model_id),el('p',g.pending+' pending · '+g.complete+' complete · '+g.reason,'muted'));if(g.context)n.append(el('p','Automatic context allocation: '+g.context.allocated_tokens.toLocaleString()+' tokens','muted'));plan.append(n);}if(p&&!p.groups.length)plan.append(el('p','No models match this hardware tier.','muted'));
 $('folder-note').textContent=s.report?.folder?.path?('Active folder: '+s.report.folder.path+' · '+s.report.folder.source):'No active model folder detected yet.';
 renderModels();LogsPage.Render(s.logs);$('remote-url').textContent=s.remote?.url||'';
-if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=s.settings.publish_results; }
-renderHub();renderRuntimes();renderRunControls();PerchanceInstall.Render(s.perchance_setup_prompt);WorkerFailure.Render(s.failure);folderPrompts();
+if(!setupDirty&&!$('page-setup').contains(document.activeElement)){ $('model-root').value=s.settings.model_root;$('llama-path').value=s.settings.llama_path;$('sync-source').checked=s.settings.sync_source;$('publish-results').checked=!s.demo; }
+renderResultSync(s);renderHub();renderRuntimes();renderRunControls();PerchanceInstall.Render(s.perchance_setup_prompt);WorkerFailure.Render(s.failure);folderPrompts();
 const scope=s.report?.selection;let scopeTests='all enabled tests';if(scope?.test_id)scopeTests=scope.test_id;else if(scope?.test_ids)scopeTests=scope.test_ids.length+' selected test(s)';const scopeModel=scope?.all_models?'all eligible models':scope?.model_id;$('run-scope').textContent=scope?('Scope: '+scopeModel+' · '+scopeTests+' · '+(scope.variant_id||'all enabled variants')):'Scope: all eligible models and enabled tests.';
 }
 let modelRenderSignature='',modelVramDrafts=new Map();
@@ -126,7 +126,7 @@ async function chooseLlamaServer(){
  $('llama-path').value=picked.path;setupDirty=false;
  await api('/api/settings',{llama_path:picked.path});await poll();toast('llama-server selected.');
 }
-on('save-setup',async()=>{const previousRoot=state.settings.model_root;const values={model_root:$('model-root').value.trim(),llama_path:$('llama-path').value.trim(),sync_source:$('sync-source').checked,publish_results:$('publish-results').checked};if($('api-token').value)values.hf_token=$('api-token').value;if(values.publish_results&&!state.settings.publish_results&&!confirm('Publish only synthetic safe-for-work results to the public GitHub repository? Do not enable for private data.'))return;await api('/api/settings',values);setupDirty=false;$('api-token').value='';toast('Worker setup saved.');if(values.model_root&&values.model_root!==previousRoot){toast('Models folder saved. Scanning it now…');await scanModelsInBackground();}else{await poll();}});
+on('save-setup',async()=>{const previousRoot=state.settings.model_root;const values={model_root:$('model-root').value.trim(),llama_path:$('llama-path').value.trim(),sync_source:$('sync-source').checked,publish_results:!state.demo};if($('api-token').value)values.hf_token=$('api-token').value;await api('/api/settings',values);setupDirty=false;$('api-token').value='';toast('Worker setup saved.');if(values.model_root&&values.model_root!==previousRoot){toast('Models folder saved. Scanning it now…');await scanModelsInBackground();}else{await poll();}});
 on('browse-models',chooseModelsFolder);on('browse-llama',chooseLlamaServer);
 on('enable-remote',async()=>{const r=await api('/api/remote/enable',{});$('remote-url').textContent=r.url;toast('Private controller enabled. Open the displayed address on your laptop through Tailscale.');});
 on('disable-remote',async()=>{if(confirm('Disable remote access? A laptop connection will disconnect, but the local workbench stays available.'))await api('/api/remote/disable',{});});
@@ -469,3 +469,14 @@ resultsTableLink.style.display=`inline-block`;
 resultsTableLink.style.marginBottom=`12px`;
 $(`page-results`).prepend(resultsTableLink);
 poll();setInterval(poll,1200);
+
+// Git transport state is separate from inference completion and never hidden by
+// a successful benchmark result or a later preflight refresh.
+function renderResultSync(s){
+ const sync=s.result_sync||{};
+ $('result-sync-status').textContent=sync.message||'Results sync automatically after each run.';
+ $('result-sync-status').setAttribute('role',sync.status==='pending'?'alert':'status');
+ $('retry-result-sync').hidden=sync.status!=='pending';
+ $('retry-result-sync').disabled=s.busy||s.demo;
+}
+on('retry-result-sync',async()=>{await api('/api/results/sync',{});await poll();});

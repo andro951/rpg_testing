@@ -26,6 +26,7 @@ from .workflows import execute, Cancelled
 from .backends import DemoBackend
 from .native import NativeBackend
 from .model_manager import ModelManager
+from .result_sync import ResultSync, sync_run
 
 
 def now():return datetime.now(timezone.utc).isoformat()
@@ -73,6 +74,8 @@ class Controller(ModelManager):
         if saved.get('models_folder_version')!=1:saved.pop('model_root',None);saved.pop('confirmed_empty_folder',None)
         self.settings={**defaults,**{k:v for k,v in saved.items() if k in defaults}}
         self.settings['backend']='llamacpp'
+        # Run-end sync is mandatory for real runs, including older saved setups.
+        self.settings['publish_results']=not demo
         self.settings['runtime_cache']=str(self.root/'.local/runtime-cache')
         self.hub_results=[];self.hub_detail=None;self.runtime_options=[];self.folder_scanned=False
         self.run_total=0;self.run_processed=0;self.skipped_models=[];self.load_attempts=[]
@@ -88,7 +91,10 @@ class Controller(ModelManager):
         self.cancel_event=threading.Event();self.resume_event=threading.Event();self.resume_event.set()
         self.pause_requested=False;self.stop_after_model=False;self.backend=None
         self.logs=[];self.pending_logs=[];self.completed_now=0;self.session_errors=0;self.current=None;self.restart_required=False
-        self.started=None;self.finished=None;self.publisher=None;self.last_publish=0;self.version_cache=None
+        self.started=None;self.finished=None;self.version_cache=None
+        self.result_sync=ResultSync(self.root,(self.settings.get('hf_token'),self.settings.get('model_api_token')))
+        self.result_sync_active=False
+        self.result_sync_status={'status':'disabled','pending':0,'message':'Demo results stay local.'} if demo else self.result_sync.status()
         self.on_shutdown=None;self.remote_info=None;self.requested_run_selection=None
         self.perchance_setup_decision=None;self.perchance_setup_prompt=None;self.perchance_setup_event=None
         self.perchance_setup_answer=None
@@ -345,6 +351,7 @@ class Controller(ModelManager):
                 elif kind=='unit_tests':self.selftest()
                 elif kind=='fix':self.fix(payload);self.check(selection=repair_selection,setup=False)
                 elif kind=='run':self.run(selection=selection)
+                elif kind=='result_sync':self.retry_result_sync()
                 elif kind=='optimization':
                     from optimization.engine import dispatch
                     dispatch(self,payload)
@@ -482,6 +489,7 @@ class Controller(ModelManager):
             if self.backend:self.backend.cancel()
         else:raise ValueError('Unknown control')
     @guarded_run
+    @sync_run
     def run(self,selection=None):
         selection=normalize_selection(selection)
         if selection is not None:validate_selection(selection,self.selection_models(),load_tests(self.root/'test_specs'))
@@ -536,17 +544,26 @@ class Controller(ModelManager):
         from .domain import code_fingerprint
         return code_fingerprint()
     def publish(self,force=False):
-        if self.demo or not self.settings['publish_results'] or (not force and time.monotonic()-self.last_publish<180):return
-        from .gitops import Publisher
-        try:
-            if not self.publisher:self.publisher=Publisher(self.root,self.data,'worker-'+digest(platform.node())[:10])
-            self.publisher.flush();self.log('git','Pushed results checkpoint.')
-        except Exception as exc:self.log('publish_error',str(exc)+' Results remain saved locally.')
-        self.last_publish=time.monotonic()
+        # Historical scheduler checkpoints must not publish broad result/log
+        # copies or run Git during inference. The run wrapper owns completion.
+        return None
+    def retry_result_sync(self):
+        if self.demo or self.result_sync_active:return self.result_sync_status
+        self.result_sync.secrets=tuple(s for s in (self.settings.get('hf_token'),self.settings.get('model_api_token')) if s)
+        self.result_sync_status=self.result_sync.retry()
+        status=self.result_sync_status
+        if status['status']=='pending':
+            self.log('result_sync_pending',status['message'])
+            if status['message'] not in self.message:self.message+=' '+status['message']
+            print('RESULT SYNC PENDING: '+status['message'],flush=True)
+        elif status.get('synced'):
+            self.log('result_sync',status['message'])
+            print(status['message'],flush=True)
+        return status
     def snapshot(self):
         with self.lock:
             return {'state':self.state,'busy':self.operation.locked(),'message':self.message,'report':copy.deepcopy(self.report),
-                    'coverage_id':self.coverage_id,
+                    'coverage_id':self.coverage_id,'result_sync':copy.deepcopy(self.result_sync_status),
                     'perchance_setup_prompt':copy.deepcopy(self.perchance_setup_prompt),
                     'failure':copy.deepcopy(self.failure),
                     'models':copy.deepcopy(self.last_models),'current':copy.deepcopy(self.current),'completed_now':self.completed_now,

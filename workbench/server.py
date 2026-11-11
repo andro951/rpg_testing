@@ -245,6 +245,7 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/fix':app.start('fix',data);return self.send(202,{'started':True})
             if path=='/api/control':app.control(data['action']);return self.send(200,{'ok':True})
             if path=='/api/settings':app.configure(data);return self.send(200,{'ok':True})
+            if path=='/api/results/sync':app.start('result_sync',{});return self.send(202,{'started':True})
             if path=='/api/perchance/setup-choice':
                 from .perchance_setup import answer
                 answer(app,data.get('id'),data.get('approved'));return self.send(200,{'ok':True})
