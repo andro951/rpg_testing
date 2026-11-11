@@ -126,7 +126,7 @@ def main():
                 assert backend.frame.evaluate('() => lastSeed') == 42
                 assert first['forwarded_sampling'] == {'seed': 42}
                 assert first['applied_sampling'] is None and first['seed_reproducibility'] == 'unverified'
-                backend.context.add_cookies([{'name': 'fixture', 'value': 'retained', 'url': url}])
+                backend.context.add_cookies([{'name': 'fixture', 'value': 'retained', 'url': url, 'expires': time.time() + 3600}])
                 backend.close()
                 assert child[-1].poll() is not None, 'Owned browser must exit before cleanup returns'
                 assert not connection.listening(port), 'A finished run must not leave a browser window'
