@@ -34,7 +34,7 @@ The new build first passed exact legacy prompt parity, then deliberately removed
 
 - **[common/](prompt_builder/templates/common/):** shared rules, allowed changes, layout and selection. Layout comments identify the source of every placeholder and are not sent to models.
 - **[input_format/](prompt_builder/templates/input_format/):** normal JSON, ID-keyed arrays, full paths and named tables. Each folder owns its explanatory text and selects its serializer.
-- **[output_format/](prompt_builder/templates/output_format/):** all eight available format choices, including `typed_lines` (renamed), each with its own complete instructions and reader selection. The typed-line subset reports unsupported combinations explicitly.
+- **[output_format/](prompt_builder/templates/output_format/):** all eight available format choices, including `typed_lines` (renamed), each with its own complete instructions and reader selection. The current `typed_lines` reader supports all 13 active cases, including the nine case/output pairs excluded by its earlier version. Legacy readers retain their original restrictions.
 - **[test_cases/](prompt_builder/templates/test_cases/):** one human-named folder per case containing starting_data.json, requested_change.txt, expected_result.json, expected_patch.json and ID-only array_identities.json. No schema.json and no separate task-pattern source. Requested changes are read directly; reference answers are never sent to the model.
 - **[builder.py](prompt_builder/builder.py):** file loading, compilation and installation. **[presentation.py](prompt_builder/presentation.py)** renders data, and **[template_text.py](prompt_builder/template_text.py)** fills layouts.
 

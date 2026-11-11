@@ -36,7 +36,7 @@ python -m prompt_builder --output build/prompt-suite
 python -m prompt_builder --output build/all-formats --input-formats normal_json id_keyed_arrays full_paths named_tables --output-formats json_dot json_slash path_list literal_line end_marked_line two_line_text typed_lines free_format
 ```
 
-The default creates 13 test definitions, 38 unique prompts, and 114 observations per model at three repetitions. Compilation does not call a model. All eight output choices are implemented; the retained `typed_lines` protocol is intentionally narrower, so unsupported case/format combinations are listed with reasons, never changed into easier tasks. `free_format` prescribes no output syntax, so parser recovery is not a complete semantic judgment of unrecognized prose.
+The default creates 13 test definitions, 38 unique prompts, and 114 observations per model at three repetitions. Compilation does not call a model. All eight output choices support the 13 current cases. The current `typed_lines` reader includes ID-selected updates, complete object appends and array-element removals, covering the nine case/output pairs excluded by its earlier version. Legacy readers retain their original restrictions. If a newly added case is unsupported, compilation lists the reason rather than changing it into an easier task. `free_format` prescribes no output syntax, so parser recovery is not a complete semantic judgment of unrecognized prose.
 
 ## Important boundaries
 
