@@ -159,6 +159,12 @@ def patch_checks(report, test, variant, raw, validator=None):
             report.add('state.final', NOT_EVALUATED, 'Configuration must be corrected before model output can be scored.',
                        scope='final_state', configuration_error=True)
             return
+        compliance = score.get('format_compliance')
+        if compliance:
+            report.add('format.compliance', compliance['status'],
+                       '; '.join(compliance['errors']) or compliance.get('reason', 'Response follows the requested output syntax.'),
+                       affects_verdict=False, validator=compliance['version'],
+                       fingerprint=compliance['fingerprint'], output_format=compliance['output_format'])
         parser_gap = score.get('status') == 'parser_gap'
         report.add('intent.normalization', NOT_EVALUATED if parser_gap else PASS if score.get('valid') else FAIL,
                    ('Response normalized using initial data and explicit array identity metadata only; no full shape schema or oracle enters normalization.'

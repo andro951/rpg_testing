@@ -9,7 +9,7 @@
 
 # Shared intent evaluation (2026-11-11)
 
-- All current output formats use the same intent grammar. Do not add independent format-specific response decoders or restore retired Ember/field-value readers. Format options may specify literal text encoding, not bypass the parser.
+- All current output formats use the same intent grammar for semantic evaluation. November 11 later correction: restore strict formatting-compliance validators for the six active output types as a separate metric. They must check the requested syntax only, with no special-case handling, repair, recovery, state application or fallback to the intent parser. Keep intent correctness independent; format failures must not change its verdict. Do not restore retired semantic decoders.
 - Historical scores/raw responses stay frozen. Retired contracts are viewable evidence, not runnable under new semantics; v1/v2 evaluator pins must fail before inference or normalization. Do not silently rescore or rewrite old results.
 - The current desktop missing-eight run was frozen before this migration. Never change its evaluator in place or relabel it as v3.
 

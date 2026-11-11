@@ -238,3 +238,27 @@ before normalization; old saved scores and raw evidence remain unchanged and
 readable. This change does not rescore a completed observation or modify a
 running frozen experiment. A new-parser comparison must be a separate, explicitly
 identified analysis, never relabeled historical model accuracy.
+
+## Independent strict format compliance (2026-11-11 correction)
+
+The six active formats also have format-specific syntax validators in
+`evaluation/format_compliance.py`. Every new v3 evaluation checks the same original
+response twice: the shared intent parser determines final-state correctness, and
+`score.format_compliance` records requested-format compliance. Neither result is
+used as a fallback for the other. A fenced but correct JSON response can pass
+intent and fail format; a well-formed wrong patch can do the reverse.
+
+The syntax validators accept no current state, expected answer or schema. They
+check exact operation names/fields, wrappers, path spelling, record boundaries,
+value labels and documented escaping. They do not remove fences/prose, repair
+brackets, infer aliases, reorder records, or execute operations. Slash-property
+versus collection-selector roles require data and remain semantic checks; the
+validator never guesses those roles from names such as `items`. Typed-lines
+have their own explicit nonempty-path and forbidden bare-field syntax.
+
+There are six strict validators only. Free format has no syntax contract and is
+not applicable; the historical two-line protocol is not restored. The metric
+has its own version and source fingerprint and is also included in new live
+evaluator fingerprints. Detailed evaluation exposes a non-verdict
+`format.compliance` check. All previous saved responses and scores remain frozen;
+any requested replay writes a separate analysis, never a replacement result.

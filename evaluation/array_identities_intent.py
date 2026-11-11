@@ -26,7 +26,7 @@ VERSION = 'array-identities-intent-v3'
 OUTPUT_FORMATS = ('json_dot', 'json_slash', 'path_list', 'literal_line',
                   'end_marked_line', 'two_line_text', 'typed_lines', 'free_format')
 SOURCES = ('evaluation/array_identities_intent.py', 'evaluation/array_identity_map.py', 'evaluation/schema_free_intent.py', 'evaluation/output_formats.py',
-           'evaluation/hosts.py', 'evaluation/retired_contracts.py', 'evaluation/live_intent.py', 'evaluation/dot_separators_v2.py',
+           'evaluation/format_compliance.py', 'evaluation/hosts.py', 'evaluation/retired_contracts.py', 'evaluation/live_intent.py', 'evaluation/dot_separators_v2.py',
            'intent_parser/parse.py', 'intent_parser/patch.py', 'intent_parser/json_contract.py',
            'intent_parser/grammar-spec.json', 'workbench/domain.py', 'workbench/workflows.py',
            'workbench/scoring.py', 'workbench/dot_paths.py', 'workbench/value_paths.py')

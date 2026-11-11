@@ -1,9 +1,21 @@
 # Typed lines
 
-This folder owns its requested output wording. `format.json` chooses the reader.
+This folder owns the requested typed-line syntax and database rules. Its active
+`format.json` selects `typed_lines`.
 
-The array-identities-intent-v2 host uses `evaluation/typed_lines.py`: records execute in written order, slash paths support JSON-scalar ID/value selectors, and object/list labels accept complete single-line JSON payloads. Append accepts complete object elements, including into empty arrays. Remove deletes an array element; targeting an existing scalar object field instead retains legacy nullification. Set plus null is explicit null assignment. Set selects existing object fields and accepts complete object values; replacing a whole collection or collection element remains forbidden. Numeric change and legacy remove-field nullification are scalar-only. List syntax does not permit nested-array elements or override collection restrictions. Missing paths, extra value lines, wrong typed values, duplicate identities and ambiguous identities are rejected.
+Current semantic evaluation uses the shared intent grammar through
+`evaluation/output_formats.py` and the `array-identities-intent-v3` host. The
+independent strict validator in `evaluation/format_compliance.py` checks exact
+record headers, adjacent value/destination lines, slash-path syntax and typed
+value labels without recovery, state access or operation application. A strict
+format failure never changes the intent verdict.
 
-The original `workbench/ember_text.py` and schema-free-intent-v1 reader retain their published grammar, scalar/primitive subset and grouped execution. Saved fixtures and results are not migrated.
+The syntax contract is `instructions.txt`. Set/append/change require one typed
+value line; remove has none; move/copy require an immediately following `to:`
+line. Blank lines may separate complete records. `none` denotes no change.
+Complete JSON object/list payloads and their empty-label forms are supported.
+Data-dependent target restrictions and collection identity resolution remain
+semantic checks, not format repair.
 
-Move and Copy use `move: /source/"id"` or `copy: /source/"id"` followed immediately by `to: /destination`. Both append a deep copy to a different collection; Move also removes the original. There is no value line. IDs stay unique in each collection, and same-collection or descendant transfers are rejected.
+Retired typed/Ember decoders are not restored. Historical responses and their
+saved scores remain unchanged.

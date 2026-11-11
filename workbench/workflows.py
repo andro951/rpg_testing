@@ -199,6 +199,12 @@ def evaluate(test,variant,values):
         if op=='not_contains':passed=not passed
         if check['step'] not in values:passed=False
         objectives.append({'name':check.get('name',check['step']),'passed':passed,'operator':op})
+    # Independent syntax metric: inspect the original response even when intent
+    # normalization fails. Never gate or rewrite the semantic verdict.
+    evaluator = result.get('evaluator', {})
+    if isinstance(evaluator, dict) and evaluator.get('version') == 'array-identities-intent-v3':
+        from evaluation.format_compliance import validate as validate_format
+        result_score['format_compliance'] = validate_format(values.get(result.get('step')), result.get('output_format', 'json_dot'))
     result_score['objective_checks']=objectives
     return result_score
 
