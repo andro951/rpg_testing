@@ -46,17 +46,23 @@ def configuration(root,category,name):
 def prompt(case,input_format,output_format,root=ROOT,*,with_parts=False):
     input_config=configuration(root,'input_format',input_format)
     configuration(root,'output_format',output_format)
+    serializer=input_config['serializer']
+    # The map selects keys/path parts for these conversions only. It is never
+    # a template binding or a separately rendered description of the data.
+    current_data=(render(case['starting_data'],serializer,case.get('array_identities'))
+                  if serializer in ('id_keyed_arrays','full_paths')
+                  else render(case['starting_data'],serializer))
     return assemble(root,input_format=input_format,output_format=output_format,
-        current_data=render(case['starting_data'],input_config['serializer']),task=case['requested_change'],with_parts=with_parts)
+        current_data=current_data,task=case['requested_change'],with_parts=with_parts)
 
 def validate_presentation_identity(case,formats,root=ROOT):
-    """Reject inconsistent display selectors, without supplying IDs to rendering.
+    """Keep the data-only named-table convention consistent with the validator.
 
-    This is a compile-time validation gate only. Both prompt() and the display
-    functions remain independent of validator metadata and never select a field
-    from it. Empty arrays display no element selectors and need no comparison.
+    Only keyed arrays and full paths may use declarations to select their IDs.
+    Tables still receive no metadata. Empty arrays display no element selectors
+    and need no comparison.
     """
-    if all(configuration(root,'input_format',mode)['serializer']=='normal_json' for mode in formats):
+    if not any(configuration(root,'input_format',mode)['serializer']=='named_tables' for mode in formats):
         return
     from evaluation.array_identity_map import IdentityMap
     from .presentation import id_field

@@ -10,4 +10,6 @@ After that check, schema descriptions were removed, shared restrictions revised,
 
 The old builder is deleted. Frozen tests, references, prompt snapshots and results remain. Historical synthetic regression tests run saved definitions rather than regenerating them with archived builder code.
 
-The later validator-only ID mapping revision selects `array-identities-intent-v1`. Its current 38 messages remain byte-identical to the immediately preceding schema-free suite; ID metadata changes evaluation identity, never model messages. Historical parity evidence above remains unchanged.
+The initial validator-only ID mapping revision selected `array-identities-intent-v1`. Its 38 messages were byte-identical to the immediately preceding schema-free suite; that revision changed evaluation identity without changing those model messages. Historical parity evidence above remains unchanged.
+
+A later explicit user clarification permits the same ID mapping internally in ID-keyed and full-path input conversion. Existing declarations select the same IDs, so their prompt bytes are unchanged. Different declarations may change converted keys/path segments; the mapping is never separately inserted as schema text.

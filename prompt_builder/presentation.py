@@ -1,12 +1,13 @@
-"""Lossless schema-free input views. Every identifier comes from starting data."""
+"""Lossless input views. ID declarations select conversion keys, not schema text."""
 import json
+from evaluation.array_identity_map import IdentityMap
 from intent_parser.patch import IntentError, assert_json
 from workbench.dot_paths import scalar_text, encode_part
 from workbench.scoring import equal
 
 
 def id_field(array):
-    """Data-only display convention, never validator metadata or a schema."""
+    """Data-only named-table convention, never identity metadata or a schema."""
     if not array or all(not isinstance(v, (dict, list)) for v in array):
         return None
     if not all(isinstance(v, dict) for v in array):
@@ -26,7 +27,7 @@ def identity(element, array):
 
 
 def validate_display(value):
-    """Check only lossless display requirements, independently of validation."""
+    """Check named-table display requirements without identity metadata."""
     if isinstance(value, dict):
         for child in value.values():validate_display(child)
     elif isinstance(value, list):
@@ -40,28 +41,40 @@ SERIALIZERS = ('normal_json','id_keyed_arrays','full_paths','named_tables')
 def has_array(value):
     return isinstance(value,list) or isinstance(value,dict) and any(has_array(v) for v in value.values())
 
-def keyed(value):
-    # Tag BOTH container kinds: user data can contain any field, even "$array".
-    if isinstance(value,list):
-        pairs=[(scalar_text(identity(v,value)),keyed(v))for v in value]
-        if len({k for k,v in pairs})!=len(pairs):raise ValueError('Array IDs collide in the keyed view')
-        return {'$array':dict(pairs)}
-    if isinstance(value,dict):return {'$object':{k:keyed(v)for k,v in value.items()}}
-    return value
+def keyed(value,array_identities=None):
+    """Use only declared array identities; retain all fields and container types."""
+    declarations=IdentityMap(array_identities)
+    declarations.validate(value)
+    def walk(node,path):
+        # Tag BOTH container kinds: user data can contain any field, even "$array".
+        if isinstance(node,list):
+            field=declarations.field(node,path)
+            return {'$array':{scalar_text(v[field] if field is not None else v):walk(v,path+(None,)) for v in node}}
+        if isinstance(node,dict):return {'$object':{k:walk(v,path+(k,)) for k,v in node.items()}}
+        return node
+    return walk(value,())
 
-def full_paths(value,path=''):
-    display=path or '<root>'
-    if isinstance(value,dict) and value:
-        lines=[display+': <object>']
-        for k,v in value.items():lines.extend(full_paths(v,path+'.'+encode_part(k) if path else encode_part(k)))
-        return lines
-    if isinstance(value,list) and value:
-        lines=[display+': <array>']
-        for v in value:
-            part=encode_part(scalar_text(identity(v,value)))
-            lines.extend(full_paths(v,path+'.'+part if path else part))
-        return lines
-    return [display+': '+json.dumps(value,ensure_ascii=False,allow_nan=False,separators=(',',':'))]
+def full_paths(value,array_identities=None,path=''):
+    """Use declared identities for array path parts, never positional indices."""
+    declarations=IdentityMap(array_identities)
+    declarations.validate(value)
+    def walk(node,data_path,display_path):
+        display=display_path or '<root>'
+        if isinstance(node,dict) and node:
+            lines=[display+': <object>']
+            for k,v in node.items():
+                part=encode_part(k)
+                lines.extend(walk(v,data_path+(k,),display_path+'.'+part if display_path else part))
+            return lines
+        if isinstance(node,list) and node:
+            lines=[display+': <array>']
+            field=declarations.field(node,data_path)
+            for v in node:
+                part=encode_part(scalar_text(v[field] if field is not None else v))
+                lines.extend(walk(v,data_path+(None,),display_path+'.'+part if display_path else part))
+            return lines
+        return [display+': '+json.dumps(node,ensure_ascii=False,allow_nan=False,separators=(',',':'))]
+    return walk(value,(),path)
 
 def named_tables(value):
     """Python literal cells preserve types, nested structures and whitespace."""
@@ -95,11 +108,12 @@ def named_tables(value):
     walk(value,[])
     return '\n'.join(lines).rstrip('\n')
 
-def render(value,serializer):
+def render(value,serializer,array_identities=None):
     assert_json(value)
     if serializer=='normal_json':return json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False)
-    validate_display(value)
-    if serializer=='id_keyed_arrays':return json.dumps(keyed(value),ensure_ascii=False,indent=2,allow_nan=False)
-    if serializer=='full_paths':return '\n'.join(full_paths(value))
-    if serializer=='named_tables':return named_tables(value)
+    if serializer=='id_keyed_arrays':return json.dumps(keyed(value,array_identities),ensure_ascii=False,indent=2,allow_nan=False)
+    if serializer=='full_paths':return '\n'.join(full_paths(value,array_identities))
+    if serializer=='named_tables':
+        validate_display(value)
+        return named_tables(value)
     raise ValueError('Unknown input serializer: '+str(serializer))

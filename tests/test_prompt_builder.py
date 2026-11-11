@@ -90,49 +90,82 @@ class PromptBuilderTests(unittest.TestCase):
         case['expected_patch']=[{'value':'ANSWER_SENTINEL'}];case['expected_result']={'ANSWER_SENTINEL':True}
         self.assertEqual(before,prompt(case,'normal_json','json_dot'))
         self.assertNotIn('ANSWER_SENTINEL',json.dumps(before))
-    def test_validator_identities_never_enter_prompts_or_bindings(self):
-        case=load_case('update_record_field')
+    def test_identity_declarations_only_supply_converted_keys_not_prompt_metadata(self):
+        case=load_case('update_record_in_nested_array')
         before={mode:prompt(case,mode,'json_dot',with_parts=True) for mode in discover()['input_format']}
-        case['array_identities']=[{'path':['SECRET_VALIDATOR_PATH'],'id_field':'SECRET_VALIDATOR_FIELD'}]
+        case['array_identities']=list(reversed(copy.deepcopy(case['array_identities'])))
         for mode,expected in before.items():
             self.assertEqual(expected,prompt(case,mode,'json_dot',with_parts=True))
+            _,bindings=expected
+            self.assertEqual(set(bindings),{'task_requirements','presentation_notes','current_state','new_information'})
+            self.assertNotIn('array_identities',json.dumps(expected))
+            self.assertNotIn('id_field',json.dumps(expected))
+        case=load_case('update_record_field')
         case['array_identities']=[{'path':['items'],'id_field':'count'}]
         test=compile_test(case,'json_dot',input_formats=['normal_json'])
         self.assertEqual(test['source']['array_identities'],case['array_identities'])
-        self.assertNotIn('SECRET_VALIDATOR',json.dumps([v['prompt_bindings'] for v in test['variants']]))
 
-    def test_raw_json_custom_and_ambiguous_ids_with_validator_metadata(self):
+    def test_raw_json_and_direct_tables_ignore_identity_metadata(self):
+        case=load_case('update_record_field')
+        before={mode:prompt(case,mode,'json_dot',with_parts=True) for mode in ('normal_json','named_tables')}
+        for declarations in (None,[],{'invalid':True},[{'path':['SECRET_VALIDATOR_PATH'],'id_field':'SECRET_VALIDATOR_FIELD'}]):
+            case['array_identities']=declarations
+            for mode,expected in before.items():
+                with self.subTest(mode=mode,declarations=declarations):
+                    self.assertEqual(expected,prompt(case,mode,'json_dot',with_parts=True))
+        del case['array_identities']
+        for mode,expected in before.items():
+            self.assertEqual(expected,prompt(case,mode,'json_dot',with_parts=True))
+
+    def test_conversions_support_custom_and_ambiguous_ids_from_map(self):
         for records,field in [([{'sku':'a','count':1}],'sku'),
                               ([{'id':'a','other_id':'b','count':1}],'other_id')]:
             case={'id':'custom_identity','starting_data':{'records':records},
                   'requested_change':'Make no changes.','expected_result':{'records':records},
                   'expected_patch':[],'array_identities':[{'path':['records'],'id_field':field}]}
-            test=compile_test(case,'json_dot',input_formats=['normal_json'])
-            result=evaluate(test,test['variants'][0],{'patch':'[]'})
-            self.assertTrue(result['exact_match'],result)
+            test=compile_test(case,'json_dot',input_formats=['normal_json','id_keyed_arrays','full_paths'])
+            for variant in test['variants']:
+                result=evaluate(test,variant,{'patch':'[]'})
+                self.assertTrue(result['exact_match'],result)
             self.assertEqual(json.loads(test['variants'][0]['prompt_bindings']['current_state']),case['starting_data'])
-            for mode in ('id_keyed_arrays','full_paths','named_tables'):
-                with self.assertRaisesRegex(ValueError,'ID-dependent presentation'):
-                    prompt(case,mode,'json_dot')
+            converted=json.loads(test['variants'][1]['prompt_bindings']['current_state'])
+            self.assertEqual(converted['$object']['records']['$array'],{records[0][field]:{'$object':records[0]}})
+            self.assertIn('records.'+records[0][field]+': <object>',test['variants'][2]['prompt_bindings']['current_state'])
+            with self.assertRaisesRegex(ValueError,'ID-dependent presentation'):
+                prompt(case,'named_tables','json_dot')
+            with self.assertRaisesRegex(ValueError,'ID-dependent presentation'):
+                compile_test(case,'json_dot',input_formats=['named_tables'])
 
-    def test_compile_rejects_mismatched_display_selector_without_changing_prompt(self):
+    def test_map_changes_only_converted_selectors_and_tables_still_reject_mismatch(self):
         case=load_case('update_record_field')
         before={mode:prompt(case,mode,'json_dot',with_parts=True) for mode in discover()['input_format']}
         case['array_identities']=[{'path':['items'],'id_field':'count'}]
-        # Direct assembly is map-blind. Compilation validates its consistency
-        # separately rather than using the map to alter the displayed selector.
-        for mode,expected in before.items():
-            self.assertEqual(expected,prompt(case,mode,'json_dot',with_parts=True))
-        for mode in ('id_keyed_arrays','full_paths','named_tables'):
-            with self.assertRaisesRegex(ValueError,'disagrees with validator identity'):
-                compile_test(case,'json_dot',input_formats=[mode])
-        compile_test(case,'json_dot',input_formats=['normal_json'])
-        nested=copy.deepcopy(case)
-        nested['starting_data']={'groups':[{'id':'g','records':case['starting_data']['items']}]}
-        nested['array_identities']=[{'path':['groups'],'id_field':'id'},
-                                    {'path':['groups',None,'records'],'id_field':'count'}]
+        for mode in ('normal_json','named_tables'):
+            self.assertEqual(before[mode],prompt(case,mode,'json_dot',with_parts=True))
+        for mode in ('id_keyed_arrays','full_paths'):
+            actual,bindings=prompt(case,mode,'json_dot',with_parts=True)
+            previous,old_bindings=before[mode]
+            self.assertNotEqual(old_bindings['current_state'],bindings['current_state'])
+            self.assertEqual(actual[0],previous[0])
+            for key in set(bindings)-{'current_state'}:self.assertEqual(bindings[key],old_bindings[key])
+            self.assertEqual(actual[-1]['content'].replace(bindings['current_state'],'DATA'),
+                             previous[-1]['content'].replace(old_bindings['current_state'],'DATA'))
+            compile_test(case,'json_dot',input_formats=[mode])
+        converted=json.loads(prompt(case,'id_keyed_arrays','json_dot',with_parts=True)[1]['current_state'])
+        self.assertEqual(list(converted['$object']['items']['$array']),['3','8','2','6'])
+        self.assertIn('items.8.item_id: "item-17"',prompt(case,'full_paths','json_dot',with_parts=True)[1]['current_state'])
         with self.assertRaisesRegex(ValueError,'disagrees with validator identity'):
-            compile_test(nested,'json_dot',input_formats=['full_paths'])
+            compile_test(case,'json_dot',input_formats=['named_tables'])
+        compile_test(case,'json_dot',input_formats=['normal_json'])
+
+    def test_hidden_nested_identity_declarations_never_become_prompt_text(self):
+        case=load_case('append_record_to_empty_array')
+        before={mode:prompt(case,mode,'json_dot',with_parts=True) for mode in discover()['input_format']}
+        case['array_identities'].append({'path':['items',None,'SECRET_VALIDATOR_PATH'],'id_field':'SECRET_VALIDATOR_FIELD'})
+        for mode,expected in before.items():
+            actual=prompt(case,mode,'json_dot',with_parts=True)
+            self.assertEqual(expected,actual)
+            self.assertNotIn('SECRET_VALIDATOR',json.dumps(actual))
 
     def test_identity_metadata_loaded_and_included_in_references(self):
         case=load_case('append_record_to_empty_array')
@@ -202,8 +235,9 @@ class PromptBuilderTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'does not produce'):load_case('update_field',root)
     def test_presentations_do_not_erase_container_type(self):
         data={'empty_array':[],'empty_object':{},'values':['a'],'$array':{'$object':False}}
-        self.assertEqual(keyed(data),{'$object':{'empty_array':{'$array':{}},'empty_object':{'$object':{}},'values':{'$array':{'a':'a'}},'$array':{'$object':{'$object':False}}}})
-        lines=render(data,'full_paths')
+        identities=[{'path':['empty_array'],'id_field':'sku'},{'path':['values'],'id_field':None}]
+        self.assertEqual(keyed(data,identities),{'$object':{'empty_array':{'$array':{}},'empty_object':{'$object':{}},'values':{'$array':{'a':'a'}},'$array':{'$object':{'$object':False}}}})
+        lines=render(data,'full_paths',identities)
         self.assertIn('values: <array>',lines);self.assertIn('empty_array: []',lines);self.assertIn('empty_object: {}',lines)
         self.assertIn('Table',render(data,'named_tables'))
     def test_mock_execution_sends_exact_compiled_messages(self):

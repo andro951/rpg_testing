@@ -31,11 +31,11 @@ than silently using different semantics.
 
 The normalizer's complete input interface is
 `normalize_response(raw, initial_state, output_format='json_dot', array_identities=...)`.
-The ID mapping is validator-only context, not a full schema. No expected state,
+The normalizer uses the explicit ID mapping as validation context, not a full schema. No expected state,
 expected patch, task wording, or prompt is an input. Reference patch application
 and comparison happen separately after normalization and final-state scoring.
 
-## Validator-only array identity pseudo-schema
+## Array identity pseudo-schema and permitted uses
 
 Each case has `array_identities.json`, frozen as `source.array_identities`:
 
@@ -59,12 +59,18 @@ unambiguous because the map names exactly one. Other fields and object shapes
 are not prescribed. Plain selectors with colliding typed spellings such as `1`
 and `"1"` remain rejected. Identity rules apply after every sequential operation.
 
-This metadata never reaches prompt assembly, model messages, template bindings
-or OPRO generation. Normal JSON displays arbitrary records. ID-keyed, full-path
-and named-table views retain a separate data-only convention for choosing a
-display ID: one unambiguous unique scalar `id` or `*_id` field in starting data.
-Those views reject unsupported records and recommend normal JSON; they do not
-use the map to select a display field. Current-case prompts remain byte-identical.
+The mapping is not inserted into model messages, template bindings, schema
+explanations or OPRO generation. The user explicitly permits the ID-keyed and
+full-path input conversions to consult it internally when choosing array IDs.
+These two conversions use the declared exact field rather than guessing from
+`id`/`*_id` names. Their resulting keys/path segments necessarily express that
+identity; all original fields and values remain present. Missing or invalid
+identity declarations fail clearly, without fallback guessing.
+
+Normal JSON presentation needs no mapping. The separate experimental named-table
+view is outside this permission and retains its data-only convention: one
+unambiguous unique scalar `id` or `*_id` field in starting data. Current-case
+prompts remain byte-identical because their declarations name the same IDs.
 
 The old `schema-free-intent-v1` evaluator and archived definitions retain their
 original inference rules. The new version and frozen mapping change experiment
@@ -140,7 +146,7 @@ unchanged pass totals. It needs a working local Chromium or the
 
 The new source fingerprint normalizes checkout line endings and does not include the Python patch version, so unchanged definitions load across supported desktop/Unity environments. The actual Python version is retained in each normalization result as runtime provenance. Historical dot-intent-v1 fingerprint rules are unchanged.
 
-Compilation separately rejects an ID-dependent view if its data-only display field disagrees with the validator declaration, including in nested arrays. This validation gate never passes metadata to rendering or changes prompt text. Empty arrays display no selectors; normal JSON remains available for every declared ID convention.
+Compilation separately checks that the named-table view’s independently chosen IDs agree with the validator declaration. ID-keyed and full-path views select directly from the declaration, including inside nested or empty arrays. Normal JSON presentation remains independent of the mapping; compiling a validated test still requires valid evaluator metadata.
 
 ## Migration verification (2026-11-10)
 
