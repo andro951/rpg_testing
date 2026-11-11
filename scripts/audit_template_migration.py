@@ -20,6 +20,9 @@ BASELINE = 'a64cc029837a33d4b67a6a8e4b5d686497ef943c'
 PRESERVED = ('test_specs/', 'prompts/patch-suite/', 'prompt-review/')
 EVIDENCE = ('results/', 'coverage_results/', 'optimization_results/')
 EXPERIMENT_DATA = {'.json', '.txt', '.jsonl', '.csv'}
+# Only this reviewed relocation is recognized; never search arbitrary archives.
+RESULT_ARCHIVE = 'archives/desktop-results-before-2026-11-11'
+RESULT_ARCHIVE_SOURCE = 'fd73a328fb89e0398d6d9c940f05ee8f44f648ec'
 
 
 def require(condition, message):
@@ -96,6 +99,40 @@ def immutable(name):
     return name.startswith(EVIDENCE) or (name.startswith('experiments/') and PurePosixPath(name).suffix in EXPERIMENT_DATA)
 
 
+def result_relocations(root, entries):
+    """Read the reviewed relocation manifest without trusting it as evidence."""
+    directory = root / RESULT_ARCHIVE
+    if not directory.exists() and not directory.is_symlink():
+        return {}
+    manifest = json.loads(regular_file(root, RESULT_ARCHIVE + '/manifest.json').read_text(encoding='utf8'))
+    require(isinstance(manifest, dict) and manifest.get('source_commit') == RESULT_ARCHIVE_SOURCE,
+            'Unexpected result archive source commit')
+    files = manifest.get('files')
+    require(isinstance(files, list) and bool(files), 'Result archive manifest has no files')
+    relocations = {}
+    for entry in files:
+        require(isinstance(entry, dict) and set(entry) == {'original_path', 'git_blob', 'sha256', 'bytes'},
+                'Invalid result archive manifest entry')
+        name = entry['original_path']
+        require(isinstance(name, str) and name.startswith('results/') and name in entries,
+                'Result archive path is not pinned baseline evidence: ' + str(name))
+        require(name not in relocations, 'Duplicate result archive path: ' + name)
+        require(entry['git_blob'] == entries[name], 'Result archive blob differs from pinned baseline: ' + name)
+        require(isinstance(entry['sha256'], str) and bool(re.fullmatch('[0-9a-f]{64}', entry['sha256'])),
+                'Invalid result archive SHA-256: ' + name)
+        require(type(entry['bytes']) is int and entry['bytes'] >= 0, 'Invalid result archive byte count: ' + name)
+        relocations[name] = entry
+    return relocations
+
+
+def verify_result_relocation(root, name, entry):
+    # Archives have -text attributes: not even CRLF normalization is permitted.
+    raw = regular_file(root, RESULT_ARCHIVE + '/' + name).read_bytes()
+    require(len(raw) == entry['bytes'], 'Archived result byte count changed: ' + name)
+    require(hashlib.sha256(raw).hexdigest() == entry['sha256'], 'Archived result SHA-256 changed: ' + name)
+    require(blob_id(raw) == entry['git_blob'], 'Archived result differs from pinned baseline bytes: ' + name)
+
+
 def expected_definitions(root):
     # Compilation is pure and checks reference data without executing a model.
     sys.path.insert(0, str(root))
@@ -162,6 +199,7 @@ def audit(root, baseline=BASELINE):
     root = Path(root).resolve()
     require(bool(re.fullmatch('[0-9a-f]{40}', baseline)), 'Baseline must be a complete commit SHA')
     entries = git_tree(root, baseline)
+    relocations = result_relocations(root, entries)
     preserved = {prefix: 0 for prefix in PRESERVED}
     immutable_count = 0
     old_ids = set()
@@ -176,16 +214,22 @@ def audit(root, baseline=BASELINE):
                 if name.startswith('test_specs/') and PurePosixPath(name).suffix == '.json':
                     old_ids.add(json.loads(before)['id'])
             elif immutable(name):
-                raw = regular_file(root, name).read_bytes()
-                # The common path needs no baseline blob transfer at all.
-                if oid not in {blob_id(raw), blob_id(checkout_content(raw))}:
-                    require(checkout_content(raw) == checkout_content(objects.read(oid)), 'Immutable evidence changed: ' + name)
+                if name in relocations:
+                    verify_result_relocation(root, name, relocations[name])
+                original = root / name
+                # An archive never conceals changed or unsafe evidence still at its original path.
+                if name not in relocations or original.exists() or original.is_symlink():
+                    raw = regular_file(root, name).read_bytes()
+                    # The common path needs no baseline blob transfer at all.
+                    if oid not in {blob_id(raw), blob_id(checkout_content(raw))}:
+                        require(checkout_content(raw) == checkout_content(objects.read(oid)), 'Immutable evidence changed: ' + name)
                 immutable_count += 1
     require(all(preserved.values()), 'Pinned baseline does not contain every required root archive')
     require(immutable_count > 0, 'Pinned baseline has no saved evidence to audit')
     current = verify_current(root, old_ids)
     return {'baseline': baseline, 'intentional_suite_and_evaluator_migration': True,
             'archived_files_checked': preserved, 'immutable_evidence_files_checked': immutable_count,
+            'archived_result_files_checked': len(relocations),
             'historical_root_ids': len(old_ids), **current,
             'source_equivalence_claimed': False, 'inference_performed': False, 'files_modified': False}
 

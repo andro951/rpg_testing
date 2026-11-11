@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from prompt_builder.builder import ROOT, compile_test
-from scripts.audit_template_migration import BASELINE, audit, blob_id
+from scripts.audit_template_migration import BASELINE, RESULT_ARCHIVE, RESULT_ARCHIVE_SOURCE, audit, blob_id
 from workbench.domain import write_json
 
 
@@ -61,6 +61,140 @@ class TemplateMigrationAuditTests(unittest.TestCase):
              patch('scripts.audit_template_migration.GitObjects') as reader:
             reader.return_value.__enter__.return_value.read.side_effect = objects.__getitem__
             return audit(self.root, BASELINE)
+
+    def archive_result(self, name='results/model/raw.json', keep_original=False):
+        original = self.root / name
+        archived = self.root / RESULT_ARCHIVE / name
+        archived.parent.mkdir(parents=True, exist_ok=True)
+        raw = original.read_bytes()
+        archived.write_bytes(raw)
+        if not keep_original:
+            original.unlink()
+        manifest = {'source_commit': RESULT_ARCHIVE_SOURCE, 'files': [{
+            'original_path': name, 'git_blob': blob_id(raw),
+            'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}]}
+        write_json(self.root / RESULT_ARCHIVE / 'manifest.json', manifest)
+        return archived, manifest
+
+    def write_archive_manifest(self, manifest):
+        write_json(self.root / RESULT_ARCHIVE / 'manifest.json', manifest)
+
+    def test_reviewed_result_relocation_preserves_pinned_bytes(self):
+        self.archive_result()
+        result = self.run_audit()
+        self.assertEqual(result['baseline'], BASELINE)
+        self.assertEqual(result['immutable_evidence_files_checked'], 5)
+        self.assertEqual(result['archived_result_files_checked'], 1)
+        self.assertFalse(result['inference_performed'])
+        self.assertFalse(result['files_modified'])
+
+    def test_missing_evidence_without_relocation_fails(self):
+        (self.root / 'results/model/raw.json').unlink()
+        with self.assertRaisesRegex(AssertionError, 'Missing or unsafe file: results/model/raw.json'):
+            self.run_audit()
+
+    def test_missing_relocation_manifest_fails(self):
+        self.archive_result()
+        (self.root / RESULT_ARCHIVE / 'manifest.json').unlink()
+        with self.assertRaisesRegex(AssertionError, 'Missing or unsafe.*manifest.json'):
+            self.run_audit()
+
+    def test_missing_or_misplaced_archive_fails(self):
+        archived, _ = self.archive_result()
+        archived.rename(archived.with_name('wrong.json'))
+        with self.assertRaisesRegex(AssertionError, 'Missing or unsafe.*raw.json'):
+            self.run_audit()
+
+    def test_unreviewed_archive_location_is_not_searched(self):
+        self.archive_result()
+        (self.root / RESULT_ARCHIVE).rename(self.root / 'archives/unreviewed-results')
+        with self.assertRaisesRegex(AssertionError, 'Missing or unsafe file: results/model/raw.json'):
+            self.run_audit()
+
+    def test_unlisted_relocated_result_fails(self):
+        self.archive_result()
+        name = 'results/model/other.json'
+        self.before[name] = b'{"raw":"other"}\n'
+        (self.root / name).write_bytes(self.before[name])
+        self.archive_result(name, keep_original=True)  # Manifest lists only the other result.
+        with self.assertRaisesRegex(AssertionError, 'Missing or unsafe file: results/model/raw.json'):
+            self.run_audit()
+
+    def test_changed_relocated_result_fails_even_if_original_is_present(self):
+        archived, _ = self.archive_result(keep_original=True)
+        archived.write_bytes(archived.read_bytes().replace(b'unchanged', b'different'))
+        with self.assertRaisesRegex(AssertionError, 'Archived result SHA-256 changed'):
+            self.run_audit()
+
+    def test_valid_archive_cannot_hide_changed_original(self):
+        self.archive_result(keep_original=True)
+        (self.root / 'results/model/raw.json').write_bytes(b'{"raw":"edited"}\n')
+        with self.assertRaisesRegex(AssertionError, 'Immutable evidence changed'):
+            self.run_audit()
+
+    def test_wrong_relocation_source_commit_fails(self):
+        _, manifest = self.archive_result()
+        manifest['source_commit'] = BASELINE
+        self.write_archive_manifest(manifest)
+        with self.assertRaisesRegex(AssertionError, 'Unexpected result archive source commit'):
+            self.run_audit()
+
+    def test_wrong_relocation_paths_fail(self):
+        _, manifest = self.archive_result()
+        for name in ('results/model/missing.json', 'coverage_results/job/state.json',
+                     '../results/model/raw.json', 'results/model/../model/raw.json',
+                     'results\\model\\raw.json', '/results/model/raw.json'):
+            with self.subTest(name=name):
+                manifest['files'][0]['original_path'] = name
+                self.write_archive_manifest(manifest)
+                with self.assertRaisesRegex(AssertionError, 'not pinned baseline evidence'):
+                    self.run_audit()
+
+    def test_duplicate_relocation_paths_fail(self):
+        _, manifest = self.archive_result()
+        manifest['files'].append(dict(manifest['files'][0]))
+        self.write_archive_manifest(manifest)
+        with self.assertRaisesRegex(AssertionError, 'Duplicate result archive path'):
+            self.run_audit()
+
+    def test_incorrect_relocation_metadata_fails(self):
+        _, manifest = self.archive_result()
+        original_entry = dict(manifest['files'][0])
+        for field, value, message in (
+                ('git_blob', '0' * 40, 'blob differs from pinned baseline'),
+                ('sha256', '0' * 64, 'Archived result SHA-256 changed'),
+                ('sha256', 'bad hash', 'Invalid result archive SHA-256'),
+                ('bytes', original_entry['bytes'] + 1, 'Archived result byte count changed'),
+                ('bytes', True, 'Invalid result archive byte count')):
+            with self.subTest(field=field, value=value):
+                manifest['files'][0] = {**original_entry, field: value}
+                self.write_archive_manifest(manifest)
+                with self.assertRaisesRegex(AssertionError, message):
+                    self.run_audit()
+
+    def test_manifest_cannot_authorize_changed_bytes_or_newline_normalization(self):
+        archived, manifest = self.archive_result()
+        original = archived.read_bytes()
+        for raw in (original.replace(b'unchanged', b'different'), original.replace(b'\n', b'\r\n')):
+            with self.subTest(raw=raw):
+                archived.write_bytes(raw)
+                manifest['files'][0]['bytes'] = len(raw)
+                manifest['files'][0]['sha256'] = hashlib.sha256(raw).hexdigest()
+                self.write_archive_manifest(manifest)
+                with self.assertRaisesRegex(AssertionError, 'differs from pinned baseline bytes'):
+                    self.run_audit()
+                manifest['files'][0]['git_blob'] = blob_id(raw)
+                self.write_archive_manifest(manifest)
+                with self.assertRaisesRegex(AssertionError, 'blob differs from pinned baseline'):
+                    self.run_audit()
+                manifest['files'][0]['git_blob'] = blob_id(original)
+
+    def test_manifest_cannot_redirect_archive_destination(self):
+        _, manifest = self.archive_result()
+        manifest['files'][0]['archived_path'] = 'elsewhere/raw.json'
+        self.write_archive_manifest(manifest)
+        with self.assertRaisesRegex(AssertionError, 'Invalid result archive manifest entry'):
+            self.run_audit()
 
     def test_preserved_data_and_new_semantics_pass_without_equivalence_claim(self):
         result = self.run_audit()
