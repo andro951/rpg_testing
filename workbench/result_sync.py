@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -41,6 +42,25 @@ def _files(root, *args):
     return set(git(root, *args, binary=True).decode('utf-8').rstrip('\0').split('\0')) - {''}
 
 
+def canonical_result_path(path):
+    """Expand filesystem aliases without accepting traversal or redirects.
+
+    Windows temp directories can contain an 8.3 account name even when resolve()
+    returns the long spelling. That is the same directory, not a symlink. Check
+    links/reparse points explicitly before resolving either spelling.
+    """
+    original = Path(path)
+    if '..' in original.parts:
+        raise RuntimeError('Parent traversal is not allowed in result paths.')
+    absolute = original.absolute()
+    for component in (absolute, *absolute.parents):
+        try:info = component.lstat()
+        except FileNotFoundError:continue
+        if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400):
+            raise RuntimeError('Symlinked or redirected result paths cannot be synchronized.')
+    return absolute.resolve()
+
+
 class ResultSync:
     def __init__(self, root, secrets=()):
         self.root = Path(root).resolve()
@@ -51,9 +71,18 @@ class ResultSync:
         if not re.fullmatch(r'results/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}/[0-9a-f]{64}\.json', name):
             raise RuntimeError('Only exact benchmark result JSON paths may be synchronized.')
         path = self.root / name
-        if path.resolve() != path.absolute() or any(p.is_symlink() for p in (path, *path.parents)):
-            raise RuntimeError('Symlinked result paths cannot be synchronized.')
-        return path
+        canonical = canonical_result_path(path)
+        if not canonical.is_relative_to(self.root):
+            raise RuntimeError('Result path is outside the repository.')
+        return canonical
+
+    def relative_result_path(self, path):
+        canonical = canonical_result_path(path)
+        try:name = canonical.relative_to(self.root).as_posix()
+        except ValueError as exc:
+            raise RuntimeError('Result path is outside the repository.') from exc
+        self._path(name)
+        return name
 
     def _validate(self, name, expected=None):
         path = self._path(name)
@@ -92,8 +121,7 @@ class ResultSync:
         write_json(self.directory / (batch['id'] + '.json'), batch)
 
     def before_save(self, batch, path):
-        name = Path(path).absolute().relative_to(self.root).as_posix()
-        self._path(name)
+        name = self.relative_result_path(path)
         if name in batch.get('dirty', []):
             batch['blocked'][name] = 'The result path already had local or staged edits before this run.'
         # Write intent first. A crash between the atomic result write and the
@@ -265,12 +293,14 @@ class RecordingStore:
         return getattr(self.store, name)
 
     def save(self, record):
-        name = self.store.path(record['model_id'], record['case_id']).absolute().relative_to(self.sync.root).as_posix()
         try:self.sync.before_save(self.batch, self.store.path(record['model_id'], record['case_id']))
         except (OSError, ValueError, RuntimeError):pass
-        # Git/journal trouble must never discard a finished model response.
+        # Git/journal/path-normalization trouble must never discard a finished
+        # response. The original ResultStore remains responsible for saving it.
         path = self.store.save(record)
-        try:self.sync.after_save(self.batch, name)
+        try:
+            name = self.sync.relative_result_path(path)
+            self.sync.after_save(self.batch, name)
         except (OSError, ValueError, RuntimeError) as exc:
             self.batch['recording_error'] = 'Saved result could not be safely enrolled for Git sync: ' + str(exc)
             try:self.sync.save_receipt(self.batch)

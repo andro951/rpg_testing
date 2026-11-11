@@ -1,5 +1,6 @@
 """Deterministic local bare-remote tests. No network or model inference."""
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -9,7 +10,7 @@ from unittest.mock import patch
 
 from workbench.controller import Controller
 from workbench.domain import ResultStore, read_json, write_json
-from workbench.result_sync import ResultSync, RecordingStore, git, sync_run, GIT_TIMEOUT
+from workbench.result_sync import ResultSync, RecordingStore, git, sync_run, GIT_TIMEOUT, canonical_result_path
 from workbench.workflows import Cancelled
 
 
@@ -313,6 +314,99 @@ class ResultSyncTests(unittest.TestCase):
         self.sync.before_save(batch, self.store.path('model', 'a' * 64))
         self.assertEqual(self.sync.retry()['status'], 'pending')
         self.assertIn('Interrupted result save', self.receipt(batch)['error'])
+
+    def test_alias_spelling_normalizes_before_enrollment_and_preserves_evidence(self):
+        # Deterministic coverage on every OS, even filesystems without 8.3 names.
+        alias_root = self.base / 'SHORT~1'
+        actual_resolve = type(self.root).resolve
+        def resolve(path, *args, **kwargs):
+            if path.is_relative_to(alias_root):
+                path = self.root / path.relative_to(alias_root)
+            return actual_resolve(path, *args, **kwargs)
+        record = self.record()
+        target = self.store.path(record['model_id'], record['case_id'])
+        alias = alias_root / target.relative_to(self.root)
+        batch = self.sync.begin()
+        with patch.object(type(self.root), 'resolve', resolve):
+            self.assertEqual(canonical_result_path(alias), target.resolve())
+            self.assertEqual(self.sync.before_save(batch, alias), target.relative_to(self.root).as_posix())
+            # The store owns raw persistence. Its return spelling may be an alias.
+            with patch.object(self.store, 'path', return_value=alias), \
+                 patch.object(self.store, 'save', side_effect=lambda value: (ResultStore(self.root / 'results').save(value), alias)[1]):
+                saved = RecordingStore(self.store, self.sync, batch).save(record)
+        self.assertEqual(saved, alias)
+        self.assertNotIn('recording_error', batch)
+        self.assertEqual(self.sync.retry()['status'], 'synced')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows 8.3 path integration')
+    def test_real_windows_short_path_store_synchronizes_to_long_root(self):
+        import ctypes
+        from ctypes import wintypes
+        # Force a component long enough to have a distinct short alias.
+        long_parent = self.base / 'Directory With Long Name For Result Sync'
+        long_parent.mkdir()
+        moved = long_parent / self.root.name
+        self.root.rename(moved)
+        self.root = moved
+        function = ctypes.WinDLL('kernel32', use_last_error=True).GetShortPathNameW
+        function.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+        function.restype = wintypes.DWORD
+        required = function(str(moved.resolve()), None, 0)
+        if not required:self.skipTest('GetShortPathNameW is unavailable for this filesystem')
+        buffer = ctypes.create_unicode_buffer(required)
+        if not function(str(moved.resolve()), buffer, required):self.skipTest('No short path is available')
+        short = Path(buffer.value)
+        if short == moved.resolve():self.skipTest('No distinct 8.3 alias is available on this filesystem')
+        sync = ResultSync(moved)
+        store = ResultStore(short / 'results')
+        batch = sync.begin()
+        saved = RecordingStore(store, sync, batch).save(self.record())
+        self.assertEqual(saved.resolve(), (moved / 'results/model' / ('a' * 64 + '.json')).resolve())
+        self.assertNotIn('recording_error', batch)
+        self.assertEqual(sync.retry()['status'], 'synced')
+
+    def test_path_normalization_failure_keeps_raw_result_and_visible_pending(self):
+        batch = self.sync.begin()
+        with patch.object(self.sync, 'relative_result_path', side_effect=ValueError('unrecognized alias')):
+            saved = RecordingStore(self.store, self.sync, batch).save(self.record())
+        self.assertEqual(self.store.read(saved)['status'], 'completed')
+        self.assertIn('unrecognized alias', batch['recording_error'])
+        self.assertEqual(self.sync.retry()['status'], 'pending')
+
+    def test_alias_normalization_does_not_allow_traversal_or_outside_root(self):
+        with self.assertRaisesRegex(RuntimeError, 'traversal'):
+            self.sync.relative_result_path(self.root / 'results' / '..' / 'results/model' / ('a' * 64 + '.json'))
+        with self.assertRaisesRegex(RuntimeError, 'outside'):
+            self.sync.relative_result_path(self.base / 'other/results/model' / ('a' * 64 + '.json'))
+        alias = self.root / 'results/model' / ('a' * 64 + '.json')
+        actual_resolve = type(self.root).resolve
+        def escape(path, *args, **kwargs):
+            if path == alias:return self.base / 'outside.json'
+            return actual_resolve(path, *args, **kwargs)
+        with patch.object(type(self.root), 'resolve', escape), self.assertRaisesRegex(RuntimeError, 'outside'):
+            self.sync.relative_result_path(alias)
+
+    def test_real_symlink_into_repository_is_not_treated_as_a_path_alias(self):
+        link = self.base / 'linked-repository'
+        try:link.symlink_to(self.root, target_is_directory=True)
+        except OSError as exc:self.skipTest('Directory symlinks are unavailable: ' + str(exc))
+        try:
+            incoming = link / 'results/model' / ('a' * 64 + '.json')
+            with self.assertRaisesRegex(RuntimeError, 'redirected'):
+                self.sync.relative_result_path(incoming)
+        finally:
+            link.unlink()
+
+    def test_symlinks_and_windows_reparse_points_are_rejected_before_resolving(self):
+        target = self.root / 'results/model' / ('a' * 64 + '.json')
+        actual_lstat = type(self.root).lstat
+        for mode, attributes in ((0o120777, 0), (0o040777, 0x400)):
+            with self.subTest(mode=mode, attributes=attributes):
+                def redirected(path):
+                    if path == target.parent:return SimpleNamespace(st_mode=mode, st_file_attributes=attributes)
+                    return actual_lstat(path)
+                with patch.object(type(self.root), 'lstat', redirected), self.assertRaisesRegex(RuntimeError, 'redirected'):
+                    self.sync.relative_result_path(target)
 
     def test_git_timeout_no_prompts_and_redacted_transport_errors(self):
         with patch('workbench.result_sync.subprocess.run') as run:
