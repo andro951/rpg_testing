@@ -7,6 +7,6 @@
 
 The reference is a diagnostic, not a unique solution. Patches are valid against the starting snapshot and execute in order; do not apply them later to a changed database or reorder them.
 
-Frozen historical definitions retain their old evaluator, schemas, order-sensitive grading and operation-count restrictions. Only newly compiled tests opt into array-identities-intent-v1; no saved model response/result is overwritten or rescored in place.
+Frozen historical definitions retain their old evaluator, schemas, order-sensitive grading and operation-count restrictions. Only newly compiled tests opt into array-identities-intent-v2; no saved model response/result is overwritten or rescored in place.
 
 Free-format output is not the dot contract. Recognized structured intent can be recovered; unrecognized prose has unknown semantic correctness. Clear prose no-change is reported as a parser gap, not evidence that the model misunderstood the task. No assistant judgment is called human annotation.

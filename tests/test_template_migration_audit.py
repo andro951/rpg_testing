@@ -38,6 +38,13 @@ class TemplateMigrationAuditTests(unittest.TestCase):
         templates = self.root / 'prompt_builder/templates'
         write_json(templates / 'common/selection.json', {'test_cases': ['update_field'],
                    'output_formats': ['json_dot'], 'input_formats': ['normal_json']})
+        # This is an intentionally one-case synthetic repository, not the production catalog.
+        for case in (templates / 'test_cases').iterdir():
+            if case.is_dir() and case.name != 'update_field':shutil.rmtree(case)
+        for form in (templates / 'output_format').iterdir():
+            if form.is_dir() and form.name != 'json_dot':shutil.rmtree(form)
+        write_json(templates / 'common/coverage.json', {'schema_version': 1,
+                   'test_cases': ['update_field'], 'output_formats': ['json_dot'], 'input_formats': ['normal_json']})
         self.current = compile_test('update_field', 'json_dot', input_formats=['normal_json'],
                                     root=templates, promotion_root=self.root)
         path = self.root / 'test_specs' / (self.current['id'] + '.json')

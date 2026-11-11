@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from prompt_builder.builder import compile_test, load_case, prompt
-from prompt_builder.presentation import render
+from prompt_builder.presentation import keyed, render
 
 
 class DeclaredIdBoundaryTests(unittest.TestCase):
@@ -21,14 +21,14 @@ class DeclaredIdBoundaryTests(unittest.TestCase):
         original = copy.deepcopy((data, declarations))
         with patch('prompt_builder.presentation.id_field',
                    side_effect=AssertionError('Conversions must not guess IDs')):
-            keyed = json.loads(render(data, 'id_keyed_arrays', declarations))
+            converted = keyed(data, declarations)
             paths = render(data, 'full_paths', declarations).splitlines()
-        self.assertEqual(keyed, {'$object': {
-            'rows.list': {'$array': {'a.b/%雪': {'$object': {
-                '': 'a.b/%雪', 'id': 'decoy', 'empty': {'$array': {}}}}}},
-            'rows': {'$object': {'list': {'$array': {'false': {'$object': {
-                'sku': False, 'id': 'another-decoy'}}}}}},
-        }})
+        self.assertEqual(converted, {
+            'rows.list': {'a.b/%雪': {
+                '': 'a.b/%雪', 'id': 'decoy', 'empty': {}}},
+            'rows': {'list': {'false': {
+                'sku': False, 'id': 'another-decoy'}}},
+        })
         self.assertIn('rows%2Elist.a%2Eb%2F%25%E9%9B%AA.%_: "a.b/%雪"', paths)
         self.assertIn('rows%2Elist.a%2Eb%2F%25%E9%9B%AA.empty: []', paths)
         self.assertIn('rows.list.false.sku: false', paths)

@@ -20,7 +20,7 @@ from .dot_separators_v2 import _resolution_parts
 from .schema_free_intent import ParserGap
 
 
-VERSION = 'array-identities-intent-v1'
+VERSION = 'array-identities-intent-v2'
 OUTPUT_FORMATS = ('json_dot', 'json_slash', 'path_list', 'literal_line',
                   'end_marked_line', 'two_line_text', 'typed_lines', 'free_format')
 SOURCES = ('evaluation/array_identities_intent.py', 'evaluation/array_identity_map.py', 'evaluation/typed_lines.py', 'evaluation/schema_free_intent.py', 'evaluation/output_formats.py',
@@ -176,8 +176,34 @@ def _reference(state, reference, array_identities):
 
 def _operation(state, raw, array_identities):
     op = raw.get('op')
+    if op in ('move', 'copy'):
+        if set(raw) != {'op', 'from', 'to'}:
+            raise IntentError('Move and Copy require only source and destination paths')
+        source, source_parts = _reference(state, raw['from'], array_identities)
+        destination, destination_parts = _reference(state, raw['to'], array_identities)
+        parent = at(state, source_parts[:-1]) if source_parts else None
+        if not isinstance(parent, list):
+            raise IntentError('Move and Copy select one existing source array element')
+        if not isinstance(destination, list):
+            raise IntentError('Move and Copy destination selects an existing array itself')
+        if parent is destination:
+            raise IntentError('Same-collection transfer unsupported')
+        if destination_parts[:len(source_parts)] == source_parts:
+            raise IntentError('Transfer into source or descendant unsupported')
+        normalized = {'op': op, 'from': from_pointer(state, source_parts, array_identities),
+                      'path': from_pointer(state, destination_parts, array_identities)}
+        # These are custom collection transfers, not RFC move/copy. Append the
+        # complete independent value first, so removal cannot shift a nested
+        # destination's concrete index before it has been used.
+        concrete = [{'op': 'add', 'path': value_paths.pointer(destination_parts) + '/-',
+                     'value': copy.deepcopy(source)}]
+        if op == 'move':
+            concrete.append({'op': 'remove', 'path': value_paths.pointer(source_parts)})
+        after = apply_rfc(state, concrete, 'json_patch')
+        _context(array_identities).validate(after, check_paths=False)
+        return normalized, after
     if op not in ('update', 'append', 'remove'):
-        raise IntentError('Only Update, Add and Remove are supported')
+        raise IntentError('Only Update, Add, Remove, Move and Copy are supported')
     fields = {'op', 'path'} if op == 'remove' else {'op', 'path', 'value'}
     if set(raw) != fields:
         raise IntentError('Missing or extra operation fields')
@@ -206,6 +232,22 @@ def _operation(state, raw, array_identities):
 
 
 def _choose(state, raw, array_identities):
+    if 'unlabeledPaths' in raw:
+        if set(raw) != {'op', 'unlabeledPaths'} or raw.get('op') not in ('move', 'copy'):
+            raise IntentError('Unlabeled source/destination requires Move or Copy')
+        paths = raw['unlabeledPaths']
+        if not isinstance(paths, list) or len(paths) != 2:
+            raise IntentError('Two unlabeled paths required')
+        candidates = []
+        for source, destination in (paths, paths[::-1]):
+            try:
+                candidates.append(_operation(state, {'op': raw['op'], 'from': source,
+                                                      'to': destination}, array_identities))
+            except (ValueError, KeyError, TypeError):
+                continue
+        if len(candidates) != 1:
+            raise IntentError('Unlabeled source/destination requires exactly one current-data interpretation')
+        return candidates[0]
     if 'unlabeledPathValue' not in raw:
         return _operation(state, raw, array_identities)
     candidates = []
@@ -232,11 +274,18 @@ def apply_patch(initial_state, patch, array_identities):
     for operation in patch:
         if not isinstance(operation, dict):
             raise IntentError('Operation must be an object')
-        op = {'replace': 'update', 'add': 'append', 'remove': 'remove'}.get(operation.get('op'))
+        op = {'replace': 'update', 'add': 'append', 'remove': 'remove',
+              'move': 'move', 'copy': 'copy'}.get(operation.get('op'))
         if op is None:
             raise IntentError('Unsupported reference operation')
-        current, state = _operation(state, {**operation, 'op': op,
-                                           'path': {'kind': 'dot', 'text': operation.get('path')}}, array_identities)
+        if op in ('move', 'copy'):
+            if set(operation) != {'op', 'from', 'path'}:
+                raise IntentError('Reference Move and Copy require only op, from and path')
+            raw = {'op': op, 'from': {'kind': 'dot', 'text': operation['from']},
+                   'to': {'kind': 'dot', 'text': operation['path']}}
+        else:
+            raw = {**operation, 'op': op, 'path': {'kind': 'dot', 'text': operation.get('path')}}
+        current, state = _operation(state, raw, array_identities)
         normalized.append(current)
     return {'normalized_patch': normalized, 'final_state': state}
 
@@ -315,7 +364,7 @@ def validate_selection(test, variant):
     if selected != configuration():
         raise ValueError('Unknown or stale schema-free evaluator; explicitly compile a new evaluator configuration')
     if result.get('representation') != 'dot_patch_v1':
-        raise ValueError('array-identities-intent-v1 requires canonical dot_patch_v1 results')
+        raise ValueError(VERSION + ' requires canonical dot_patch_v1 results')
     if result.get('output_format', 'json_dot') not in OUTPUT_FORMATS:
         raise ValueError('Unsupported schema-free output_format')
     if 'expected_state' not in test:

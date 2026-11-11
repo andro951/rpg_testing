@@ -80,12 +80,11 @@ def validate_presentation_identity(case,formats,root=ROOT):
 
 def applicable(case,output_format,root=ROOT):
     config=configuration(root,'output_format',output_format)
-    if config['decoder']!='typed_lines':return None
     from .reference_output import encode
     from evaluation.array_identities_intent import normalize_response
     try:
-        raw=encode(case['starting_data'],case['expected_patch'],output_format,case['array_identities'])
-        normalize_response(raw,case['starting_data'],output_format,case['array_identities'])
+        raw=encode(case['starting_data'],case['expected_patch'],config['decoder'],case['array_identities'])
+        normalize_response(raw,case['starting_data'],config['decoder'],case['array_identities'])
     except ValueError as exc:return str(exc)
     return None
 
@@ -98,12 +97,15 @@ def apply_saved_promotion(test, repository=None):
     return promoted if promoted is not None else test
 
 
-def compile_test(case,output_format,*,input_formats=None,root=ROOT,repetitions=3,promotion_root=None):
+def compile_test(case,output_format,*,input_formats=None,root=ROOT,repetitions=1,promotion_root=None):
     if isinstance(case,str):case=load_case(case,root)
     reason=applicable(case,output_format,root)
     if reason:raise ValueError(f'{case["id"]}/{output_format}: {reason}')
     selection=read_json(Path(root)/'common/selection.json')
-    formats=input_formats or selection['input_formats']
+    formats=selection['input_formats'] if input_formats is None else input_formats
+    from .coverage import names as validate_names
+    validate_names(formats,'input_formats')
+    if type(repetitions)is not int or repetitions<1:raise ValueError('repetitions must be a positive integer')
     skip_keyed=selection.get('skip_id_keyed_when_no_arrays',True)
     if type(skip_keyed)is not bool:raise ValueError('skip_id_keyed_when_no_arrays must be boolean')
     config=configuration(root,'output_format',output_format)
@@ -134,16 +136,17 @@ def source_hashes(root):
     root=Path(root)
     # Record source provenance, including evaluation-only case answers. Hashing
     # an answer does not insert it into model input. Frozen references are excluded.
-    return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()for p in sorted(root.rglob('*'))
+    return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes().replace(b'\r\n',b'\n')).hexdigest()for p in sorted(root.rglob('*'))
             if p.is_file()and p.suffix in('.txt','.json')and 'reference'not in p.parts}
 
-def _build(output,*,root=ROOT,input_formats=None,output_formats=None,cases=None,repetitions=3,promotion_root=None):
+def _build(output,*,root=ROOT,input_formats=None,output_formats=None,cases=None,repetitions=1,promotion_root=None):
     root=Path(root);output=Path(output)
-    selection=read_json(root/'common/selection.json')
-    modes=input_formats or selection['input_formats'];formats=output_formats or selection['output_formats'];names=cases or selection['test_cases']
-    if len(set(names))!=len(names)or len(set(modes))!=len(modes)or len(set(formats))!=len(formats):raise ValueError('Duplicate selection')
+    from .coverage import resolve, report
+    selection,explicit=resolve(root,cases=cases,input_formats=input_formats,output_formats=output_formats)
+    if type(repetitions)is not int or repetitions<1:raise ValueError('repetitions must be a positive integer')
+    modes=selection['input_formats'];formats=selection['output_formats'];names=selection['test_cases']
     manifest={'version':VERSION,'schema_hints':False,'evaluator':evaluator.configuration(),'model_runs_started_by_builder':0,
-              'source_hashes':source_hashes(root),'test_cases':names,'input_formats':modes,'output_formats':formats,'prompts':[],'unsupported':[]}
+              'repetitions':repetitions,'source_hashes':source_hashes(root),'test_cases':names,'input_formats':modes,'output_formats':formats,'prompts':[],'unsupported':[]}
     for name in names:
         case=load_case(name,root)
         for form in formats:
@@ -160,7 +163,11 @@ def _build(output,*,root=ROOT,input_formats=None,output_formats=None,cases=None,
                 target.with_suffix('.txt').write_text('SYSTEM MESSAGE\n'+request[0]['content']+'\n\nUSER MESSAGE\n'+request[-1]['content'],encoding='utf8')
                 manifest['prompts'].append({'test_id':test['id'],'test_case':name,'input_format':variant['id'],'output_format':form,'message_digest':digest(request),'repetitions':repetitions,'file':target.with_suffix('.messages.json').relative_to(output).as_posix()})
     manifest['prompt_count']=len(manifest['prompts']);manifest['observations_per_model']=sum(p['repetitions']for p in manifest['prompts'])
-    manifest['test_spec_files']={p.name:hashlib.sha256(p.read_bytes()).hexdigest()for p in sorted((output/'test_specs').glob('*.json'))}
+    manifest['coverage']=report(root,selection,manifest['prompts'],manifest['unsupported'],repetitions,explicit)
+    if manifest['unsupported'] and not manifest['coverage']['omitted']['distinct_prompt_count']:
+        details='; '.join(row['test_case']+'/'+row['output_format']+': '+row['reason'] for row in manifest['unsupported'])
+        raise ValueError('Complete suite has unsupported required combinations; no build published: '+details)
+    manifest['test_spec_files']={p.name:definition_source_sha256(p)for p in sorted((output/'test_specs').glob('*.json'))}
     write_json(output/'manifest.json',manifest)
     return manifest
 
@@ -201,22 +208,24 @@ def build(output,**settings):
         if stage.exists():shutil.rmtree(stage)
 
 
-def install(output,repository=None):
-    """Activate a completed build; preserve superseded definitions as test data."""
-    import shutil
-    from workbench.domain import experiment_spec
-    output=Path(output);repository=Path(repository)if repository else Path(__file__).resolve().parents[1]
-    manifest=read_json(output/'manifest.json')
-    if manifest.get('version')!=VERSION:raise ValueError('Not a completed template build')
+def validate_artifacts(output,manifest,*,prompt_base=None,installed=False):
+    """Verify content and scope before changing or executing an installed suite."""
+    output=Path(output)
     inventory=manifest.get('test_spec_files',{})
     actual={p.name for p in (output/'test_specs').glob('*.json')}
-    if not inventory or actual!=set(inventory):raise ValueError('Build test inventory does not match manifest; rebuild before installing')
+    if not inventory or (not installed and actual!=set(inventory)) or not set(inventory)<=actual:
+        raise ValueError('Build test inventory does not match manifest; rebuild before installing')
     for name,expected_hash in inventory.items():
-        if Path(name).name!=name or hashlib.sha256((output/'test_specs'/name).read_bytes()).hexdigest()!=expected_hash:
+        if not isinstance(name,str) or Path(name).name!=name:raise ValueError('Unsafe build test inventory')
+        raw=(output/'test_specs'/name).read_bytes()
+        if expected_hash not in {hashlib.sha256(raw).hexdigest(),hashlib.sha256(raw.replace(b'\r\n',b'\n')).hexdigest()}:
             raise ValueError('Build test hash does not match manifest: '+name)
     generated={name:read_json(output/'test_specs'/name)for name in inventory}
     if not generated:raise ValueError('Refusing to install an empty suite')
-    for t in generated.values():validate_test(t)
+    for name,t in generated.items():
+        validate_test(t)
+        if name!=t['id']+'.json' or not t.get('enabled',True) or any(not v.get('enabled',True) for v in t['variants']):
+            raise ValueError('Build test inventory identity or enabled scope mismatch')
     from workbench.workflows import messages
     by_id={t['id']:t for t in generated.values()}
     expected_views={(t['id'],v['id'])for t in generated.values()for v in t['variants']}
@@ -225,11 +234,33 @@ def install(output,repository=None):
         key=(row['test_id'],row['input_format'])
         if key not in expected_views or key in seen:raise ValueError('Manifest prompt inventory mismatch')
         seen.add(key);test=by_id[key[0]];variant=next(v for v in test['variants']if v['id']==key[1])
+        if (row['test_case']!=test['prompt_builder']['fixture'] or row['output_format']!=test['prompt_builder']['method']
+                or row['repetitions']!=test['repetitions']):raise ValueError('Manifest prompt scope differs from frozen definition')
         request=messages(test,variant['steps'][0],{},variant)
-        file=(output/row['file']).resolve()
-        if not file.is_relative_to(output.resolve()) or read_json(file)!=request or digest(request)!=row['message_digest']:
+        relative=Path(row['file'])
+        if relative.as_posix()!=f"prompts/{key[0]}/{key[1]}.messages.json":raise ValueError('Manifest prompt preview path mismatch')
+        base=Path(prompt_base) if prompt_base is not None else output/'prompts'
+        file=(base/relative.relative_to('prompts')).resolve()
+        if not file.is_relative_to(base.resolve()) or read_json(file)!=request or digest(request)!=row['message_digest']:
             raise ValueError('Generated prompt preview does not match frozen definition')
     if seen!=expected_views:raise ValueError('Manifest is missing generated prompt views')
+    return generated
+
+
+def install(output,repository=None,*,allow_subset=False,root=None):
+    """Activate a verified build. Partial activation requires a separate opt-in."""
+    import shutil
+    from workbench.domain import experiment_spec
+    from .coverage import validate_manifest
+    output=Path(output);repository=Path(repository)if repository else Path(__file__).resolve().parents[1]
+    templates=Path(root)if root is not None else repository/'prompt_builder/templates'
+    if root is None and not templates.exists():templates=ROOT
+    manifest=read_json(output/'manifest.json')
+    if manifest.get('version')!=VERSION:raise ValueError('Not a completed template build')
+    generated=validate_artifacts(output,manifest)
+    coverage=validate_manifest(manifest,templates)
+    if not coverage['complete'] and not allow_subset:
+        raise ValueError('Refusing to replace active all-tests suite with a subset/incomplete build; use --allow-subset-install only for an explicitly requested partial suite')
     current=repository/'test_specs';current.mkdir(exist_ok=True)
     managed={p.name:p for p in current.glob('*.json')if read_json(p).get('prompt_builder',{}).get('version')in('database-v3','file-templates-v1')}
     collisions=(set(generated)&{p.name for p in current.glob('*.json')})-set(managed)
@@ -304,7 +335,11 @@ def install(output,repository=None):
     previews=repository/'prompts/current-suite'
     if previews.exists():shutil.rmtree(previews)  # generated only; sources live in templates
     shutil.copytree(output/'prompts',previews)
+    # Canonicalize validated legacy raw-byte pins after install rewrites JSON.
+    # A Windows CRLF build must remain verifiable on an LF checkout (and back).
+    manifest['test_spec_files']={name:definition_source_sha256(current/name)for name in generated}
     write_json(previews/'manifest.json',manifest)
     from tools.build_prompt_sharing import build as sharing
     write_json(repository/'optimization/sharing.json',sharing(repository))
-    return {'installed_definitions':len(generated),'prompt_count':manifest['prompt_count'],'archived_changed_definitions':len(changed)}
+    return {'installed_definitions':len(generated),'prompt_count':manifest['prompt_count'],'archived_changed_definitions':len(changed),
+            'coverage':coverage,'subset_install_explicitly_allowed':bool(allow_subset and not coverage['complete'])}

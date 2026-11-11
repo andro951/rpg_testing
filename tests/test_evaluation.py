@@ -27,7 +27,59 @@ def failed_codes(assessment):
 
 
 def schema_free(variant):
-    return variant.get('result', {}).get('evaluator', {}).get('version') in ('schema-free-intent-v1', 'array-identities-intent-v1')
+    return variant.get('result', {}).get('evaluator', {}).get('version') in ('schema-free-intent-v1', 'array-identities-intent-v1', 'array-identities-intent-v2')
+
+
+def canonical_response(test, variant, raw):
+    """Read each synthetic response with its selected protocol, not json.loads."""
+    from evaluation.hosts import selected
+    host = selected(variant['result'])
+    kwargs = ({'array_identities': test['source']['array_identities']}
+              if 'array_identities' in test['source'] else {})
+    return host.normalize_response(raw, test['source']['initial_state'],
+                                   variant['result'].get('output_format', 'json_dot'),
+                                   **kwargs)['normalized_patch']
+
+
+def encode_response(test, variant, operations):
+    from prompt_builder.reference_output import encode
+    output_format = variant['result'].get('output_format', 'json_dot')
+    if output_format in ('json_dot', 'free_format'):
+        return json.dumps(operations)
+    return encode(test['source']['initial_state'], operations, output_format,
+                  test['source']['array_identities'])
+
+
+def malformed_response_probes(output_format):
+    """Independent negative records in each reader's actual syntax.
+
+    Do not use the valid-reference encoder here: it deliberately rejects bad
+    paths before a test response could reach the evaluator under test.
+    """
+    if output_format in ('json_dot', 'json_slash', 'free_format'):
+        slash = output_format == 'json_slash'
+        return {
+            'missing_path': '[{"op":"replace","value":"wrong"}]',
+            'invalid_escape': json.dumps([{'op': 'replace', 'path': '/~2' if slash else '%', 'value': 'wrong'}]),
+            'missing_target': json.dumps([{'op': 'replace', 'path': '/__absent_target__' if slash else '__absent_target__', 'value': 'wrong'}]),
+        }
+    if output_format == 'path_list':
+        return {'missing_path': 'set: "wrong"', 'invalid_escape': 'set [%]: "wrong"',
+                'missing_target': 'set [__absent_target__]: "wrong"'}
+    if output_format in ('literal_line', 'end_marked_line'):
+        suffix = '|' if output_format == 'end_marked_line' else ''
+        return {kind: prefix + 'text:wrong' + suffix for kind, prefix in
+                (('missing_path', 'set: '), ('invalid_escape', 'set %: '),
+                 ('missing_target', 'set __absent_target__: '))}
+    if output_format == 'two_line_text':
+        return {'missing_path': 'set:\nvalue: "wrong"',
+                'invalid_escape': 'set: %\nvalue: "wrong"',
+                'missing_target': 'set: __absent_target__\nvalue: "wrong"'}
+    if output_format == 'typed_lines':
+        return {'missing_path': 'set:\ntext: wrong',
+                'invalid_escape': 'set: /~2\ntext: wrong',
+                'missing_target': 'set: /__absent_target__\ntext: wrong'}
+    raise AssertionError('Missing negative probes for output format ' + output_format)
 
 
 def unrequested_schema_free_change(state, array_identities=None):
@@ -138,13 +190,16 @@ class CoverageTests(unittest.TestCase):
                     values[key] = '```json\n' + good + '\n```'
                     result = assess(test, variant, values)
                     if schema_free(variant):
-                        # This explicitly selected host normalizes fences. The
-                        # old strict JSON contracts below must still reject them.
-                        self.assertEqual(result['objective_outcome'], 'PASS')
-                        self.assertTrue(evaluate(test, variant, values)['exact_match'])
+                        output_format = variant['result'].get('output_format', 'json_dot')
+                        # Only intent/JSON readers unwrap Markdown fences. The
+                        # independent text protocols retain exact line syntax.
+                        accepts_fence = output_format in ('json_dot', 'json_slash', 'free_format')
+                        self.assertEqual(result['objective_outcome'], 'PASS' if accepts_fence else 'FAIL')
+                        self.assertEqual(evaluate(test, variant, values)['exact_match'], accepts_fence)
                         self.assertEqual(next(c['status'] for c in result['checks']
-                                              if c['code'] == 'intent.normalization'), 'passed')
-                        values[key] = '[{"op":"replace","path":'
+                                              if c['code'] == 'intent.normalization'),
+                                         'passed' if accepts_fence else 'failed')
+                        values[key] = malformed_response_probes(output_format)['missing_path']
                         result = assess(test, variant, values)
                         self.assertEqual(result['objective_outcome'], 'FAIL')
                         self.assertIn('intent.normalization', failed_codes(result))
@@ -162,19 +217,13 @@ class CoverageTests(unittest.TestCase):
             if variant['result']['representation'] == 'answers': continue
             with self.subTest(test=test['id'], variant=variant['id']):
                 values = copy.deepcopy(fixture['outputs']); key = variant['result']['step']
-                patch = json.loads(values[key])
                 if schema_free(variant):
-                    # Dot paths have a different syntax and failure taxonomy.
-                    # Exercise malformed structure, invalid escapes and a valid
-                    # but unresolved path without imposing RFC pointer rules.
-                    probe = patch or [{'op':'replace', 'path':'__unused__', 'value':None}]
-                    for kind in ('missing_path', 'invalid_escape', 'missing_target'):
-                        bad = copy.deepcopy(probe)
-                        if kind == 'missing_path':
-                            del bad[0]['path']
-                        else:
-                            bad[0]['path'] = '%' if kind == 'invalid_escape' else '__absent_target__'
-                        values[key] = json.dumps(bad)
+                    patch = canonical_response(test, variant, values[key])
+                    output_format = variant['result'].get('output_format', 'json_dot')
+                    # Exercise malformed structure, invalid escapes and a
+                    # syntactically valid but unresolved path in every reader.
+                    for kind, raw in malformed_response_probes(output_format).items():
+                        values[key] = raw
                         result = assess(test, variant, values)
                         with self.subTest(probe=kind):
                             self.assertEqual(result['objective_outcome'], 'FAIL')
@@ -183,7 +232,7 @@ class CoverageTests(unittest.TestCase):
                             self.assertEqual(next(c['status'] for c in result['checks']
                                                   if c['code'] == 'state.final'), 'not_evaluated')
                     extra = unrequested_schema_free_change(test['expected_state'], test['source'].get('array_identities'))
-                    values[key] = json.dumps(patch + [extra])
+                    values[key] = encode_response(test, variant, patch + [extra])
                     result = assess(test, variant, values)
                     score = evaluate(test, variant, values)
                     self.assertTrue(score['valid'], score.get('error'))
@@ -192,6 +241,7 @@ class CoverageTests(unittest.TestCase):
                     self.assertIn('state.final', failed_codes(result))
                     self.assertNotIn('intent.normalization', failed_codes(result))
                     continue
+                patch = json.loads(values[key])
                 probe = patch or [{'op':'replace', 'path':'/unused', 'value':None}]
                 bad = copy.deepcopy(probe); del bad[0]['path']; values[key] = json.dumps(bad)
                 result = assess(test, variant, values)
@@ -219,6 +269,22 @@ class CoverageTests(unittest.TestCase):
             if variant['result']['representation'] == 'answers': continue
             with self.subTest(test=test['id'], variant=variant['id']):
                 values = copy.deepcopy(fixture['outputs']); key = variant['result']['step']
+                if schema_free(variant):
+                    patch = canonical_response(test, variant, values[key])
+                    # Omit a required change, or add a real unwanted change to
+                    # the no-change control. Both are valid protocol responses
+                    # and must fail on task semantics, not merely parsing.
+                    wrong = [] if patch else [unrequested_schema_free_change(
+                        test['source']['initial_state'], test['source'].get('array_identities'))]
+                    values[key] = encode_response(test, variant, wrong)
+                    result = assess(test, variant, values)
+                    score = evaluate(test, variant, values)
+                    self.assertTrue(score['valid'], score.get('error'))
+                    self.assertFalse(score['exact_match'])
+                    self.assertEqual(result['objective_outcome'], 'FAIL')
+                    self.assertIn('state.final', failed_codes(result))
+                    self.assertNotIn('intent.normalization', failed_codes(result))
+                    continue
                 patch = json.loads(values[key]) or [{'op':'replace', 'path':'/missing_target', 'value':None}]
                 first = patch[0]
                 if 'value' in first: first['value'] = 'Deliberately wrong value and type'

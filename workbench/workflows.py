@@ -62,7 +62,7 @@ def messages(test,step,values,variant=None):
         msgs=[{'role':'system','content':base+' '+_legacy_presentation_instruction(mode)}]
         source=test['source']
         evaluator=variant.get('result',{}).get('evaluator')
-        if isinstance(evaluator,dict) and evaluator.get('version') == 'array-identities-intent-v1':
+        if isinstance(evaluator,dict) and evaluator.get('version') in ('array-identities-intent-v1', 'array-identities-intent-v2'):
             source={key:value for key,value in source.items() if key != 'array_identities'}
         if 'new_information_override' in variant:
             source={**source,'new_information':variant['new_information_override']}

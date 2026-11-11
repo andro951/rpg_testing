@@ -9,18 +9,20 @@ def main():
     parser.add_argument('--templates',type=Path,default=ROOT)
     parser.add_argument('--output',type=Path,default=Path('build/prompt-suite'))
     parser.add_argument('--install',action='store_true',help='Activate generated definitions in this repository after archiving previous managed tests')
+    parser.add_argument('--allow-subset-install',action='store_true',help='Explicitly allow a subset/incomplete build to replace the active suite; Run all remains blocked')
     parser.add_argument('--list',action='store_true',help='List discovered case and format folders without generating tests')
     parser.add_argument('--input-formats',nargs='+')
     parser.add_argument('--output-formats',nargs='+')
     parser.add_argument('--cases',nargs='+')
-    parser.add_argument('--repetitions',type=int,default=3)
+    parser.add_argument('--repetitions',type=int,default=1)
     args=parser.parse_args()
+    if args.allow_subset_install and not args.install:parser.error('--allow-subset-install requires --install')
     if args.list:result=discover(args.templates)
     else:
         result=build(args.output,root=args.templates,input_formats=args.input_formats,output_formats=args.output_formats,cases=args.cases,repetitions=args.repetitions)
-        result={k:result[k]for k in('version','prompt_count','observations_per_model','unsupported','model_runs_started_by_builder')}
+        result={k:result[k]for k in('version','prompt_count','observations_per_model','unsupported','coverage','model_runs_started_by_builder')}
         result['output']=str(args.output)
-        if args.install:result['installation']=install(args.output)
+        if args.install:result['installation']=install(args.output,allow_subset=args.allow_subset_install,root=args.templates)
     print(json.dumps(result,indent=2))
 
 if __name__=='__main__':main()

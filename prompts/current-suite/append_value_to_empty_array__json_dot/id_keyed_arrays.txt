@@ -15,6 +15,9 @@ Allowed changes:
 - Update an existing field's value. Change array membership with the addition/removal operations below.
 - Add one complete element to an existing array. Select the destination array itself, without an element selector.
 - Remove one array element selected by its unique value or ID. This deletes that element; it does not assign null or delete an object field.
+- Move one ID/value-selected element to a different existing array. Append its complete value to the destination and remove the original from the source.
+- Copy one ID/value-selected element to a different existing array. Append a complete independent copy to the destination and leave the source unchanged.
+- For Move and Copy, select the source element and the destination array itself. Preserve the element's ID and all its fields. Do not transfer within the same array or into a descendant of the source element. The destination must retain unique IDs/values. These are custom collection operations, not standard JSON Patch Move/Copy.
 - If the new information requires no database change, return the method's no-change response.
 
 How to write a path:
@@ -27,24 +30,24 @@ Return only a JSON array of operations, without explanations, Markdown fences or
 For Update, write an object with exactly "op": "replace", "path": the existing field path, and "value": its complete new JSON value.
 For array addition, write an object with exactly "op": "add", "path": the destination array path, and "value": the complete JSON element to append.
 For removal, write an object with exactly "op": "remove" and "path": the ID/value-selected element path. No value field is used.
+For Move or Copy, write an object with exactly "op": "move" or "copy", "from": the ID/value-selected source element path, and "path": the destination array path. Do not include a value field. Use the requested operation directly, with the custom collection semantics above.
 Paths are JSON strings in the output object, but the path components themselves have no quotation marks.
 Syntax examples:
 [{"op":"replace","path":"example.status","value":"ready"}]
 [{"op":"add","path":"example_records","value":{"example_id":"example-new","label":"ready"}}]
 [{"op":"add","path":"example_places","value":"example-new"}]
 [{"op":"remove","path":"example_places.example-old"}]
+[{"op":"move","from":"example_places.example-old","path":"example_archive"}]
+[{"op":"copy","from":"example_records.example-old","path":"example_backups"}]
 The examples use unrelated fields; output only the changes required by the task.
 
 Input presentation:
-This view marks every original object as {"$object": {fields}} and every original array as {"$array": {identity: element}}. The markers are presentation metadata, never path components. Array keys are the unique ID or primitive value. Original object fields appear inside $object, even if a field itself is named $array or $object. Empty objects and empty arrays therefore remain distinct. Use identities, never positions.
+This is a non-JSON display of the same data. Objects use {field: value} and arrays use [identity: element]. Array keys are the unique ID or primitive value, written as quoted strings, never positions. Original fields and values keep their JSON types, and object elements retain their ID field. Empty arrays are [] and empty objects are {}. Access arrays by identity, not index; the displayed keys do not add another path level.
+
 
 Current data:
 {
-  "$object": {
-    "locations": {
-      "$array": {}
-    }
-  }
+  "locations": []
 }
 
 Task:

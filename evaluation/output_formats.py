@@ -53,13 +53,26 @@ def _escape_text(text, marker):
     return ''.join(value)
 
 
-def _line_records(raw, mode):
+def _line_records(raw, mode, *, allow_transfers=False):
     if raw.strip() == 'none':
         return []
     records = []
     for line in re.split(r'\r?\n', raw):
         if not line.strip():
             continue
+        if allow_transfers:
+            if mode == 'path_list':
+                transfer = re.fullmatch(r'(move|copy) \[([^\]]*)\] -> \[([^\]]*)\]', line)
+                def reference(path):
+                    return {'kind': 'components',
+                            'parts': [decode_part(part.strip()) for part in path.split(',')] if path else []}
+            else:
+                transfer = re.fullmatch(r'(move|copy) (\S+) -> (\S+)', line)
+                reference = _dot
+            if transfer:
+                kind, source, destination = transfer.groups()
+                records.append({'op': kind, 'from': reference(source), 'to': reference(destination)})
+                continue
         if mode == 'path_list':
             match = re.fullmatch(r'(set|append|remove) \[([^\]]*)\](?:: (.*))?', line)
             if not match:
@@ -99,6 +112,43 @@ def _line_records(raw, mode):
     if not records:
         raise IntentError('Return none for no change')
     return records
+
+
+def _two_line_records(raw):
+    """Current ordered field/value protocol, with explicit transfer records.
+
+    Leave workbench.field_values unchanged for historical definitions.
+    """
+    if raw.strip() == 'none':
+        return []
+    lines = re.split(r'\r?\n', raw.strip())
+    operations, index = [], 0
+    while index < len(lines):
+        if not lines[index].strip():
+            index += 1
+            continue
+        match = re.fullmatch(r'(set|append|remove|move|copy): (.*)', lines[index])
+        if not match:
+            raise IntentError('Expected set, append, remove, move or copy followed by its path')
+        kind, path = match.groups()
+        index += 1
+        if kind in ('move', 'copy'):
+            if index >= len(lines) or not lines[index].startswith('to: '):
+                raise IntentError('Move and Copy require one immediately following to: destination line')
+            operations.append({'op': kind, 'from': _dot(path), 'to': _dot(lines[index][4:])})
+            index += 1
+            continue
+        operation = {'op': {'set': 'update', 'append': 'append', 'remove': 'remove'}[kind],
+                     'path': _dot(path)}
+        if kind != 'remove':
+            if index >= len(lines) or not lines[index].startswith('value: '):
+                raise IntentError('Set and append require one immediately following value: JSON literal line')
+            operation['value'] = parse(lines[index][7:])
+            index += 1
+        operations.append(operation)
+    if not operations:
+        raise IntentError('Return none for no change')
+    return operations
 
 
 def _typed(raw, initial, identity_context=None):
@@ -147,9 +197,12 @@ def decode(raw, output_format, initial_state, *, identity_context=None):
     if output_format == 'typed_lines':
         operations = _typed(raw, initial_state, identity_context)
     elif output_format == 'two_line_text':
-        from workbench.field_values import decode as decode_fields
-        operations = [{**operation, 'op': {'replace': 'update', 'add': 'append', 'remove': 'remove'}[operation['op']],
-                       'path': _dot(operation['path'])} for operation in decode_fields(raw)]
+        if identity_context is not None:
+            operations = _two_line_records(raw)
+        else:
+            from workbench.field_values import decode as decode_fields
+            operations = [{**operation, 'op': {'replace': 'update', 'add': 'append', 'remove': 'remove'}[operation['op']],
+                           'path': _dot(operation['path'])} for operation in decode_fields(raw)]
     else:
-        operations = _line_records(raw, output_format)
+        operations = _line_records(raw, output_format, allow_transfers=identity_context is not None)
     return {'operations': operations, 'diagnostics': {'reader': output_format, 'semantic_inference': False}}

@@ -21,14 +21,14 @@ class DeclaredIdentityViewsTests(unittest.TestCase):
         ]
         original=copy.deepcopy((data,declarations))
         converted=keyed(data,declarations)
-        groups=converted['$object']['groups.list']['$array']
+        groups=converted['groups.list']
         self.assertEqual(list(groups),['g.雪','g2'])
-        member=groups['g.雪']['$object']['members']['$array']['member/%']['$object']
+        member=groups['g.雪']['members']['member/%']
         self.assertEqual(member,{'':'member/%','other_id':'other',
-            'values':{'$array':{'':'','null':None,'true':True,'7':7,'2.5':2.5,'a.b/雪':'a.b/雪'}},
-            'empty':{'$array':{}}})
-        self.assertEqual(groups['g2']['$object']['members']['$array']['member/%']['$object']['values'],
-                         {'$array':{'second':'second'}})
+            'values':{'':'','null':None,'true':True,'7':7,'2.5':2.5,'a.b/雪':'a.b/雪'},
+            'empty':{}})
+        self.assertEqual(groups['g2']['members']['member/%']['values'],
+                         {'second':'second'})
         lines=full_paths(data,declarations)
         prefix='groups%2Elist.g%2E%E9%9B%AA.members.member%2F%25'
         self.assertIn(prefix+'.%_: "member/%"',lines)
@@ -45,17 +45,17 @@ class DeclaredIdentityViewsTests(unittest.TestCase):
     def test_root_arrays_and_empty_containers(self):
         data=[{'sku':False,'id':'decoy','empty':{}},{'sku':None,'id':'decoy','empty':{}}]
         declarations=[{'path':[],'id_field':'sku'}]
-        self.assertEqual(keyed(data,declarations),{'$array':{
-            'false':{'$object':{'sku':False,'id':'decoy','empty':{'$object':{}}}},
-            'null':{'$object':{'sku':None,'id':'decoy','empty':{'$object':{}}}}}})
+        self.assertEqual(keyed(data,declarations),{
+            'false':{'sku':False,'id':'decoy','empty':{}},
+            'null':{'sku':None,'id':'decoy','empty':{}}})
         self.assertEqual(full_paths(data,declarations),[
             '<root>: <array>','false: <object>','false.sku: false','false.id: "decoy"','false.empty: {}',
             'null: <object>','null.sku: null','null.id: "decoy"','null.empty: {}'])
         for field in (None,'sku'):
             declarations=[{'path':[],'id_field':field}]
-            self.assertEqual(keyed([],declarations),{'$array':{}})
+            self.assertEqual(keyed([],declarations),{})
             self.assertEqual(full_paths([],declarations),['<root>: []'])
-        self.assertEqual(keyed({},[]),{'$object':{}})
+        self.assertEqual(keyed({},[]),{})
         self.assertEqual(full_paths({},[]),['<root>: {}'])
         self.assertEqual(keyed('scalar',[]),'scalar')
         self.assertEqual(full_paths('scalar',[]),['<root>: "scalar"'])
@@ -128,7 +128,7 @@ class DeclaredIdentityViewsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Missing array identity mapping'):
                 render(data,mode,declarations)
         declarations.append({'path':['groups',None,'members'],'id_field':'member code'})
-        self.assertEqual(keyed(data,declarations)['$object']['groups']['$array']['g']['$object']['members'],{'$array':{}})
+        self.assertEqual(keyed(data,declarations)['groups']['g']['members'],{})
         self.assertIn('groups.g.members: []',full_paths(data,declarations))
 
     def test_nonconverted_rendering_ignores_even_malformed_metadata(self):

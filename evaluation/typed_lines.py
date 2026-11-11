@@ -1,4 +1,4 @@
-"""Ordered typed-line extension for array-identities-intent-v1 only.
+"""Ordered typed-line extension for the current array-identities evaluator.
 
 The published Ember reader and legacy schema-free host retain their contract.
 """
@@ -6,9 +6,19 @@ import math
 import re
 
 from intent_parser.patch import IntentError
-from workbench.ember_text import DECIMAL, HEADER, TYPED, typed as legacy_typed
+from workbench.ember_text import DECIMAL, TYPED, typed as legacy_typed
 from workbench.scoring import parse as parse_json
 from workbench.value_paths import tokens
+
+HEADER = re.compile(r'(set|append|change|remove|move|copy): (/[^\r\n\u2028\u2029]*)\Z')
+DESTINATION = re.compile(r'to: (/[^\r\n\u2028\u2029]*)\Z')
+
+
+def _path(path):
+    parts = tokens(path)
+    if not parts or any(not part for part in parts):
+        raise IntentError('Invalid or unsafe typed-line path')
+    return {'kind': 'slash', 'text': path}
 
 
 def typed(value):
@@ -32,13 +42,19 @@ def records(raw):
             continue
         match = HEADER.fullmatch(lines[index])
         if not match:
-            raise IntentError('Expected set, append, change, or remove and an exact /path')
+            raise IntentError('Expected set, append, change, remove, move or copy and an exact /path')
         verb, path = match.groups()
-        parts = tokens(path)
-        if not parts or any(not part for part in parts):
-            raise IntentError('Invalid or unsafe typed-line path')
-        record = {'verb': verb, 'path': {'kind': 'slash', 'text': path}}
+        record = {'verb': verb, 'path': _path(path)}
         index += 1
+        if verb in ('move', 'copy'):
+            match = DESTINATION.fullmatch(lines[index]) if index < len(lines) else None
+            if not match:
+                raise IntentError('Move and Copy require one immediately following to: /destination line')
+            record['from'] = record.pop('path')
+            record['to'] = _path(match[1])
+            result.append(record)
+            index += 1
+            continue
         if verb != 'remove':
             match = TYPED.fullmatch(lines[index]) if index < len(lines) else None
             if not match:
@@ -75,21 +91,35 @@ def records(raw):
     return result
 
 
+def _safe_reference(state, path, identity_context):
+    from .array_identities_intent import _reference
+    old, concrete = _reference(state, path, identity_context)
+    node, parent = state, None
+    for part in concrete:
+        parent = node
+        if isinstance(node, dict):
+            if part in ('__proto__', 'prototype', 'constructor'):
+                raise IntentError('Unsafe typed-line object field')
+            node = node[part]
+        else:
+            node = node[int(part)]
+    return old, parent
+
+
 def decode(raw, initial, identity_context):
-    from .array_identities_intent import _reference, _operation
+    from .array_identities_intent import _operation
     state, operations = initial, []
     for record in records(raw):
-        verb, path = record['verb'], record['path']
-        old, concrete = _reference(state, path, identity_context)
-        node, parent = state, None
-        for part in concrete:
-            parent = node
-            if isinstance(node, dict):
-                if part in ('__proto__', 'prototype', 'constructor'):
-                    raise IntentError('Unsafe typed-line object field')
-                node = node[part]
-            else:
-                node = node[int(part)]
+        verb = record['verb']
+        if verb in ('move', 'copy'):
+            for path in (record['from'], record['to']):
+                _safe_reference(state, path, identity_context)
+            op = {'op': verb, 'from': record['from'], 'to': record['to']}
+            _, state = _operation(state, op, identity_context)
+            operations.append(op)
+            continue
+        path = record['path']
+        old, parent = _safe_reference(state, path, identity_context)
         op = {'op': 'append' if verb == 'append' else 'update', 'path': path}
         if verb == 'remove' and isinstance(parent, list):
             op['op'] = 'remove'

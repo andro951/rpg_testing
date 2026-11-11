@@ -64,7 +64,7 @@ class CatalogSourceHashTests(unittest.TestCase):
                             'reporting/timing_expectations.json': {}}.items():
                         write_json(repo / name, value)
                     with patch('prompt_builder.builder.write_json', side_effect=writer):
-                        install(output, repo)
+                        install(output, repo, allow_subset=True)
                     entries = read_json(repo / 'evaluation/catalog.json')['definitions']
                     self.assertEqual(entries[0], old)
                     entry = entries[1]

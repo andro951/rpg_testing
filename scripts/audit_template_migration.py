@@ -101,13 +101,14 @@ def expected_definitions(root):
     sys.path.insert(0, str(root))
     from prompt_builder.builder import applicable, compile_test, load_case
     templates = root / 'prompt_builder/templates'
-    selection = json.loads((templates / 'common/selection.json').read_text(encoding='utf8'))
+    from prompt_builder.coverage import resolve
+    selection, _ = resolve(templates)
     expected = {}
     for name in selection['test_cases']:
         case = load_case(name, templates)
         for output_format in selection['output_formats']:
-            if applicable(case, output_format, templates):
-                continue
+            reason = applicable(case, output_format, templates)
+            require(not reason, 'Unsupported required case/output: ' + name + '/' + output_format + ': ' + str(reason))
             test = compile_test(case, output_format, input_formats=selection['input_formats'],
                                 root=templates, promotion_root=root)
             require(test['id'] not in expected, 'Duplicate compiled ID: ' + test['id'])

@@ -95,6 +95,13 @@ def refresh_current_previews(root, changed):
     if not path.exists():
         return
     manifest = read_json(path)
+    # The active manifest verifies saved definitions as well as prompt previews.
+    # Refresh only inventoried files changed by this accepted promotion.
+    from evaluation.catalog import definition_source_sha256
+    for test_id in changed:
+        name = test_id + '.json'
+        if name in manifest.get('test_spec_files', {}):
+            manifest['test_spec_files'][name] = definition_source_sha256(root / 'test_specs' / name)
     for entry in manifest['prompts']:
         if entry['test_id'] not in changed:
             continue

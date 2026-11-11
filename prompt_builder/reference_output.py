@@ -21,8 +21,23 @@ def encode(initial,patch,output_format,array_identities):
     if not patch:return '[]'if output_format=='json_slash'else'none'
     lines=[];operations=[];state=initial
     for op in patch:
-        verb={'replace':'set','add':'append','remove':'remove'}[op['op']]
+        verb={'replace':'set','add':'append','remove':'remove','move':'move','copy':'copy'}[op['op']]
         path=op['path'];value=op.get('value');raw=json.dumps(value,ensure_ascii=False)
+        if verb in ('move','copy'):
+            source=op['from']
+            if output_format=='json_slash':
+                operations.append({**op,'from':slash_path(state,source,array_identities),
+                                   'path':slash_path(state,path,array_identities)})
+            elif output_format=='path_list':
+                lines.append(verb+' ['+', '.join(source.split('.'))+'] -> ['+', '.join(path.split('.'))+']')
+            elif output_format=='two_line_text':lines.extend([verb+': '+source,'to: '+path])
+            elif output_format=='typed_lines':
+                lines.extend([verb+': '+slash_path(state,source,array_identities),
+                              'to: '+slash_path(state,path,array_identities)])
+            elif output_format in ('literal_line','end_marked_line'):lines.append(verb+' '+source+' -> '+path)
+            else:raise ValueError('Unknown reference output format: '+output_format)
+            state=apply_patch(state,[op],array_identities)['final_state']
+            continue
         if output_format=='json_slash':operations.append({**op,'path':slash_path(state,path,array_identities)})
         elif output_format=='path_list':lines.append(verb+' ['+', '.join(path.split('.'))+']'+(': '+raw if verb!='remove'else''))
         elif output_format=='two_line_text':
