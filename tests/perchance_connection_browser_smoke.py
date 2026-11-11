@@ -1,6 +1,8 @@
 """Normal browser -> CDP -> hosted iframe, with a simulated text service only."""
+import errno
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -32,6 +34,44 @@ def report_browser_failure(executable, children, stderr_path):
         print(f'Fixture browser child {index}: {status}', file=sys.stderr)
     captured = Path(stderr_path).read_text(encoding='utf-8', errors='replace')
     print('Fixture browser stderr:\n' + (captured or '(empty)'), file=sys.stderr)
+
+
+class FixtureDirectory(tempfile.TemporaryDirectory):
+    """Retry only transient final profile writes after owned-browser shutdown."""
+    def cleanup(self):
+        for attempt in range(6):
+            try:
+                return super().cleanup()
+            except OSError as exc:
+                if exc.errno not in (errno.ENOTEMPTY, errno.EBUSY) or attempt == 5:
+                    raise
+                time.sleep(0.1 * (attempt + 1))
+
+
+def shutdown_fixture_browser(backend, children):
+    """Close only fixture-owned Chromium before its temporary profile is removed."""
+    try:
+        try:
+            if getattr(backend, 'browser', None):
+                # Browser.close() on a CDP-attached Playwright browser only
+                # disconnects. The protocol command asks Chromium itself to
+                # shut down gracefully and finish writing its profile.
+                backend.browser.new_browser_cdp_session().send('Browser.close')
+        finally:
+            for process in children:
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=10)
+    finally:
+        # Keep the CDP transport alive until browser exit has been observed.
+        # Any command/wait error propagates; cleanup failures are not ignored.
+        backend.close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -68,7 +108,7 @@ def main():
         from playwright.sync_api import sync_playwright
         with sync_playwright() as playwright:executable = playwright.chromium.executable_path
     try:
-        with tempfile.TemporaryDirectory() as tmp, \
+        with FixtureDirectory() as tmp, \
              (Path(tmp) / 'browser-stderr.log').open('wb') as browser_stderr, \
              patch.object(perchance, 'validate_url', side_effect=lambda value: value), \
              patch.object(connection, 'launch', side_effect=fixture_launch) as launch:
@@ -101,12 +141,7 @@ def main():
                 report_browser_failure(executable, child, browser_stderr.name)
                 raise
             finally:
-                #Only this fixture-owned browser is shut down by the test.
-                if getattr(backend, 'browser', None):backend.browser.close()
-                backend.close()
-                for process in child:
-                    if process.poll() is None:process.terminate()
-                    process.wait(timeout=10)
+                shutdown_fixture_browser(backend, child)
     finally:
         server.shutdown(); server.server_close(); thread.join(5)
     print('PASS: separately launched normal browser, CDP attachment, iframe worker, raw text/chunks, disconnect, preserved page and reconnect without relaunch. Text service SIMULATED; real browser/CDP/HTTP.')
