@@ -94,7 +94,7 @@ function renderModels(){
  if(!state.models.length)list.append(el('article',state.state==='scanning'?'Scanning the selected models folder…':'No discovered models yet. Choose or rescan the active folder.'));
 }
 async function poll(){if(polling)return;polling=true;try{render(await api('/api/state'));}catch(e){$('connection').textContent='● Worker disconnected';}finally{polling=false;}}
-async function loadTests(){if(state?.busy){$('test-list').replaceChildren(el('article','Test-file editing is available when the current operation has finished.'));return;}const data=await api('/api/tests');testData=data.tests;$('example-select').replaceChildren(...data.examples.map(x=>new Option(x,x)));const list=$('test-list');list.replaceChildren();for(const t of data.tests){const card=el('article');card.append(el('h3',t.name||t.id),el('p',t.id+' · '+t.variants.length+' workflow variants · '+(t.repetitions||1)+' repetition(s) · '+t.timeout_seconds+' s limit · '+(t.enabled===false?'Disabled':'Enabled')));card.append(button('View / edit JSON',()=>openEditor(t)),el('p',t.variants.map(v=>v.id+' ('+v.steps.length+' top-level steps)').join(' · '),'muted'));list.append(card);}}
+async function loadTests(){if(state?.busy){$('test-list').replaceChildren(el('article','Test-file editing is available when the current operation has finished.'));return;}const data=await api('/api/tests');testData=data.tests;$('example-select').replaceChildren(...data.examples.map(x=>new Option(x,x)));const list=$('test-list');list.replaceChildren();for(const t of data.tests){const card=el('article');card.append(el('h3',t.name||t.id),el('p',t.id+' · '+t.variants.length+' workflow variants · '+(t.repetitions||1)+' repetition(s) · '+t.timeout_seconds+' s limit · '+(t.enabled===false?'Disabled':'Enabled')));card.append(button('View / edit JSON',()=>openEditor(t)),el('p',t.variants.map(v=>v.id+' ('+v.steps.length+' top-level steps; retries '+(v.retry_enabled?'enabled':'disabled')+')').join(' · '),'muted'));list.append(card);}}
 function openEditor(t){$('test-json').value=JSON.stringify(t,null,2);$('editor').showModal();}
 async function loadResults(){if(state?.busy){$('result-list').replaceChildren(el('article','Stop or finish the active run before loading results from disk. Live progress remains available in Overview.'));return;}records=await api('/api/results');renderResults();}
 function renderResults(){const search=$('result-filter').value.toLowerCase();const list=$('result-list');list.replaceChildren();for(const r of records.filter(r=>[r.model_id,r.test_id,r.variant_id].join(' ').toLowerCase().includes(search))){const card=el('article',undefined,'result-row');const title=el('div');title.append(el('b',r.model_id),el('p',r.test_id+' / '+r.variant_id,'muted'));const correct=r.score?.exact_match;let label=r.status!=='completed'?r.status:(correct===true?'PASS':correct===false?'FAIL':'NO EXACT ORACLE');if(r.timed_out)label+=' · TIMEOUT';if(r.measurement_valid===false&&r.status==='completed')label+=' · INVALID MEASUREMENT';label+=' · '+(r.execution_class||'legacy_unverified');card.append(title,el('span',label,correct===true?'success':'error'),el('span',typeof r.pipeline_seconds==='number'?r.pipeline_seconds.toFixed(3)+' s':'—'));const act=el('div',undefined,'actions');act.append(button('Inspect',()=>{$('result-json').textContent=JSON.stringify(r,null,2);$('inspect').showModal();}),button('Delete / rerun',async()=>{if(!confirm('Delete this result and make the case pending again? This action is recorded in the audit log.'))return;await api('/api/result/delete',{model_id:r.model_id,case_id:r.case_id});await loadResults();},'danger'));card.append(act);list.append(card);}if(!list.children.length)list.append(el('article','No matching result files.'));}
@@ -106,6 +106,19 @@ on('export',()=>download('/api/export','rpg-testing-evidence.zip'));on('unity-sc
 on('refresh-tests',loadTests);on('refresh-results',loadResults);$('result-filter').addEventListener('input',renderResults);
 on('import-example',async()=>{await api('/api/test/import-example',{id:$('example-select').value});render(await api('/api/state'));await loadTests();toast('Example added to test files.');});
 on('new-test',()=>openEditor(testData[0]?{...testData[0],id:'new_test',name:'New test'}:{schema_version:2,id:'new_test',workflow:'steps',source:{},variants:[]}));
+on('add-retry-pairs',()=>{
+ const test=JSON.parse($('test-json').value),variants=test.variants;
+ const ids=new Set(variants.map(v=>v.id));
+ const additions=[];
+ for(const v of variants.filter(v=>!v.retry_enabled)){
+  const id=v.id+'__retry';
+  if(ids.has(id))continue;
+  if(id.length>128)throw Error('Variant ID is too long to add __retry. Edit its ID first.');
+  additions.push({...structuredClone(v),id,name:(v.name||v.id)+' / self-review retries',retry_enabled:true});ids.add(id);
+ }
+ test.variants.push(...additions);$('test-json').value=JSON.stringify(test,null,2);
+ toast('Added '+additions.length+' retry comparison variant(s). Review JSON, then validate and save.');
+});
 on('save-test',async()=>{let test;try{test=JSON.parse($('test-json').value);}catch{throw Error('This is not valid JSON.');}await api('/api/test/save',{test});$('editor').close();await loadTests();toast('Test validated and saved.');});
 async function scanModelsInBackground(){await api('/api/models/scan',{});setPage('models');await poll();}
 async function chooseModelsFolder(){

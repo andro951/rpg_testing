@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .judgements import load_tests, guarded_run, JudgementStore, definition_id
-from .domain import canonical, digest, code_fingerprint, experiment_spec, device_tier, write_json
+from .domain import canonical, digest, code_fingerprint, experiment_spec, device_tier, write_json, read_json
 from .planning import validate_selection
 from .workflows import messages, condition, output_schema, evaluate, Cancelled, repetition_seed
 from .scoring import parse
@@ -46,12 +46,19 @@ def validate_url(value):
     return value
 
 
-def identity(settings):
+def adapter_fingerprint():
     files = [Path(__file__), WORKER]
+    return digest({p.name: hashlib.sha256(p.read_bytes().replace(b'\r\n', b'\n')).hexdigest() for p in files})
+
+
+def identity(settings):
+    raw_adapter = adapter_fingerprint()
+    review = read_json(Path(__file__).with_name('operational-source-compatibility.json'))
+    adapter = review.get('equivalent_perchance_adapters', {}).get(raw_adapter, raw_adapter)
     return {'provider': 'Perchance Text Generator', 'policy': VERSION,
             'worker_url': validate_url(settings.get('perchance_url', DEFAULT_URL)),
             'epoch': settings.get('perchance_epoch', '1'),
-            'adapter_hash': digest({p.name: hashlib.sha256(p.read_bytes().replace(b'\r\n', b'\n')).hexdigest() for p in files}),
+            'adapter_hash': adapter,
             'workflow_code': code_fingerprint(), 'remote_model': None,
             'capability_evidence': {'reviewed': '2026-10-08', 'source': 'tools/perchance-text/worker.js',
                                     'reason': 'Seed is forwarded experimentally; its effect and reproducibility are unverified. Other experimental controls remain unavailable.'},
@@ -64,6 +71,8 @@ def effective(test, variant):
     for key in ('id', 'name', 'description', 'enabled', 'repetitions', 'provenance', 'timeout_seconds'):
         t.pop(key, None)
         v.pop(key, None)
+    if v.get('retry_enabled') is False:
+        v.pop('retry_enabled')
     v['cache'] = 'default'
     v.pop('min_cached_tokens', None)
     v.setdefault('prompt_style', 'conversational_v2')
@@ -319,6 +328,8 @@ class BrowserBackend:
 def execute_job(job, backend, cancel, progress=None):
     from jsonschema import Draft202012Validator
     test, variant = job['test'], job['variant']
+    from .self_review import enabled, generate as reviewed_generate
+    retry_enabled = enabled(variant)
     values, calls, events = {}, [], []
     started = time.perf_counter()
     error = None
@@ -347,13 +358,19 @@ def execute_job(job, backend, cancel, progress=None):
             requested = {'temperature': 0, 'top_p': 1, 'top_k': 0, 'min_p': 0, 'seed': 42, **step.get('sampling', {})}
             base_seed = requested['seed']
             requested['seed'] = repetition_seed(base_seed, job.get('repetition', 0))
-            try:
-                response = backend.generate(prompt, requested, schema, cancel)
-            except Exception as exc:
-                if hasattr(exc, 'partial_response'):
-                    calls.append({'step': step['id'], 'iteration': iteration, 'messages': prompt, 'base_seed': base_seed, **exc.partial_response})
-                raise
-            calls.append({'step': step['id'], 'iteration': iteration, 'messages': prompt, 'base_seed': base_seed, **response})
+            if retry_enabled:
+                response = reviewed_generate(prompt, schema,
+                    lambda request, output: backend.generate(request, requested, output, cancel),
+                    calls, events, {'step': step['id'], 'iteration': iteration, 'base_seed': base_seed,
+                                    'requested_sampling': requested}, cancel, progress, finish='provider_completed')
+            else:
+                try:
+                    response = backend.generate(prompt, requested, schema, cancel)
+                except Exception as exc:
+                    if hasattr(exc, 'partial_response'):
+                        calls.append({'step': step['id'], 'iteration': iteration, 'messages': prompt, 'base_seed': base_seed, **exc.partial_response})
+                    raise
+                calls.append({'step': step['id'], 'iteration': iteration, 'messages': prompt, 'base_seed': base_seed, **response})
             if response.get('finish_reason') != 'provider_completed':
                 raise ValueError('Provider did not complete the text request')
             value = response['text'] if schema is None else parse(response['text'])
@@ -418,7 +435,7 @@ def run(app, report, pending, backend_factory=BrowserBackend, append=False):
                       'valid_for_full_gpu_comparison': False, 'policy': VERSION,
                       'load': {'environment': copy.deepcopy(backend.environment), 'context': {}, 'placement': {}},
                       'timeout_seconds': job['test']['timeout_seconds'], 'started_at': utc_now(),
-                      'provenance': {'workflow_code': code_fingerprint(), 'provider': 'perchance', 'remote_model': None}}
+                      'provenance': {'workflow_code': code_fingerprint(), 'raw_adapter_hash': adapter_fingerprint(), 'provider': 'perchance', 'remote_model': None}}
             path = app.store.path(MODEL_ID, job['case_id'])
             if path.exists():
                 prior = app.store.read(path)

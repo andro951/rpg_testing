@@ -39,8 +39,15 @@ def identity_info():
     data = {'version': VERSION,
             'source_hashes': {name: hashlib.sha256((root / name).read_bytes().replace(b'\r\n', b'\n')).hexdigest()
                               for name in SOURCES}}
+    # Exact reviewed runner-only additions preserve the grading contract. Keep
+    # raw sources/fingerprint visible; unknown future changes remain stale.
+    from workbench.domain import read_json
+    raw = digest(data)
+    review = read_json(root / 'workbench/operational-source-compatibility.json')
+    fingerprint = review.get('equivalent_array_identity_evaluators', {}).get(raw, raw)
     # Runtime version is saved provenance, not a cross-host source-compatibility gate.
-    return {**data, 'python_version': platform.python_version(), 'fingerprint': digest(data)}
+    return {**data, 'python_version': platform.python_version(),
+            'implementation_fingerprint': raw, 'fingerprint': fingerprint}
 
 
 def configuration():

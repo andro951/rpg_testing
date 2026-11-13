@@ -218,6 +218,8 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progr
     if 'evaluator' in variant.get('result', {}):
         from evaluation.hosts import selected
         selected(variant['result']).validate_selection(test, variant)
+    from .self_review import enabled, generate as reviewed_generate
+    retry_enabled=enabled(variant)
     values={};calls=[];events=[];cache=variant.get('cache','default');cache_valid=True
     def units(items):
         total=0
@@ -250,12 +252,18 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progr
                 prompt=messages(test,step,values,variant)
                 settings={'temperature':0.0,'top_p':1.0,'top_k':0,'min_p':0.0,'seed':42,**step.get('sampling',{})}
                 base_seed=settings['seed'];settings['seed']=repetition_seed(base_seed,repetition)
-                try:call=backend.generate(prompt,settings,schema,cache,cancel)
-                except Exception as exc:
-                    partial=getattr(exc,'partial_response',None)
-                    if partial is not None:calls.append({'step':step['id'],'messages':prompt,'sampling':settings,**partial})
-                    raise
-                calls.append({'step':step['id'],'iteration':iteration,'messages':prompt,'sampling':settings,'base_seed':base_seed,'schema':schema,**call})
+                if retry_enabled:
+                    call=reviewed_generate(prompt,schema,
+                        lambda request,output:backend.generate(request,settings,output,cache,cancel),
+                        calls,events,{'step':step['id'],'iteration':iteration,'sampling':settings,'base_seed':base_seed},
+                        cancel,on_stage)
+                else:
+                    try:call=backend.generate(prompt,settings,schema,cache,cancel)
+                    except Exception as exc:
+                        partial=getattr(exc,'partial_response',None)
+                        if partial is not None:calls.append({'step':step['id'],'messages':prompt,'sampling':settings,**partial})
+                        raise
+                    calls.append({'step':step['id'],'iteration':iteration,'messages':prompt,'sampling':settings,'base_seed':base_seed,'schema':schema,**call})
                 if call.get('finish_reason')!='stop':raise ValueError('Generation ended without EOS: '+str(call.get('finish_reason')))
                 value=call['text'] if schema is None else parse(call['text'])
                 if schema is not None:Draft202012Validator(schema).validate(value)

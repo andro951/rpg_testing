@@ -170,7 +170,11 @@ def automatic_context(tests: list[dict], metadata: dict) -> dict:
             fixed=len(render_source_text(test['source'],mode).encode('utf-8'))
             fixed+=len(test.get('shared_prefix','').encode('utf-8'))+len(test.get('instructions','').encode('utf-8'))
             fixed+=len(presentation_instruction(mode).encode('utf-8'))+256
-            longest=max(longest,fixed+prompt_bytes(variant['steps']))
+            estimate=fixed+prompt_bytes(variant['steps'])
+            if variant.get('retry_enabled',False):
+                # Retained answers/reviews share the finite native context.
+                estimate=estimate*2+8*8192
+            longest=max(longest,estimate)
     desired=max(16384,2**math_ceil_log2(max(1,longest*2+8192)))
     # Bytes are only a planning estimate, not tokenizer output. A conservative estimate
     # exceeding native context must not falsely prove that the actual tokens cannot fit.
