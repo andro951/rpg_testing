@@ -22,10 +22,14 @@ def scope(root):
     tests = load_tests(root / 'test_specs')
     from prompt_builder.coverage import runtime_report
     runtime_report(root, tests=tests)
-    return {'workflow': code_fingerprint(), 'definitions': [
+    value = {'workflow': code_fingerprint(), 'definitions': [
         {'test_id': t['id'], 'variant_id': v['id'], 'definition': digest(experiment_spec(t, v)),
          'messages': digest(messages(t, v['steps'][0], {}, v)), 'repetitions': t.get('repetitions', 1)}
         for t in tests for v in t['variants'] if v.get('enabled', True)]}
+    from workbench.study_protocol import load, snapshot
+    protocol = load(root)
+    if protocol is not None:value['study_protocol'] = snapshot(protocol)
+    return value
 
 
 def directory(root, key):

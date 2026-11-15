@@ -20,21 +20,27 @@ def describe(state,path,identities):
    child=node[part];components.append(('the collection ' if isinstance(child,list) else 'the field ')+json.dumps(part,ensure_ascii=False));template.append(part)
   node=child
  return ' within '.join(reversed(components))
-def cases():
- for index,s in enumerate(json.loads((ROOT/'scripts/paired_suite_240_states.json').read_text(encoding='utf-8')),1):
+def cases(recipes=None):
+ """Yield independent arms; Copy may override its collection, selector and destination."""
+ if recipes is None:
+  recipes=json.loads((ROOT/'scripts/paired_suite_240_states.json').read_text(encoding='utf-8'))
+ for index,s in enumerate(recipes,1):
   state=s['state']; identities=s['array_identities']; source=s['source']+'.'+encode_part(scalar_text(s['selected']))
+  copy_source=s.get('copy_source',s['source']);copy_selected=s.get('copy_selected',s['selected']);copy_destination=s.get('copy_destination',s['destination'])
+  copy_path=copy_source+'.'+encode_part(scalar_text(copy_selected))
   for action in ACTIONS:
    patch={'update':[{'op':'replace','path':s['update_path'],'value':s['update_value']}],
     'append':[{'op':'add','path':s['append_path'],'value':s['new_element']}],
     'remove':[{'op':'remove','path':s['remove_path'] if action=='remove' and s['remove_path']!=s['source']+'.'+str(s['selected']) else source}],
     'move':[{'op':'move','from':source,'path':s['destination']}],
-    'copy':[{'op':'copy','from':source,'path':s['destination']}],'no_op':[]}[action]
+    'copy':[{'op':'copy','from':copy_path,'path':copy_destination}],'no_op':[]}[action]
    src_desc=describe(state,s['source'],identities);dst_desc=describe(state,s['destination'],identities)
+   copy_src_desc=describe(state,copy_source,identities);copy_dst_desc=describe(state,copy_destination,identities)
    texts={'update':f"Set {describe(state,s['update_path'],identities)} to {json.dumps(s['update_value'],ensure_ascii=False)}.",
     'append':f"Append this complete element to {describe(state,s['append_path'],identities)}: {json.dumps(s['new_element'],ensure_ascii=False)}.",
     'remove':f"Remove {describe(state,patch[0]['path'] if action=='remove' else source,identities)}.",
     'move':f"Move the complete element with {'value' if not isinstance(resolve(state,s['source'],identities)[0][0],dict) else 'ID'} {json.dumps(s['selected'],ensure_ascii=False)} from {src_desc} to {dst_desc}. Remove it from the source and preserve every field/value in the destination.",
-    'copy':f"Copy the complete element with {'value' if not isinstance(resolve(state,s['source'],identities)[0][0],dict) else 'ID'} {json.dumps(s['selected'],ensure_ascii=False)} from {src_desc} to {dst_desc}. Leave the source unchanged and preserve every field/value in the destination.",
+    'copy':f"Copy the complete element with {'value' if not isinstance(resolve(state,copy_source,identities)[0][0],dict) else 'ID'} {json.dumps(copy_selected,ensure_ascii=False)} from {copy_src_desc} to {copy_dst_desc}. Leave the source unchanged and preserve every field/value in the destination.",
     'no_op':'The documentation uses blue headings and a serif font.'}
    archive=ROOT/'archives/suite-before-240-2026-11-15/prompt_builder/templates/test_cases'
    for original in s['originals']:

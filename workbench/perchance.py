@@ -137,6 +137,12 @@ def plan(tests, settings, target, store, selection):
                     'requested_definition': experiment_spec(test, variant),
                     'requested_timeout_seconds': test['timeout_seconds'],
                     'observation_id': cid, 'collapsed_dimensions': list(UNAVAILABLE)})
+    if target.get('context_request') is not None:
+        # Requested study metadata is not an applied provider setting and must
+        # not alter effective workflow/CIDs or cause another service trial.
+        for group in groups.values():
+            for alias in group['aliases']:
+                alias['context_request'] = copy.deepcopy(target['context_request'])
     jobs, complete, requested = [], 0, 0
     for group in groups.values():
         matching = [a for a in group['aliases'] if
@@ -188,6 +194,9 @@ def preflight(app, preparation=None, selection=None):
         issues.append({'id': 'perchance_tier', 'message': 'Perchance is assigned strictly to an 8 GB worker; larger tiers are excluded.', 'level': 'blocked'})
     target = {'backend': 'perchance', 'vram_gb': tier or gpu['total_gib'], 'gpu_name': gpu['name'],
               'os': platform.platform(), 'execution_class': 'remote_service', 'execution_policy': VERSION}
+    from .study_protocol import load as load_protocol, remote_context
+    requested_context = remote_context(load_protocol(app.root))
+    if requested_context is not None:target['context_request'] = requested_context
     result = plan(tests, app.settings, target, app.store, selection)
     if result['pending']:
         if importlib.util.find_spec('playwright') is None:
@@ -436,6 +445,8 @@ def run(app, report, pending, backend_factory=BrowserBackend, append=False):
                       'load': {'environment': copy.deepcopy(backend.environment), 'context': {}, 'placement': {}},
                       'timeout_seconds': job['test']['timeout_seconds'], 'started_at': utc_now(),
                       'provenance': {'workflow_code': code_fingerprint(), 'raw_adapter_hash': adapter_fingerprint(), 'provider': 'perchance', 'remote_model': None}}
+            if pending['target'].get('context_request') is not None:
+                record['load']['context'] = copy.deepcopy(pending['target']['context_request'])
             path = app.store.path(MODEL_ID, job['case_id'])
             if path.exists():
                 prior = app.store.read(path)
