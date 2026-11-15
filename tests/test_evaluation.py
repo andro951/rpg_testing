@@ -22,6 +22,40 @@ def contracts():
         yield fixture, test, variant
 
 
+
+def mutation_signature(fixture, test, variant):
+    """Group only current v3 scoring-equivalent arms, not model executions.
+
+    assess()/evaluate() consume no prompt or retry controls. Preserve every
+    other field (including unknown future fields), the generation-step type and
+    output contract, and fixture values. Legacy evaluators remain ungrouped.
+    """
+    if variant.get('result', {}).get('evaluator', {}).get('version') != 'array-identities-intent-v3':
+        return digest({'legacy_fixture': fixture, 'test': test, 'variant': variant})
+    scoring_test = {k: v for k, v in test.items() if k not in {'variants', 'instructions'}}
+    scoring_variant = {k: v for k, v in variant.items() if k not in {
+        'id', 'prompt_style', 'prompt_bindings', 'state_presentation', 'cache', 'retry_enabled', 'steps'}}
+    def scoring_steps(steps):
+        return [{k: scoring_steps(v) if k == 'steps' else v for k, v in step.items()
+                 if k != 'prompt'} for step in steps]
+    scoring_variant['steps'] = scoring_steps(variant.get('steps', []))
+    return digest({'test': scoring_test, 'variant': scoring_variant, 'values': fixture['outputs']})
+
+
+def mutation_contract_groups(rows=None):
+    groups = {}
+    for row in contracts() if rows is None else rows:
+        groups.setdefault(mutation_signature(*row), []).append(row)
+    return groups
+
+
+def mutation_contracts():
+    # Every group is exercised; no state, action, format or scoring contract is
+    # sampled away. Only its input-presentation/retry duplicates share probes.
+    for rows in mutation_contract_groups().values():
+        yield rows[0]
+
+
 def failed_codes(assessment):
     return {c['code'] for c in assessment['checks'] if c['status'] == 'failed'}
 
@@ -125,6 +159,46 @@ def unrequested_schema_free_change(state, array_identities=None):
 
 
 class CoverageTests(unittest.TestCase):
+    def test_mutation_groups_cover_every_variant_with_identical_scoring_contract(self):
+        from collections import Counter
+        rows = list(contracts())
+        groups = mutation_contract_groups(rows)
+        label = lambda row: (row[0]['source_path'], row[2]['id'])
+        self.assertEqual(Counter(label(row) for row in rows),
+                         Counter(label(row) for group in groups.values() for row in group))
+        current = 0
+        for signature, group in groups.items():
+            for row in group:
+                self.assertEqual(mutation_signature(*row), signature)
+            fixture, test, variant = group[0]
+            if variant.get('result', {}).get('evaluator', {}).get('version') == 'array-identities-intent-v3':
+                current += len(group)
+                self.assertEqual(len(group), 6, 'Each current scoring contract has three inputs x two retry modes')
+                self.assertEqual({row[2]['id'] for row in group}, {
+                    'normal_json', 'id_keyed_arrays', 'full_paths',
+                    'normal_json__self_check', 'id_keyed_arrays__self_check', 'full_paths__self_check'})
+            else:
+                self.assertEqual(len(group), 1, 'Do not collapse historical evaluator variants')
+        self.assertEqual(current, 8640)
+
+    def test_mutation_signature_preserves_each_scoring_sensitive_dimension(self):
+        row = next(row for row in contracts() if schema_free(row[2])
+                   and row[2]['result']['evaluator']['version'] == 'array-identities-intent-v3')
+        original = mutation_signature(*row)
+        for target, field, value in [
+                (1, 'source', {'initial_state': {'different': True}, 'array_identities': []}),
+                (1, 'expected_state', {'different': True}),
+                (1, 'state_schema', {'type': 'object'}),
+                (2, 'expected_patch', [{'op': 'remove', 'path': 'different'}]),
+                (2, 'result', {'representation': 'answers'}),
+                (2, 'checks', [{'step': 'patch', 'operator': 'contains', 'value': 'different'}]),
+                (2, 'steps', [{'id': 'patch', 'type': 'generate', 'output': {'type': 'json'}}]),
+                (0, 'outputs', {'patch': 'different'})]:
+            changed = copy.deepcopy(row)
+            changed[target][field] = value
+            with self.subTest(field=field):
+                self.assertNotEqual(mutation_signature(*changed), original)
+
     def test_explicit_identity_extra_change_probes_are_valid(self):
         from evaluation.array_identities_intent import apply_patch
         for state, declarations in (
@@ -172,7 +246,7 @@ class CoverageTests(unittest.TestCase):
                 self.assertFalse(failed_codes(result))
 
     def test_each_variant_wrong_response_and_output_format(self):
-        for fixture, test, variant in contracts():
+        for fixture, test, variant in mutation_contracts():
             with self.subTest(test=test['id'], variant=variant['id']):
                 values = copy.deepcopy(fixture['outputs'])
                 if variant['result']['representation'] == 'answers':
@@ -210,7 +284,7 @@ class CoverageTests(unittest.TestCase):
                         self.assertIn('json.document', failed_codes(assess(test, variant, values)))
 
     def test_each_patch_variant_missing_fields_bad_pointer_and_extra_changes(self):
-        for fixture, test, variant in contracts():
+        for fixture, test, variant in mutation_contracts():
             if variant['result']['representation'] == 'answers': continue
             with self.subTest(test=test['id'], variant=variant['id']):
                 values = copy.deepcopy(fixture['outputs']); key = variant['result']['step']
@@ -262,7 +336,7 @@ class CoverageTests(unittest.TestCase):
                 self.assertIn('patch.application_failed' if variant['result']['representation']=='value_patch' else 'state.preservation', failed_codes(result))
 
     def test_each_variant_wrong_task_value_or_target(self):
-        for fixture, test, variant in contracts():
+        for fixture, test, variant in mutation_contracts():
             if variant['result']['representation'] == 'answers': continue
             with self.subTest(test=test['id'], variant=variant['id']):
                 values = copy.deepcopy(fixture['outputs']); key = variant['result']['step']

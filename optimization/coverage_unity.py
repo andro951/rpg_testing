@@ -85,6 +85,33 @@ print(json.dumps(out))
 '''
 
 
+
+def allocation_walltime(value='04:00:00'):
+    """Validate a run-scoped Slurm allocation; never a benchmark deadline.
+
+    Keep the historical four-hour default. An explicit override may request up
+    to five days; the caller must also respect the selected partition/QoS limit.
+    """
+    import re
+    if not isinstance(value, str):
+        raise ValueError('Unity walltime must be HH:MM:SS or D-HH:MM:SS')
+    match = re.fullmatch(r'(?:(\d+)-)?(\d{2,3}):([0-5]\d):([0-5]\d)', value)
+    if not match:
+        raise ValueError('Unity walltime must be HH:MM:SS or D-HH:MM:SS')
+    day_text, hour_text, minute_text, second_text = match.groups()
+    days, hours, minutes, seconds = int(day_text or 0), int(hour_text), int(minute_text), int(second_text)
+    if day_text is not None and hours >= 24:
+        raise ValueError('Unity walltime day form needs hours below 24')
+    total = ((days * 24 + hours) * 60 + minutes) * 60 + seconds
+    if not 0 < total <= 5 * 24 * 60 * 60:
+        raise ValueError('Unity walltime must be positive and no more than five days')
+    days, remainder = divmod(total, 24 * 60 * 60)
+    hours, remainder = divmod(remainder, 60 * 60)
+    minutes, seconds = divmod(remainder, 60)
+    clock = f'{hours:02d}:{minutes:02d}:{seconds:02d}'
+    return f'{days}-{clock}' if days else clock
+
+
 def bundle(app, state, worker):
     import base64
     root = app.root
@@ -94,6 +121,7 @@ def bundle(app, state, worker):
     safe_id(worker['model_id'])
     if worker['model']['id'] != worker['model_id']:
         raise ValueError('Unity model identity mismatch')
+    walltime = allocation_walltime(worker.get('walltime', '04:00:00'))
     port = worker['inference_port']
     if type(port) is not int or not 1024 <= port <= 65535:
         raise ValueError('Invalid per-model inference port')
@@ -105,6 +133,8 @@ def bundle(app, state, worker):
                     sync_source=False, publish_results=False, remote_enabled=False)
     manifest = {'id': state['id'], 'suite_digest': state['suite_digest'], 'scope': state['scope'],
                 'model_id': worker['model_id'], 'seed_results_roots': worker.get('seed_results_roots', [])}
+    if 'walltime' in worker:
+        manifest['allocation'] = {'walltime': walltime}
     manifest['source_files']={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
         for folder in ('workbench','optimization','prompt_builder','evaluation','intent_parser') for p in (root/folder).rglob('*')
         if p.is_file() and not p.is_symlink() and '__pycache__' not in p.parts}
@@ -115,7 +145,7 @@ def bundle(app, state, worker):
         if not __import__('re').fullmatch(r'[A-Za-z0-9_&.-]+',worker[name]):
             raise ValueError('Invalid Slurm '+name)
     script = '\n'.join(['#!/bin/bash', '#SBATCH --job-name=rpg-coverage', '#SBATCH --partition=gpu',
-        '#SBATCH --gpus=1', '#SBATCH --cpus-per-task=4', '#SBATCH --mem=32G', '#SBATCH --time=04:00:00',
+        '#SBATCH --gpus=1', '#SBATCH --cpus-per-task=4', '#SBATCH --mem=32G', '#SBATCH --time='+walltime,
         '#SBATCH --constraint='+worker['constraint'], '#SBATCH --qos='+worker['qos'],
         'set -euo pipefail', ': "${SLURM_JOB_ID:?Submit through Slurm}"',
         shlex.quote(worker['python'])+' -B -m workbench.coverage_worker', ''])

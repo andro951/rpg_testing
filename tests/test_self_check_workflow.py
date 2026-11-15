@@ -55,30 +55,41 @@ class SelfCheckTests(unittest.TestCase):
         result, backend = self.run_answers([self.correct,'no','[]','yes'])
         self.assertEqual(len(backend.requests),4)
         self.assertFalse(result['score']['exact_match'])
-        self.assertEqual(result['outputs']['self_check_initial_answer'],self.correct)
+        self.assertEqual(result['calls'][0]['text'],self.correct)
+        self.assertEqual(result['calls'][0]['call_kind'],'initial_answer')
     def test_correction_uses_original_and_latest_raw_answer(self):
         result, backend = self.run_answers(['[]','no',self.correct,'yes'])
         self.assertTrue(result['score']['exact_match'])
         self.assertEqual(len(result['calls']),4)
         original = backend.requests[0]
-        for request in backend.requests[1:]: self.assertEqual(request[:-2],original)
+        for request in backend.requests[1:]: self.assertEqual(request[:len(original)],original)
         self.assertEqual(backend.requests[-1][-2]['content'],self.correct)
-        self.assertEqual(backend.requests[2][-2]['content'],'[]')
+        self.assertEqual(backend.requests[2][-2]['content'],'no')
+        self.assertEqual(backend.requests[2][len(original)]['content'],'[]')
+        self.assertEqual(backend.requests[-1][-3]['content'],
+                         'You judged your previous answer wrong. Provide a new answer to the original request, following its requested output format.')
     def test_three_revisions_eight_calls_maximum(self):
         result, backend = self.run_answers(['[]','no','[]','no','[]','no',self.correct,'no'])
         self.assertEqual(len(backend.requests),8)
         self.assertTrue(result['score']['exact_match'])
-        self.assertEqual(result['step_events'][-1]['status'],'revision_limit_reached')
-    def test_invalid_check_preserved_and_fails_closed(self):
+        reviews=[e for e in result['step_events'] if e['status']=='self_review']
+        self.assertEqual(reviews[-1]['outcome'],'retry_budget_exhausted')
+        self.assertEqual(reviews[-1]['retries_used'],3)
+    def test_ambiguous_check_preserved_and_stops_unendorsed(self):
         result, backend = self.run_answers([self.correct,'Probably yes'])
-        self.assertFalse(result['score']['valid'])
-        self.assertIn('Invalid self-check',result['score']['error'])
-        self.assertEqual(result['outputs']['self_check_decision_1'],'Probably yes')
+        self.assertTrue(result['score']['exact_match'])
+        self.assertEqual(result['calls'][-1]['review_decision'],'ambiguous')
+        self.assertEqual(result['calls'][-1]['text'],'Probably yes')
+        reviews=[e for e in result['step_events'] if e['status']=='self_review']
+        self.assertEqual(reviews[-1]['outcome'],'ambiguous_review')
         self.assertEqual(len(result['calls']),2)
-    def test_protocol_validation(self):
+    def test_existing_retry_protocol_is_only_runtime_switch(self):
+        self.assertEqual(len(self.test['variants']),6)
+        self.assertEqual(sum(v.get('retry_enabled',False) for v in self.test['variants']),3)
+        self.assertFalse(any('self_check' in v for v in self.test['variants']))
         bad = copy.deepcopy(self.test)
-        bad['variants'][1]['self_check']['max_revisions'] = 4
-        with self.assertRaisesRegex(ValueError,'Unsupported self-check'): validate_test(bad)
+        bad['variants'][1]['retry_enabled'] = 'on'
+        with self.assertRaisesRegex(ValueError,'retry_enabled must be boolean'): validate_test(bad)
     def test_perchance_uses_same_protocol_without_faking_finish_reason(self):
         import threading
         from workbench.perchance import execute_job, effective
@@ -103,12 +114,28 @@ class SelfCheckTests(unittest.TestCase):
                 return result
         with self.assertRaises(Cancelled) as caught:
             execute(self.test,self.on,CancellingBackend([self.correct]),cancel=event)
-        self.assertEqual(caught.exception.partial['outputs']['patch'],self.correct)
+        self.assertEqual(caught.exception.partial['calls'][0]['text'],self.correct)
+        self.assertEqual(caught.exception.partial['calls'][0]['call_kind'],'initial_answer')
         self.assertEqual(len(caught.exception.partial['calls']),1)
     def test_final_answer_retains_independent_format_metric(self):
         result, _ = self.run_answers([self.correct,'yes'])
         self.assertIn('format_compliance',result['score'])
         self.assertTrue(result['score']['exact_match'])
+    @unittest.skipUnless(shutil.which('node'), 'Node unavailable')
+    def test_ui_does_not_duplicate_explicit_six_variant_matrix(self):
+        import subprocess
+        source = Path(__file__).resolve().parents[1]/'workbench/web/app.js'
+        script = r"""
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const source=fs.readFileSync(process.argv[1],'utf8');
+const snippet=source.slice(source.indexOf("on('add-retry-pairs',"),source.indexOf("on('save-test',"));
+let callback;const input={value:process.argv[2]};
+vm.runInNewContext(snippet,{on:(id,fn)=>callback=fn,$:id=>input,structuredClone,toast:()=>{}});
+callback();callback();const result=JSON.parse(input.value);
+assert.equal(result.variants.length,6);
+assert.equal(result.variants.filter(v=>v.retry_enabled).length,3);
+"""
+        subprocess.run(['node','-e',script,str(source),json.dumps(self.test)],check=True,capture_output=True,text=True)
     def test_complete_manifest_carries_both_conditions(self):
         dest = Path(self.temp.name)/'build'
         manifest = build(dest, root=self.root)

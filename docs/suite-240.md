@@ -30,7 +30,7 @@ The original 21 cases and historical evidence remain frozen in archives/suite-be
 | 22 delimiter_payloads | Format-like tokens remain data | New |
 | 23 multiline_preservation | Multiline data preserved inside complete elements; scalar update remains all-format representable | New |
 | 24 deep_scalar | Three-level field nesting | New |
-| 25 wide_records | 18-field records challenge complete copy without losing siblings | New |
+| 25 wide_records | 18 payload fields plus an ID challenge complete copy without losing siblings | New |
 | 26 large_collection | 48-element source, target near middle, repeated groups | New |
 | 27 deep_collections | Six-level collection path | New |
 | 28 cross_branch_transfer | Transfers across separate root branches | New |
@@ -105,7 +105,23 @@ All 21 retained action requests preserve the original requested_change.txt text 
 ## Run matrix and execution status
 
 - 240 cases × 3 input presentations × 6 structured output formats × self-check off/on = **8,640 workflow observations per model** at one repetition. There are 4,320 initial task/presentation combinations and 1,440 case/output definitions.
-- Self-check off generates one answer. Self-check on generates an answer, asks whether it satisfies the original task and required format, and permits at most three full-answer revisions when the model says no. A final fourth check records model acceptance or exhaustion. Invalid yes/no checks are explicit workflow errors. All raw answers/checks/revisions are saved; no evaluator or reference-answer feedback enters the model's decisions.
+- Self-check off generates one answer. Self-check on uses the pre-existing `retry_enabled` workflow, retains the full original conversation plus answers/reviews, asks `Does this answer look correct? Yes or no.`, and permits at most three full-answer revisions when the model says no. A final fourth check records model acceptance or exhaustion. Ambiguous checks stop with the current answer unendorsed and still grade that answer normally, preserving the existing self-review protocol. All raw answers/checks/revisions are saved; no evaluator or reference-answer feedback enters the model's decisions.
 - At most 38,880 generation calls per model are possible (4,320 off calls + 4,320 on workflows × 8 calls). These are not additional independent observations. Provider capability controls and configured repetitions still apply.
-- Building, reference checks and mocked workflow tests are **not model inference**. At implementation time this cloud checkout has no configured models, GPU/model weights, or Unity worker configuration. No real model run has started here. The historical five-model catalog is not evidence of current installed availability. A configured authorized worker and its current model catalog are required to complete the requested all-model runs.
+- Building, reference checks and mocked workflow tests are **not model inference**. At implementation time this cloud checkout has no configured models, GPU/model weights, or Unity worker configuration. No real model run has started in the cloud. Isaac explicitly authorized execution on his desktop after publishing. Read-only inspection verified five installed local model files, an actual 8 GB GTX 1080 (Perchance eligible), saved runtime/browser dependencies and four configured Unity model entries. Remote Unity availability and actual run progress must still be verified.
 - Use the supported `Controller.run(selection=None)` route after successful preflight, with the intended committed source stable, so result-sync journaling and resume remain active. Do not substitute a demo/mock run or bypass provider restrictions. User-computer access requires specific permission.
+
+### Preserved desktop work
+
+The desktop had an unpublished prior commit, `935f0a6f`, implementing bounded self-review. It was transferred by a verified Git bundle and merged, preserving its provenance and behavior rather than replacing it with a second implementation. The new on/off matrix uses that existing `retry_enabled` protocol. See [self-review-retries.md](self-review-retries.md).
+
+## Deterministic validation (not model results)
+
+- Archive SHA-256 verification: all 2,627 preserved files match their recorded original bytes.
+- Generated and installed 1,440 definitions/8,640 workflow conditions with complete coverage, no unsupported combinations or input exclusions.
+- Paired-state checks verify 40 canonical states, six arms each, all 21 preserved original task texts and representative expected patches, and all 1,440 case/output compatibility checks.
+- Preserved original self-review disabled-parity tests still cover 372 original prompts using frozen inputs.
+- 44 focused integrated tests passed after adopting the existing desktop self-review implementation, including walltime, uniqueness, pairing and review behavior. Full regression: `python -m unittest discover -s tests -v` ran 1,147 tests in 730.779 seconds, passing with one skip. These checks are synthetic and not benchmark observations.
+
+## Requested execution placements
+
+Desktop inspection verified five installed local configurations and eligible Perchance on the actual 8 GB tier. Read-only SSH checks verified four configured Unity model files/runtimes and an empty user queue. The requested ten model/placement entries therefore represent 86,400 workflow observations before exact-compatible completion reuse. Jobs retain one model per GPU/job, distinct inference ports and durable evidence. The approved run may request Unity walltime `5-00:00:00` within the observed partition limit; the software default remains four hours. Verification of readiness is not proof that any inference has started.

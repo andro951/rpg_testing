@@ -33,6 +33,17 @@ Configured Unity models live in the machine-local file
 Each entry needs `model_id`, the full pinned `model` catalog object, `model_path`,
 `runtime_path`, `python`, `ssh` (an argv array including destination),
 `remote_base`, `constraint`, `qos`, and a distinct `inference_port`.
+An optional worker `walltime` string controls only the Slurm allocation, using
+`HH:MM:SS` or `D-HH:MM:SS`. Omission retains `04:00:00`. Explicit requests must
+be positive and at most five days; the caller must verify and obey any lower
+partition/QoS limit before submission. For an authorized large run, set
+`"walltime": "5-00:00:00"` only on that run's frozen worker configuration rather
+than changing the machine-wide default. The override is recorded in the remote
+manifest's `allocation.walltime`, so conflicting resume configuration is rejected.
+It does not alter model settings, benchmark deadlines, case identity, completion
+criteria, or existing jobs. A longer allocation does not authorize restarting a
+terminal job or submitting another one.
+
 `seed_results_roots` may name retained prior remote result roots. These are
 candidate evidence, not automatic completions: the ordinary planner requires exact
 workflow, artifact, target, experiment and repetition compatibility. No credentials

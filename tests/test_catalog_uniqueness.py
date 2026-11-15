@@ -30,7 +30,7 @@ def trial_signature(test, variant):
         # The same initial request with model-controlled self-review is a
         # distinct experimental condition. Include actual workflow settings,
         # not an arbitrary identity suffix that could hide true duplicates.
-        'self_check': variant.get('self_check'),
+        'retry_enabled': variant.get('retry_enabled', False),
     })
 
 
@@ -48,18 +48,21 @@ class CatalogUniquenessTests(unittest.TestCase):
 
     def test_renaming_does_not_hide_duplicate_workflow_but_real_self_check_differs(self):
         test = read_json(next((ROOT / 'test_specs').glob('*.json')))
-        baseline = next(v for v in test['variants'] if not v.get('self_check'))
+        baseline = next(v for v in test['variants'] if not v.get('retry_enabled', False))
         original = trial_signature(test, baseline)
         renamed_test, renamed_variant = copy.deepcopy((test, baseline))
         renamed_test['id'] = 'cosmetic-name-only'
         renamed_variant['id'] = 'cosmetic-variant-only'
         self.assertEqual(original, trial_signature(renamed_test, renamed_variant))
-        checked = next(v for v in test['variants'] if v.get('self_check')
+        checked = next(v for v in test['variants'] if v.get('retry_enabled', False)
                        and v['id'] == baseline['id'] + '__self_check')
         self.assertNotEqual(original, trial_signature(test, checked))
-        changed_limit = copy.deepcopy(checked)
-        changed_limit['self_check']['max_revisions'] += 1
-        self.assertNotEqual(trial_signature(test, checked), trial_signature(test, changed_limit))
+        disabled = copy.deepcopy(checked)
+        disabled['retry_enabled'] = False
+        self.assertEqual(original, trial_signature(test, disabled))
+        omitted = copy.deepcopy(disabled)
+        omitted.pop('retry_enabled')
+        self.assertEqual(original, trial_signature(test, omitted))
 
 
 if __name__ == '__main__':

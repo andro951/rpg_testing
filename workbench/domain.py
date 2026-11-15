@@ -89,7 +89,7 @@ def implementation_fingerprint():
     """Exact source provenance, including operational loading code."""
     base=Path(__file__).parent
     return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
-                   for name in ('domain.py','workflows.py','scoring.py','value_paths.py','dot_paths.py','backends.py','inventory.py','presentation.py','seedcheck.py','native.py','scheduler.py','execution_policy.py','telemetry.py')})
+                   for name in ('domain.py','workflows.py','scoring.py','value_paths.py','dot_paths.py','backends.py','inventory.py','presentation.py','seedcheck.py','native.py','scheduler.py','execution_policy.py','telemetry.py','self_review.py')})
 
 
 def code_fingerprint():
@@ -109,7 +109,8 @@ def experiment_spec(test: dict, variant: dict) -> dict:
     """Experimental identity; watchdog duration and presentation metadata are run settings."""
     presentation = {'variants', 'repetitions', 'enabled', 'name', 'description', 'timeout_seconds'}
     return {'test': {k: v for k, v in test.items() if k not in presentation},
-            'variant': {k: v for k, v in variant.items() if k not in {'enabled', 'name', 'description'}}}
+            'variant': {k: v for k, v in variant.items() if k not in {'enabled', 'name', 'description'}
+                        and not (k == 'retry_enabled' and v is False)}}
 
 
 def case_id(model: dict, test: dict, variant: dict, repetition: int, target: dict) -> str:
@@ -263,14 +264,9 @@ def validate_test(test: dict) -> None:
                 if s['assign'] not in known:
                     raise ValueError('assign can only replace an existing step output')
     for variant in test['variants']:
+        from .self_review import enabled as retry_enabled
+        retry_enabled(variant)
         safe_id(variant['id'])
-        if 'self_check' in variant:
-            if variant['self_check'] != {'mode':'on', 'max_revisions':3,
-                                        'protocol':'original-request-latest-answer-yes-no-v1'}:
-                raise ValueError('Unsupported self-check protocol')
-            if len(variant.get('steps', [])) != 1 or variant['steps'][0].get('type') != 'generate':
-                raise ValueError('Self-check requires one initial generation step')
-
         if variant['id'] in variants:
             raise ValueError('Duplicate variant')
         variants.add(variant['id'])
