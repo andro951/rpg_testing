@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from prompt_builder.builder import compile_test, load_case, prompt
+from tests.helpers.frozen_templates import compile_test, load_case, prompt
 from prompt_builder.presentation import keyed, render
 
 

@@ -9,6 +9,7 @@ from evaluation import output_formats
 from intent_parser.parse import parse_intent_with_diagnostics
 from prompt_builder.builder import ROOT, compile_test, discover, load_case
 from prompt_builder.reference_output import encode
+from tests.helpers.frozen_templates import compile_test as compile_frozen_test
 from workbench.workflows import evaluate
 
 FORMATS = ('json_dot', 'json_slash', 'path_list', 'literal_line', 'end_marked_line', 'typed_lines')
@@ -110,7 +111,7 @@ class UnifiedIntentFormatTests(unittest.TestCase):
             self.apply('set: a.b\nvalue: 3', 'two_line_text', {'a.b': 1, 'a': {'b': 2}}, [])
 
     def test_final_state_not_expected_patch_is_verdict(self):
-        test = compile_test('update_field', 'typed_lines', input_formats=['normal_json'])
+        test = compile_frozen_test('update_field', 'typed_lines', input_formats=['normal_json'])
         variant = test['variants'][0]
         raw = encode(test['source']['initial_state'], variant['expected_patch'], 'typed_lines', test['source']['array_identities'])
         score = evaluate(test, variant, {'patch': raw})
@@ -136,7 +137,7 @@ class UnifiedIntentFormatTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Ambiguous'):
             self.apply('add path:"a.b" value:3', 'json_dot', {'a.b': 1, 'a': {'b': 2}}, [])
 
-    def test_all_current_case_format_input_references_372(self):
+    def test_all_current_case_format_workflow_references(self):
         count = 0
         for name in discover()['test_cases']:
             case = load_case(name)
@@ -149,7 +150,7 @@ class UnifiedIntentFormatTests(unittest.TestCase):
                         self.assertTrue(score['exact_match'], score)
                         self.assertTrue(score['expected_patch_match'], score)
                         count += 1
-        self.assertEqual(count, 372)
+        self.assertEqual(count, 240 * 6 * 3 * 2)
 
 
 if __name__ == '__main__':

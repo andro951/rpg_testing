@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from prompt_builder.builder import ROOT, compile_test
+from tests.helpers.frozen_templates import ROOT, compile_test
 from scripts.audit_template_migration import BASELINE, RESULT_ARCHIVE, RESULT_ARCHIVE_SOURCE, audit, blob_id
 from workbench.domain import write_json
 

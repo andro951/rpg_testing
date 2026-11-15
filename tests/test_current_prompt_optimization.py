@@ -10,7 +10,7 @@ from unittest.mock import patch
 from evaluation.schema_free_intent import OUTPUT_FORMATS
 from optimization.engine import create, generation_packet, packet_messages
 from optimization.storage import Store
-from prompt_builder.builder import compile_test
+from tests.helpers.frozen_templates import compile_test
 from tools.build_prompt_sharing import build as sharing
 from workbench.domain import digest, experiment_spec, write_json
 

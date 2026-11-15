@@ -165,9 +165,9 @@ Old saved responses and scores are untouched. Historical executable definitions
 with old source fingerprints must use their original matching repository
 revision; no compatibility alias silently accepts an old pin with new code.
 
-## Full five-operation coverage (2026-11-11)
+## Historical full five-operation coverage (2026-11-11)
 
-The 21 current cases contain four Update, four Append, four Remove, four Move,
+The 21 cases at that checkpoint contained four Update, four Append, four Remove, four Move,
 four Copy, and one no-change case. The eight transfer cases were restored from
 preserved task/data definitions into the current templates without restoring
 full schemas or model-facing schema descriptions. Each case has a separately
@@ -175,7 +175,7 @@ stored reference patch and expected final state.
 
 The standard build covers six active structured output formats and three input
 views (two for the no-array field update): 62 case/input pairs × six formats =
-372 distinct prompts. The current default is one repetition, so there are 372 observations per model. Extra repetitions can be explicitly configured; three would produce 1,116. Historical and already-frozen runs keep their recorded repetitions.
+372 distinct prompts. The checkpoint default was one repetition, so there were 372 observations per model. Extra repetitions can be explicitly configured; three would produce 1,116. Historical and already-frozen runs keep their recorded repetitions.
 Those are coverage counts, not measured model results. Historical two-line and
 experimental free-format prompt styles remain explicitly selectable through the same grammar. No model run is
 started by a build, an installation, or a synthetic reference check.
@@ -262,3 +262,7 @@ has its own version and source fingerprint and is also included in new live
 evaluator fingerprints. Detailed evaluation exposes a non-verdict
 `format.compliance` check. All previous saved responses and scores remain frozen;
 any requested replay writes a separate analysis, never a replacement result.
+
+## Forty-state factorial suite (2026-11-15)
+
+The current suite has 40 diverse starting states with six independent actions each, yielding 240 cases. All cases support three presentations, six structured outputs and self-check off/on: 8,640 workflow observations per model for one repetition. Self-check uses only the original request and current model answer, never reference answers or evaluator correctness. At most three revisions are allowed. Raw checks and revisions remain evidence, and final-answer intent correctness and strict format compliance remain independent metrics. See [suite-240.md](suite-240.md). Original 21-case definitions and results remain frozen in the pre-migration archive.

@@ -78,6 +78,17 @@ def resolve(root, *, cases=None, input_formats=None, output_formats=None):
     return selected, sorted(key for key, arg in arguments.items() if arg is not None)
 
 
+def self_check_modes(root):
+    selection = read_json(Path(root) / 'common/selection.json')
+    policy = read_json(Path(root) / 'common/coverage.json')
+    modes = selection.get('self_check_modes', ['off'])
+    required = policy.get('self_check_modes', ['off'])
+    if (not isinstance(modes, list) or not modes or len(set(modes)) != len(modes)
+            or any(mode not in ('off', 'on') for mode in modes) or set(modes) != set(required)):
+        raise ValueError('self_check_modes must match the required off/on coverage contract')
+    return modes
+
+
 def matrix(root, selection):
     """Return intended prompt identities and justified input non-applicability."""
     from .builder import configuration
@@ -102,7 +113,8 @@ def matrix(root, selection):
         variants[case] = sorted(modes)
         for mode in modes:
             for form in selection['output_formats']:
-                views.add((case, mode, form))
+                for check_mode in self_check_modes(root):
+                    views.add((case, mode, form, check_mode))
     return views, exclusions, variants
 
 
@@ -111,7 +123,7 @@ def _summary(selection, views, repetitions):
             'test_case_count': len(selection['test_cases']),
             'input_format_count': len(selection['input_formats']),
             'output_format_count': len(selection['output_formats']),
-            'test_definition_count': len({(c, o) for c, _, o in views}),
+            'test_definition_count': len({(c, o) for c, _, o, _ in views}),
             'distinct_prompt_count': len(views),
             'repetitions_per_prompt': repetitions,
             'observations_per_model': len(views) * repetitions}
@@ -125,7 +137,10 @@ def report(root, selected, prompts, unsupported, repetitions, explicit_selectors
     requested_views, requested_exclusions, _ = matrix(root, selected)
     actual_views = set()
     for row in prompts:
-        key = (row['test_case'], row['input_format'], row['output_format'])
+        key = (row['test_case'], row['input_format'], row['output_format'], row.get('self_check', 'off'))
+        expected_variant = key[1] + ('__self_check' if key[3] == 'on' else '')
+        if row.get('variant_id', key[1]) != expected_variant:
+            raise ValueError('Manifest self-check variant identity mismatch')
         if key in actual_views or key not in requested_views or row.get('repetitions') != repetitions:
             raise ValueError('Manifest prompt scope or repetitions mismatch')
         if row.get('test_id') != key[0] + '__' + key[2]:
@@ -152,7 +167,8 @@ def report(root, selected, prompts, unsupported, repetitions, explicit_selectors
             'explicit_selectors': sorted(explicit_selectors),
             'expected': {**_summary(expected, expected_views, repetitions),
                          'input_variants_by_case': variants,
-                         'candidate_prompt_count': len(expected['test_cases']) * len(expected['input_formats']) * len(expected['output_formats'])},
+                         'self_check_modes': self_check_modes(root),
+                         'candidate_prompt_count': len(expected['test_cases']) * len(expected['input_formats']) * len(expected['output_formats']) * len(self_check_modes(root))},
             'actual': _summary(actual, actual_views, repetitions),
             'omitted': {**{key: sorted(set(expected[key]) - set(selected[key])) for key in DIMENSIONS},
                         'distinct_prompt_count': len(omitted), 'observations_per_model': len(omitted) * repetitions},
@@ -175,6 +191,9 @@ def validate_manifest(manifest, root):
         raise ValueError('Build sources are stale or changed; rebuild before installing or running all tests')
     if manifest.get('evaluator') != evaluator.configuration():
         raise ValueError('Build evaluator is stale; rebuild before installing or running all tests')
+    rows = manifest.get('prompts', [])
+    if ('initial_prompt_count' in manifest and manifest['initial_prompt_count'] != len({(r['test_case'],r['input_format'],r['output_format']) for r in rows})) or ('workflow_condition_count' in manifest and manifest['workflow_condition_count'] != len(rows)):
+        raise ValueError('Manifest initial prompt/workflow condition counts mismatch')
     coverage = manifest.get('coverage', {})
     explicit = coverage.get('explicit_selectors')
     if not isinstance(explicit, list) or len(set(explicit)) != len(explicit) or set(explicit) - set(DIMENSIONS):
@@ -233,7 +252,7 @@ def runtime_report(repository, selection=None, tests=None):
     if tests is not None:
         available = {(t['id'], v['id']) for t in tests if t.get('enabled', True)
                      for v in t['variants'] if v.get('enabled', True)}
-        expected = {(r['test_id'], r['input_format']) for r in manifest['prompts']}
+        expected = {(r['test_id'], r.get('variant_id',r['input_format'])) for r in manifest['prompts']}
         if not targeted and not expected <= available:
             raise ValueError('Run all is missing disabled or rejected required variants; select an explicit subset instead')
         if not targeted and available - expected:
@@ -247,9 +266,9 @@ def runtime_report(repository, selection=None, tests=None):
     if targeted:
         ids = {selection['test_id']} if 'test_id' in selection else set(selection.get('test_ids', []))
         rows = [row for row in rows if row['test_id'] in ids
-                and ('variant_id' not in selection or row['input_format'] == selection['variant_id'])]
+                and ('variant_id' not in selection or row.get('variant_id',row['input_format']) == selection['variant_id'])]
     if tests is not None:
-        rows = [row for row in rows if (row['test_id'], row['input_format']) in available]
+        rows = [row for row in rows if (row['test_id'], row.get('variant_id',row['input_format'])) in available]
     expected_views = matrix(templates, contract(templates))[0]
     return {**coverage, 'run_scope': 'explicit_subset' if targeted else 'all_current_tests',
             'run_selection': selection,
@@ -259,5 +278,5 @@ def runtime_report(repository, selection=None, tests=None):
                            'distinct_prompt_count': len(rows),
                            'observations_per_model': sum(row['repetitions'] for row in rows)},
             'run_omitted_distinct_prompt_count': coverage['expected']['distinct_prompt_count']
-                - sum((row['test_case'], row['input_format'], row['output_format']) in expected_views
+                - sum((row['test_case'], row['input_format'], row['output_format'], row.get('self_check','off')) in expected_views
                       for row in rows)}

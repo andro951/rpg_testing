@@ -5,7 +5,7 @@ import unittest
 
 from optimization.feedback import EvidencePacket, diagnostic
 from optimization.templates import bindings, projection
-from prompt_builder.builder import compile_test
+from tests.helpers.frozen_templates import compile_test
 
 
 class IdentityOptimizerBoundaryTests(unittest.TestCase):

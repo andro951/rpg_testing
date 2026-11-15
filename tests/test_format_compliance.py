@@ -10,6 +10,7 @@ from evaluation.format_compliance import FORMATS, validate
 from evaluation.core import assess
 from prompt_builder.builder import compile_test, discover, load_case
 from prompt_builder.reference_output import encode
+from tests.helpers.frozen_templates import compile_test as compile_frozen_test
 from workbench.workflows import evaluate, execute
 from tests.test_current_live_intent import Backend
 
@@ -30,7 +31,7 @@ class FormatComplianceTests(unittest.TestCase):
                     raw = encode(case['starting_data'], case['expected_patch'], form, case['array_identities'])
                     self.check(form, raw)
                     count += 1
-        self.assertEqual(count, 126)
+        self.assertEqual(count, 240 * 6)
 
     def test_json_is_exact_not_repaired(self):
         good = '[{"op":"replace","path":"note","value":"new"}]'
@@ -129,7 +130,7 @@ class FormatComplianceTests(unittest.TestCase):
             self.check('path_list','set [unknown]: "unknown"')
 
     def test_same_response_has_independent_semantic_and_format_results(self):
-        test = compile_test('update_field','json_dot',input_formats=['normal_json'])
+        test = compile_frozen_test('update_field','json_dot',input_formats=['normal_json'])
         variant = test['variants'][0]
         raw = encode(test['source']['initial_state'],variant['expected_patch'],'json_dot',test['source']['array_identities'])
         original = copy.deepcopy(test)
@@ -154,7 +155,7 @@ class FormatComplianceTests(unittest.TestCase):
         from workbench.controller import Controller
         from workbench.demo_native import DemoNative
         from workbench.domain import write_json
-        test = compile_test('update_field', 'json_dot', input_formats=['normal_json'])
+        test = compile_frozen_test('update_field', 'json_dot', input_formats=['normal_json'])
         variant = test['variants'][0]
         raw = encode(test['source']['initial_state'], variant['expected_patch'], 'json_dot', test['source']['array_identities'])
         response = '```json\n' + raw + '\n```'
@@ -181,7 +182,7 @@ class FormatComplianceTests(unittest.TestCase):
                 self.assertEqual(snapshots, {p: p.read_bytes() for p in app.store.root.rglob('*.json')})
 
     def test_oracle_does_not_change_format_compliance(self):
-        test = compile_test('update_field','json_dot',input_formats=['normal_json'])
+        test = compile_frozen_test('update_field','json_dot',input_formats=['normal_json'])
         variant = test['variants'][0]
         before = evaluate(test,variant,{'patch':'[]'})['format_compliance']
         test['expected_state'] = copy.deepcopy(test['source']['initial_state'])

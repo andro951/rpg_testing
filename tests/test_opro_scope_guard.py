@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from optimization import coverage
 from optimization.storage import Store
-from prompt_builder.builder import ROOT, build, install, compile_test
+from tests.helpers.frozen_templates import ROOT, build, install, compile_test
 from workbench.controller import Controller
 from workbench.domain import digest, experiment_spec, read_json, write_json
 from workbench.judgements import load_tests as load_suite_tests

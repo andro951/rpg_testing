@@ -20,6 +20,63 @@ COMPONENTS = {
 }
 
 
+
+def expansion_scopes(variants):
+    """Build the same cumulative scopes using shared immutable membership indexes."""
+    indexes = {}
+    for key, entry in variants.items():
+        if not entry['objective_optimization_eligible']:
+            continue
+        for component in entry['components']:
+            groups = indexes.setdefault(component, {})
+            tags = [('family',), ('domain', entry['domain']),
+                    ('task', entry['task_family'], entry['output_contract'] if component == 'task_instructions' else None)]
+            if key.startswith('array_patch_'):
+                tags.append(('related_array_operations',))
+            for tag in tags:
+                groups.setdefault(tag, set()).add(key)
+    # Intern identical groups so repeated task/domain/family levels can be
+    # compared by identity rather than scanning the same large member set.
+    interned = {}
+    def freeze(members):
+        frozen = frozenset(members)
+        return interned.setdefault(frozen, frozen)
+    indexes = {component: {tag: freeze(members) for tag, members in groups.items()}
+               for component, groups in indexes.items()}
+    scopes, identifiers = {}, {}
+    empty = frozenset()
+    for key, entry in variants.items():
+        for component, binding in entry['components'].items():
+            groups = indexes.get(component, {})
+            candidates = [('origin', frozenset((key,))),
+                          ('task', groups.get(('task', entry['task_family'],
+                                               entry['output_contract'] if component == 'task_instructions' else None), empty))]
+            if component != 'task_instructions':
+                if key.startswith('array_patch_'):
+                    candidates.append(('related_array_operations', groups.get(('related_array_operations',), empty)))
+                candidates.extend([('domain', groups.get(('domain', entry['domain']), empty)), ('family', groups.get(('family',), empty))])
+            previous = empty
+            binding['expansion_levels'] = []
+            for level, members in candidates:
+                if members is previous or members <= previous:
+                    continue
+                if not previous <= members:
+                    members = members | previous
+                cache_key = (component, members)
+                sid = identifiers.get(cache_key)
+                if sid is None:
+                    ordered = sorted(members)
+                    sid = component + ':' + digest(ordered)[:16]
+                    identifiers[cache_key] = sid
+                    scopes.setdefault(sid, {'component': component, 'members': ordered,
+                                            'repetitions': 'full_configured_count', 'models': 'all_eligible_models',
+                                            'judgments': 'rejected_tests_must_be_excluded_at_execution'})
+                binding['expansion_scopes'].append(sid)
+                binding['expansion_levels'].append({'level': level, 'scope_id': sid})
+                previous = members
+    return scopes
+
+
 def build(root=ROOT):
     labels = read_json(root / 'reporting/grouping_metadata.json')
     variants = {}
@@ -93,32 +150,7 @@ def build(root=ROOT):
                 # index questions contain a ticket ID and remain fully frozen;
                 # task-specific guidance is inserted instead.
                 append('task_instructions')
-    scopes = {}
-    for key, entry in variants.items():
-        for component, binding in entry['components'].items():
-            compatible = [k for k, v in variants.items() if v['objective_optimization_eligible'] and component in v['components']]
-            candidates = [('origin', [key]),
-                          ('task', [k for k in compatible if variants[k]['task_family'] == entry['task_family']
-                                    and (component != 'task_instructions' or variants[k]['output_contract'] == entry['output_contract'])])]
-            if component != 'task_instructions':
-                if key.startswith('array_patch_'):
-                    candidates += [('related_array_operations', [k for k in compatible if k.startswith('array_patch_')])]
-                candidates += [('domain', [k for k in compatible if variants[k]['domain'] == entry['domain']]), ('family', compatible)]
-            previous = set()
-            binding['expansion_levels'] = []
-            for level, members in candidates:
-                members = sorted(members)
-                # Some task labels span domains only when explicitly compatible.
-                members = sorted(set(members) | previous)
-                if set(members) == previous:
-                    continue
-                sid = component + ':' + digest(members)[:16]
-                scopes.setdefault(sid, {'component': component, 'members': members,
-                                        'repetitions': 'full_configured_count', 'models': 'all_eligible_models',
-                                        'judgments': 'rejected_tests_must_be_excluded_at_execution'})
-                binding['expansion_scopes'].append(sid)
-                binding['expansion_levels'].append({'level': level, 'scope_id': sid})
-                previous = set(members)
+    scopes = expansion_scopes(variants)
     data = {'schema_version': 1, 'reviewed_date': '2026-10-08',
             'workflow_fingerprint': code_fingerprint(), 'components': COMPONENTS,
             'eligibility_guard': 'Registration checks compatibility, not permission to run. Apply current rejected-test and provider-capability policies.',

@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from prompt_builder.builder import ROOT, build, compile_test, discover, load_case, prompt, install
+from tests.helpers.frozen_templates import ROOT, build, compile_test, discover, load_case, prompt, install
 from prompt_builder.presentation import keyed, render
 from workbench.domain import read_json
 from workbench.workflows import evaluate, execute, messages

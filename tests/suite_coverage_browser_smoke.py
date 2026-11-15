@@ -7,6 +7,7 @@ import tempfile
 import threading
 
 from workbench.controller import Controller
+from workbench.domain import read_json
 from workbench.server import WorkbenchServer
 
 
@@ -17,6 +18,9 @@ def main():
         root = Path(temp)
         for name in ('prompt_builder/templates', 'test_specs', 'prompts/current-suite'):
             shutil.copytree(source / name, root / name)
+        manifest = read_json(root / 'prompts/current-suite/manifest.json')
+        selected_spec = sorted(manifest['test_spec_files'])[0]
+        selected_test_id = read_json(root / 'test_specs' / selected_spec)['id']
         app = Controller(root, True)
         server = WorkbenchServer(('127.0.0.1', 0), app)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -32,30 +36,30 @@ def main():
                 expect(page.locator('#connection')).to_contain_text('Connected')
                 page.locator('#preflight').click()
                 expect(page.locator('#readiness')).to_have_text('Ready', timeout=20000)
-                expect(page.locator('#issues')).to_contain_text('Full current suite: 21 cases')
+                expect(page.locator('#issues')).to_contain_text('Full current suite: 240 cases')
                 expect(page.locator('#issues')).to_contain_text('6 output formats')
-                expect(page.locator('#issues')).to_contain_text('372 distinct prompts × 1 repetition(s) = 372 observations/model')
+                expect(page.locator('#issues')).to_contain_text('8640 distinct prompts × 1 repetition(s) = 8640 observations/model')
                 expect(page.locator('#issues')).to_contain_text('Omitted current prompts: 0')
-                expect(page.locator('#pending')).to_have_text('372')
+                expect(page.locator('#pending')).to_have_text('8640')
                 screenshot = os.environ.get('WORKBENCH_COVERAGE_SCREENSHOT')
                 if screenshot:
                     page.screenshot(path=screenshot, full_page=True)
                 page.reload()
-                expect(page.locator('#issues')).to_contain_text('Full current suite: 21 cases')
+                expect(page.locator('#issues')).to_contain_text('Full current suite: 240 cases')
                 page.set_viewport_size({'width': 390, 'height': 844})
-                expect(page.locator('#issues')).to_contain_text('372 observations/model')
+                expect(page.locator('#issues')).to_contain_text('8640 observations/model')
                 page.set_viewport_size({'width': 1440, 'height': 1000})
                 page.get_by_role('button', name='Run Individual Test', exact=True).click()
                 page.locator('#individual-model').select_option(app.catalog()[0]['id'])
-                page.locator('#individual-test').select_option('copy_value__json_dot')
+                page.locator('#individual-test').select_option(selected_test_id)
                 page.locator('#individual-variant').select_option('normal_json')
                 page.locator('#individual-check').click()
                 expect(page.locator('#readiness')).to_have_text('Ready', timeout=20000)
                 expect(page.locator('#issues')).to_contain_text('Explicit subset: 1 cases')
                 expect(page.locator('#issues')).to_contain_text('1 distinct prompts × 1 repetition(s) = 1 observations/model')
-                expect(page.locator('#issues')).to_contain_text('Omitted current prompts: 371')
+                expect(page.locator('#issues')).to_contain_text('Omitted current prompts: 8639')
                 # A missing required definition must turn readiness red, not reduce the count.
-                missing = root / 'test_specs/copy_value__json_dot.json'
+                missing = root / 'test_specs' / selected_spec
                 saved = missing.read_bytes()
                 missing.unlink()
                 page.locator('#preflight').click()

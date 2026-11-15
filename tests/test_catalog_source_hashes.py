@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from evaluation.catalog import definition_source_sha256
 from optimization.promotion import rebuild
-from prompt_builder.builder import build, compile_test, install
+from tests.helpers.frozen_templates import build, compile_test, install
 from workbench.domain import read_json, write_json
 
 

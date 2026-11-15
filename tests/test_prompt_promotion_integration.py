@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from optimization.promotion import apply, rebuild
-from prompt_builder.builder import ROOT, build, compile_test
+from tests.helpers.frozen_templates import ROOT, build, compile_test
 from workbench.domain import digest, read_json, write_json
 from workbench.workflows import messages
 

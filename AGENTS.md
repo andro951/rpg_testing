@@ -1,3 +1,10 @@
+## Current suite migration (2026-11-15, supersedes earlier current-suite counts)
+
+- Isaac authorized archiving the 21 existing tests and all results, then creating 240 tests: 40 substantially diverse starting JSON states, each independently tested with Update, Append, Remove, Move, Copy and no-op. Preserve meaningful original cases in the documented successor mapping, and preserve archived bytes/grading.
+- Current matrix is three input views, six active structured output formats and self-check off/on, one configured repetition: 8,640 workflow observations per model. On uses model self-judgment, not an evaluator oracle, with at most three revisions. Every raw generation/check/revision remains evidence. Additional model calls are not additional independent observations.
+- Requested all-model execution is still subject to actual model/worker availability and existing provider controls. Never substitute demo/mock trials, fabricate measurements or claim inference started from a successful build. User-computer access requires explicit permission for that computer.
+- Original templates, definitions, previews, catalog snapshots and all prior active result directories are frozen in archives/suite-before-240-2026-11-15 with SHA-256 manifest. Earlier archives and experiment snapshots remain untouched. Do not regrade historical evidence.
+
 ## Current template-builder contract (2026-11-10, supersedes older builder/schema instructions)
 
 - Editable sources: prompt_builder/templates/{common,input_format,output_format,test_cases}. Old test_builder was removed at the user’s request; do not restore it.

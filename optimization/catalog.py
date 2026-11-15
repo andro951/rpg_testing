@@ -68,6 +68,8 @@ def validate(root=ROOT, data=None):
     """Validate all definitions, spans and nested, compatible scope memberships."""
     data = data or catalog()
     found = set()
+    scope_members = {}
+    checked_memberships = set()
     for folder in ('test_specs', 'examples/test_specs'):
         for path in sorted((root / folder).glob('*.json')):
             test = read_json(path)
@@ -85,17 +87,23 @@ def validate(root=ROOT, data=None):
                     previous = set()
                     for scope_id in binding['expansion_scopes']:
                         scope = data['scopes'][scope_id]
-                        members = set(scope['members'])
+                        if scope_id not in scope_members:
+                            scope_members[scope_id] = frozenset(scope['members'])
+                        members = scope_members[scope_id]
                         if (len(members) != len(scope['members']) or key not in members
                                 or not previous <= members):
                             raise ValueError('Invalid expansion nesting: ' + scope_id)
-                        for member in members:
-                            target = data['variants'][member]
-                            if not target['objective_optimization_eligible'] or component not in target['components']:
-                                raise ValueError('Incompatible expansion member: ' + member)
-                            if component == 'task_instructions' and (target['task_family'] != entry['task_family']
-                                    or target['output_contract'] != entry['output_contract']):
-                                raise ValueError('Incompatible task instruction contract: ' + member)
+                        contract = (entry['task_family'], entry['output_contract']) if component == 'task_instructions' else None
+                        membership_key = (scope_id, component, contract)
+                        if membership_key not in checked_memberships:
+                            for member in members:
+                                target = data['variants'][member]
+                                if not target['objective_optimization_eligible'] or component not in target['components']:
+                                    raise ValueError('Incompatible expansion member: ' + member)
+                                if component == 'task_instructions' and (target['task_family'] != entry['task_family']
+                                        or target['output_contract'] != entry['output_contract']):
+                                    raise ValueError('Incompatible task instruction contract: ' + member)
+                            checked_memberships.add(membership_key)
                         previous = members
     if found != set(data['variants']):
         raise ValueError('Prompt-sharing coverage does not match source catalog')

@@ -366,6 +366,12 @@ def execute_job(job, backend, cancel, progress=None):
     from jsonschema.exceptions import ValidationError
     try:
         walk(variant['steps'])
+        if variant.get('self_check'):
+            from .workflows import run_self_check
+            run_self_check(test, variant, values, calls, events,
+                lambda request, settings, cancel: backend.generate(request, settings, None, cancel),
+                cancel=cancel, on_stage=progress, repetition=job.get('repetition', 0),
+                completed_reason='provider_completed')
     except (ValueError, KeyError, TypeError, ValidationError) as exc:
         error = str(exc)
     except Exception as exc:

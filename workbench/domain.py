@@ -264,6 +264,13 @@ def validate_test(test: dict) -> None:
                     raise ValueError('assign can only replace an existing step output')
     for variant in test['variants']:
         safe_id(variant['id'])
+        if 'self_check' in variant:
+            if variant['self_check'] != {'mode':'on', 'max_revisions':3,
+                                        'protocol':'original-request-latest-answer-yes-no-v1'}:
+                raise ValueError('Unsupported self-check protocol')
+            if len(variant.get('steps', [])) != 1 or variant['steps'][0].get('type') != 'generate':
+                raise ValueError('Self-check requires one initial generation step')
+
         if variant['id'] in variants:
             raise ValueError('Duplicate variant')
         variants.add(variant['id'])

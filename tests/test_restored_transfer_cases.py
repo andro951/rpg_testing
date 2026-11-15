@@ -2,14 +2,14 @@
 import json
 from pathlib import Path
 import unittest
-from prompt_builder.builder import ROOT, load_case, prompt
+from tests.helpers.frozen_templates import ROOT, load_case, prompt
 from prompt_builder.reference_output import encode
 from evaluation.array_identities_intent import normalize_response, unordered
 
 
 class RestoredTransferCasesTests(unittest.TestCase):
     def test_preserved_eight_tasks_with_current_metadata_and_no_schema_hints(self):
-        repository = ROOT.parents[1]
+        repository = Path(__file__).resolve().parents[1]
         source = json.loads((repository / 'archives/prompt-builder-inputs/fixtures.json').read_text())
         cases = [case for case in source['fixtures'] if case['task'].startswith(('move_', 'copy_'))]
         self.assertEqual(len(cases), 8)

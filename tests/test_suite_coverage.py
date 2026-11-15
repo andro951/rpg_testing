@@ -7,7 +7,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from prompt_builder.builder import ROOT, applicable, build, install
+from prompt_builder.builder import applicable
+from tests.helpers.frozen_templates import ROOT, build, install
 from prompt_builder.coverage import contract, runtime_report, validate_manifest
 from workbench.domain import read_json, write_json
 
@@ -297,6 +298,37 @@ class SuiteCoverageTests(unittest.TestCase):
         self.assertEqual(plan['pending'], 0)
         native.assert_not_called()
         remote.assert_not_called()
+
+
+class Current240SuiteCoverageTests(unittest.TestCase):
+    """The live suite, separately from frozen 21-case coverage regressions."""
+    def test_current_matrix_has_every_state_operation_format_and_workflow(self):
+        from prompt_builder import builder
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            manifest = builder.build(output)
+            self.assertEqual(len(manifest['test_cases']), 240)
+            self.assertEqual(len(manifest['input_formats']), 3)
+            self.assertEqual(len(manifest['output_formats']), 6)
+            self.assertEqual(len(manifest['test_spec_files']), 240 * 6)
+            self.assertEqual(manifest['observations_per_model'], 240 * 3 * 6 * 2)
+            self.assertEqual(manifest['initial_prompt_count'], 4320)
+            self.assertEqual(manifest['workflow_condition_count'], 8640)
+            self.assertTrue(manifest['coverage']['complete'])
+            self.assertEqual(manifest['coverage']['input_exclusions'], [])
+            self.assertEqual(manifest['unsupported'], [])
+            self.assertEqual(manifest['model_runs_started_by_builder'], 0)
+            self.assertEqual(validate_manifest(manifest, builder.ROOT), manifest['coverage'])
+            conditions = 0
+            for path in (output / 'test_specs').glob('*.json'):
+                definition = read_json(path)
+                self.assertEqual(len(definition['variants']), 6)
+                ids = {variant['id'] for variant in definition['variants']}
+                self.assertEqual(ids, {'normal_json', 'id_keyed_arrays', 'full_paths',
+                                       'normal_json__self_check', 'id_keyed_arrays__self_check',
+                                       'full_paths__self_check'})
+                conditions += len(ids)
+            self.assertEqual(conditions, 8640)
 
 
 if __name__ == '__main__':

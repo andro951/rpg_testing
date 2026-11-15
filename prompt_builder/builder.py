@@ -129,6 +129,18 @@ def compile_test(case,output_format,*,input_formats=None,root=ROOT,repetitions=1
              'expected_patch':copy.deepcopy(case['expected_patch']),
              'steps':[{'id':'patch','type':'generate','prompt':user,'output':{'type':'text'},'sampling':{'temperature':0,'top_p':1,'seed':42}}],
              'result':{'step':'patch','representation':'dot_patch_v1','output_format':config['decoder'],'evaluator':evaluator.configuration()}})
+    from .coverage import self_check_modes
+    modes = self_check_modes(root)
+    baseline = test['variants']
+    test['variants'] = []
+    for variant in baseline:
+        for check_mode in modes:
+            arm = copy.deepcopy(variant)
+            if check_mode == 'on':
+                arm['id'] += '__self_check'
+                arm['self_check'] = {'mode': 'on', 'max_revisions': 3,
+                                     'protocol': 'original-request-latest-answer-yes-no-v1'}
+            test['variants'].append(arm)
     validate_test(test)
     return apply_saved_promotion(test, promotion_root)
 
@@ -161,8 +173,10 @@ def _build(output,*,root=ROOT,input_formats=None,output_formats=None,cases=None,
                 request=messages(test,variant['steps'][0],{},variant)
                 target=output/'prompts'/test['id']/variant['id'];write_json(target.with_suffix('.messages.json'),request)
                 target.with_suffix('.txt').write_text('SYSTEM MESSAGE\n'+request[0]['content']+'\n\nUSER MESSAGE\n'+request[-1]['content'],encoding='utf8')
-                manifest['prompts'].append({'test_id':test['id'],'test_case':name,'input_format':variant['id'],'output_format':form,'message_digest':digest(request),'repetitions':repetitions,'file':target.with_suffix('.messages.json').relative_to(output).as_posix()})
+                manifest['prompts'].append({'test_id':test['id'],'test_case':name,'input_format':variant['id'].removesuffix('__self_check'),'variant_id':variant['id'],'self_check':'on' if variant.get('self_check') else 'off','output_format':form,'message_digest':digest(request),'repetitions':repetitions,'file':target.with_suffix('.messages.json').relative_to(output).as_posix()})
     manifest['prompt_count']=len(manifest['prompts']);manifest['observations_per_model']=sum(p['repetitions']for p in manifest['prompts'])
+    manifest['initial_prompt_count']=len({(p['test_case'],p['input_format'],p['output_format']) for p in manifest['prompts']})
+    manifest['workflow_condition_count']=len(manifest['prompts'])
     manifest['coverage']=report(root,selection,manifest['prompts'],manifest['unsupported'],repetitions,explicit)
     if manifest['unsupported'] and not manifest['coverage']['omitted']['distinct_prompt_count']:
         details='; '.join(row['test_case']+'/'+row['output_format']+': '+row['reason'] for row in manifest['unsupported'])
@@ -231,7 +245,7 @@ def validate_artifacts(output,manifest,*,prompt_base=None,installed=False):
     expected_views={(t['id'],v['id'])for t in generated.values()for v in t['variants']}
     seen=set()
     for row in manifest['prompts']:
-        key=(row['test_id'],row['input_format'])
+        key=(row['test_id'],row.get('variant_id',row['input_format']))
         if key not in expected_views or key in seen:raise ValueError('Manifest prompt inventory mismatch')
         seen.add(key);test=by_id[key[0]];variant=next(v for v in test['variants']if v['id']==key[1])
         if (row['test_case']!=test['prompt_builder']['fixture'] or row['output_format']!=test['prompt_builder']['method']
@@ -321,7 +335,7 @@ def install(output,repository=None,*,allow_subset=False,root=None):
         for v in test['variants']:
             groups[test['id']][v['id']]={'ability_category':'Database operations','task_type':'Schema-free database update',
                 'prompt_comparison_set':test['name'],'test_version':'file-templates-v1','operation_method':test['prompt_builder']['method'],
-                'input_presentation':v['id'],'reviewed_definition':digest(experiment_spec(test,v))}
+                'input_presentation':v['id'].removesuffix('__self_check'),'self_check':'on' if v.get('self_check') else 'off','reviewed_definition':digest(experiment_spec(test,v))}
             from .reference_output import encode
             from workbench.workflows import evaluate
             raw=encode(test['source']['initial_state'],v['expected_patch'],v['result']['output_format'],test['source']['array_identities'])

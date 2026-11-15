@@ -209,6 +209,62 @@ def evaluate(test,variant,values):
     return result_score
 
 
+def run_self_check(test, variant, values, calls, events, generate, *, cancel=None,
+                   on_stage=None, on_progress=None, repetition=0, completed_reason='stop'):
+    """Bounded provider-neutral review; retain raw turns, never consult an oracle."""
+    # Self-assessment is a model decision, never evaluator feedback.
+    # Each turn sees the original task and only its latest answer.
+    initial = variant['steps'][0]
+    result_key = variant['result']['step']
+    original = messages(test, initial, {}, variant)
+    latest = values[result_key]
+    values['self_check_initial_answer'] = latest
+    settings = {'temperature':0.0,'top_p':1.0,'top_k':0,'min_p':0.0,'seed':42,
+                **initial.get('sampling', {})}
+    base_seed = settings['seed']
+    settings['seed'] = repetition_seed(base_seed, repetition)
+    def followup(kind, number, instruction):
+        if cancel and cancel.is_set(): raise Cancelled('Stopped by user')
+        step_id = 'self_check_' + kind + '_' + str(number)
+        if on_stage: on_stage(step_id)
+        if on_progress: on_progress({'step':step_id,'status':'running','completed':number,
+                                     'total':4,'percent':min(90, 20 * number)})
+        request = original + [{'role':'assistant','content':latest},
+                              {'role':'user','content':instruction}]
+        try: call = generate(request, settings, cancel)
+        except Exception as exc:
+            partial = getattr(exc, 'partial_response', None)
+            if partial is not None:
+                calls.append({'step':step_id,'messages':request,'sampling':dict(settings),**partial})
+            raise
+        calls.append({'step':step_id,'iteration':number,'messages':request,
+                      'sampling':dict(settings),'base_seed':base_seed,'schema':None,**call})
+        values[step_id] = call['text']
+        if call.get('finish_reason') != completed_reason:
+            raise ValueError('Self-check generation ended without EOS: ' + str(call.get('finish_reason')))
+        events.append({'step':step_id,'status':'completed','iteration':number})
+        return call['text']
+    for review in range(4):
+        decision = followup('decision', review + 1,
+            'Review your preceding answer against the original request above. '
+            'Does that answer completely and correctly satisfy the requested change and output format, '
+            'without changing anything else? Reply with exactly yes or no, and nothing else.')
+        normalized = decision.strip().lower()
+        if normalized not in ('yes', 'no'):
+            raise ValueError('Invalid self-check decision: expected exactly yes or no')
+        if normalized == 'yes':
+            events.append({'step':'self_check','status':'accepted_by_model','revisions':review})
+            break
+        if review == 3:
+            events.append({'step':'self_check','status':'revision_limit_reached','revisions':3})
+            break
+        latest = followup('revision', review + 1,
+            'You judged your preceding answer incorrect. Produce a corrected complete answer '
+            'to the original request, in its required output format only. Do not explain or '
+            'return a patch to your previous answer; replace it with the complete answer.')
+        values[result_key] = latest
+
+
 def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progress=None):
     """No disk writes. Include all request work in pipeline time; score afterward."""
     from jsonschema import Draft202012Validator
@@ -268,6 +324,10 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progr
                 completed_units+=1
                 if on_progress:on_progress({'step':step['id'],'status':'completed','completed':completed_units,'total':total_units,'percent':100*completed_units/total_units})
         run(variant['steps'])
+        if variant.get('self_check'):
+            run_self_check(test, variant, values, calls, events,
+                lambda request, settings, cancel: backend.generate(request, settings, None, cache, cancel),
+                cancel=cancel, on_stage=on_stage, on_progress=on_progress, repetition=repetition)
     except Cancelled as exc:
         exc.partial={'calls':calls,'outputs':values,'step_events':events,'pipeline_seconds':time.perf_counter()-started}
         raise
