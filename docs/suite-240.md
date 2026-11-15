@@ -31,25 +31,25 @@ The original 21 cases and historical evidence remain frozen in archives/suite-be
 | 23 multiline_preservation | Multiline data preserved inside complete elements; scalar update remains all-format representable | New |
 | 24 deep_scalar | Three-level field nesting | New |
 | 25 wide_records | 18 payload fields plus an ID challenge complete copy without losing siblings | New |
-| 26 large_collection | 48-element source, target near middle, repeated groups | New |
+| 26 large_medical_60 | Large synthetic relational medical database with 60 primary elements | New |
 | 27 deep_collections | Six-level collection path | New |
 | 28 cross_branch_transfer | Transfers across separate root branches | New |
 | 29 overlapping_destination_ids | Non-target ID repeats across collections; selected target unique within each destination | New |
 | 30 duplicate_display_names | Six identical name/role distractors selected only by ID | New |
 | 31 heterogeneous_scalar_fields | String tokens vs booleans/numbers/null in different fields | New |
-| 32 empty_nested_objects | Empty objects retained on append/move/copy | New |
+| 32 authentic_bramble_new_game | Authentic fresh EmberAdventuresLite game with untouched runtime state and distinct Copy source | New |
 | 33 integer_values | Primitive integer identity, not index | New |
 | 34 negative_decimal_values | Signed fractional primitive identities | New |
 | 35 boolean_values | Boolean primitive identities and null append | New |
 | 36 null_value | Null primitive source selection | New |
-| 37 long_primitive_collection | 64 strings, target in middle | New |
+| 37 large_shipping_50 | Large synthetic relational shipping database with 50 primary elements | New |
 | 38 unicode_primitive_values | Unicode primitive identities | New |
 | 39 numeric_string_values | Leading-zero identities remain distinct strings | New |
 | 40 collections_inside_selected_record | Nested arrays selected through parent IDs; repeated child ID in other parent | New |
 
 ## Scope
 
-240 cases × 3 input presentations × 6 output formats = 4,320 prompts per model before workflow conditions or repetitions. Two distinct self-check conditions would make 8,640 trials/model; this file does not claim such a run was performed.
+240 cases × 3 input presentations × 6 output formats = 4,320 prompts per model before workflow conditions or repetitions. Two distinct self-check conditions make 8,640 trials/model; this file does not claim such a run was performed.
 
 Safe-number boundary values remain within the evaluator’s supported JSON integer range. Multiline strings are tested inside complete elements and unchanged data, not as unsupported typed-lines scalar text payloads. Primitive values include signed fractions, booleans and null. Collection identities are declared privately for every array, including nested arrays under selected parent elements.
 
@@ -84,18 +84,18 @@ Regenerate: `python scripts/generate_paired_suite_240.py`. Validate: `python -m 
 | 23 | [2, 0] | 3 | 3 |
 | 24 | [2, 0] | 5 | 2 |
 | 25 | [3, 0] | 3 | 19 |
-| 26 | [48, 1] | 3 | 3 |
+| 26 | [3, 4, 60, 2, 15] | 3 | 8 |
 | 27 | [2, 0] | 8 | 2 |
 | 28 | [2, 0] | 4 | 2 |
 | 29 | [3, 2] | 3 | 2 |
 | 30 | [6, 0] | 3 | 4 |
 | 31 | [2, 0] | 3 | 5 |
-| 32 | [2, 0] | 3 | 3 |
+| 32 | [1, 0, 0, 1, 0, 2, 3, 0, 1, 0, 2, 3, 0, 1, 1, 2, 0, 1, 2, 1, 1, 0, 1, 0, 5, 1, 0, 2, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 2, 1, 1, 0, 1, 0] | 10 | 34 |
 | 33 | [5, 2] | 2 | 3 |
 | 34 | [3, 0] | 2 | 3 |
 | 35 | [2, 0] | 2 | 3 |
 | 36 | [3, 1] | 2 | 3 |
-| 37 | [64, 0] | 2 | 3 |
+| 37 | [3, 3, 4, 50, 2] | 3 | 9 |
 | 38 | [3, 0] | 2 | 3 |
 | 39 | [4, 0] | 2 | 3 |
 | 40 | [2, 2, 0, 1, 0] | 5 | 3 |
@@ -125,3 +125,11 @@ The desktop had an unpublished prior commit, `935f0a6f`, implementing bounded se
 ## Requested execution placements
 
 Desktop inspection verified five installed local configurations and eligible Perchance on the actual 8 GB tier. Read-only SSH checks verified four configured Unity model files/runtimes and an empty user queue. The requested ten model/placement entries therefore represent 86,400 workflow observations before exact-compatible completion reuse. Jobs retain one model per GPU/job, distinct inference ports and durable evidence. The approved run may request Unity walltime `5-00:00:00` within the observed partition limit; the software default remains four hours. Verification of readiness is not proof that any inference has started.
+
+## Large-state preparation
+
+This revision replaces states26,32,37 with60 synthetic patients, the authentic fresh Bramble game state, and50 synthetic shipments. The first13 recipes and all21 original mappings are unchanged. Medical/ shipping data is synthetic; Bramble was materialized by the game and is not abbreviated or padded. Its parsed state equals the canonical source fixture (SHA256 ecec972f7a180a4f69bcb639b3ff11ba8a36ae5c6d7bb30f2e386e6aeb684543). Copy uses the player’s known-facts collection and story-memory destination independently of inventory Move.
+
+Prepared on a separate branch; common native context remains unselected. Tokenizer/context/residency validation and final authorization still gate benchmark inference. No model runs are claimed here. Previous source/config/catalog metadata is frozen in archives/suite-before-large-states-5151504e; the installer preserves superseded definitions and previews in archives/template-builds. Existing results and earlier archives remain untouched.
+
+Historical registrations are available in `archives/suite-before-large-states-5151504e/resolved-historical-catalog.json` and `resolved-historical-fixtures.json`, explicitly marked historical-only/non-runnable. Their resolution manifest records SHA256 hashes and counts. These sidecars retain all1,440 prior active definitions and8,640 fixtures at exact archived paths without exposing superseded pins as current runnable contracts. Original catalog/fixture bytes remain unchanged in the same verified snapshot.

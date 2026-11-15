@@ -1,6 +1,7 @@
 """Synthetic planning checks only; no model inference."""
 import copy
 import json
+import hashlib
 from pathlib import Path
 import unittest
 from workbench.inventory import automatic_context
@@ -14,8 +15,20 @@ def fixture(prompt='Return READY.',review=False):
                          'steps':[{'type':'generate','prompt':prompt}]}]}
 
 class ContextSizingTests(unittest.TestCase):
-    def test_full_current_suite_is_16k_with_and_without_review(self):
-        tests=[json.loads(p.read_text()) for p in (ROOT/'test_specs').glob('*.json')]
+    def test_frozen_small_240_suite_is_16k_with_and_without_review(self):
+        # Exact pre-large-suite definitions, archived from commit5151504e.
+        snapshot=ROOT/'archives/suite-before-large-states-5151504e'
+        pins=json.loads((snapshot/'SHA256.json').read_text(encoding='utf-8'))
+        raw=(snapshot/'evaluation/catalog.json').read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),pins['evaluation/catalog.json'])
+        entries=[e for e in json.loads(raw)['definitions'] if e['scope']=='active']
+        self.assertEqual(len(entries),1440)
+        archive=ROOT/'archives/template-builds/19025a0440b84189'
+        tests=[]
+        for entry in entries:
+            raw=(archive/entry['path']).read_bytes()
+            self.assertEqual(hashlib.sha256(raw.replace(b'\r\n',b'\n')).hexdigest(),entry['source_sha256'])
+            tests.append(json.loads(raw))
         before=copy.deepcopy(tests)
         on=automatic_context(tests,META)
         off=copy.deepcopy(tests)
@@ -29,6 +42,28 @@ class ContextSizingTests(unittest.TestCase):
         self.assertEqual(tests,before)
         self.assertIsNone(on['output_cap'])
         self.assertEqual(on['capacity_policy'],'fixed-case-local-v1')
+
+    def test_current_suite_estimates_transmitted_bytes_without_claiming_native_fit(self):
+        tests=[json.loads(p.read_text(encoding='utf-8')) for p in (ROOT/'test_specs').glob('*.json')]
+        before=copy.deepcopy(tests)
+        on=automatic_context(tests,META)
+        off=copy.deepcopy(tests)
+        for test in off:
+            for variant in test['variants']:variant['retry_enabled']=False
+        normal=automatic_context(off,META)
+        expected=max(len(test['instructions'].encode('utf-8'))+256+
+                     sum(len(step['prompt'].encode('utf-8'))+128 for step in variant['steps'])
+                     for test in tests for variant in test['variants'] if variant.get('enabled',True))
+        self.assertEqual(on['input_estimate_bytes'],expected)
+        self.assertEqual(normal['input_estimate_bytes'],expected)
+        self.assertGreaterEqual(on['allocated_tokens'],normal['allocated_tokens'])
+        self.assertLessEqual(on['allocated_tokens']-normal['allocated_tokens'],2048)
+        self.assertLess(on['review_control_estimate_bytes'],1536)
+        self.assertIsNone(on['output_cap'])
+        self.assertIn('UTF-8 byte estimate',on['method'])
+        self.assertEqual(tests,before)
+        # Selected common C and actual-tokenizer fit are tested by study_protocol,
+        # not inferred from this conservative automatic byte estimate.
 
     def test_direct_prompt_does_not_double_count_source_or_unused_prefix(self):
         t=fixture();first=automatic_context([t],META)

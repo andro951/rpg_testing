@@ -72,6 +72,44 @@ class StudyProtocolTests(unittest.TestCase):
         self.assertFalse(report['ready']);self.assertEqual(plan['pending'],0)
         self.assertEqual(report['issues'][0]['id'],'study_protocol')
 
+    def test_malformed_protocol_blocks_controller_before_provider_setup_or_routing(self):
+        for raw in ('{broken', '{"schema_version":1}'):
+            for selection in (None, {'model_id':perchance.MODEL_ID}):
+                with self.subTest(raw=raw,selection=selection):
+                    (self.root/protocol.FILENAME).write_text(raw)
+                    with patch('prompt_builder.coverage.runtime_report') as coverage, \
+                         patch('workbench.perchance_setup.prepare') as setup, \
+                         patch('workbench.perchance.preflight') as remote, \
+                         patch('workbench.preflight.build') as native:
+                        report,plan=self.app.build_preflight(selection=selection)
+                        self.assertFalse(report['ready'])
+                        self.assertEqual(report['issues'][0]['id'],'study_protocol')
+                        self.assertEqual(plan['pending'],0)
+                        checked=self.app.check(selection=selection)
+                        self.assertFalse(checked['ready'])
+                        self.assertEqual(checked['issues'][0]['id'],'study_protocol')
+                        setup.assert_not_called();remote.assert_not_called()
+                        native.assert_not_called();coverage.assert_not_called()
+
+    def test_run_blocks_invalid_protocol_before_provider_setup(self):
+        (self.root/protocol.FILENAME).write_text('{broken')
+        with patch('workbench.perchance_setup.prepare') as setup:
+            self.app.run()
+            setup.assert_not_called()
+        self.assertFalse(self.app.report['ready'])
+        self.assertEqual(self.app.report['issues'][0]['id'],'study_protocol')
+        self.assertEqual(self.app.state,'idle')
+
+    def test_direct_remote_preflight_blocks_malformed_protocol_before_backend_checks(self):
+        for raw in ('{broken', '{"schema_version":1}'):
+            (self.root/protocol.FILENAME).write_text(raw)
+            with patch('workbench.inventory.detect_gpus') as gpu:
+                report,plan=perchance.preflight(self.app,selection={'model_id':perchance.MODEL_ID})
+                self.assertFalse(report['ready'])
+                self.assertEqual(report['issues'][0]['id'],'study_protocol')
+                self.assertEqual(plan['pending'],0)
+                gpu.assert_not_called()
+
     def test_duplicate_json_and_symlink_are_rejected(self):
         path=self.root/protocol.FILENAME
         path.write_text('{"schema_version":1,"schema_version":1}')

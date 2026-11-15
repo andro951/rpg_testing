@@ -239,7 +239,19 @@ class Controller(ModelManager):
     def selection_models(self):
         from .perchance import model
         return self.catalog()+([] if self.demo else [model()])
+    def study_protocol_block(self,preparation=None,selection=None):
+        """Validate before provider setup/routing, without touching model backends."""
+        from .study_protocol import load
+        try:load(self.root)
+        except (ValueError,OSError,TypeError) as exc:
+            plan={'pending':0,'complete':0,'model_loads':0,'groups':[]}
+            return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'selection':selection,
+                    'issues':[preflight.issue('study_protocol',str(exc))],'plan':plan,
+                    'note':'Invalid study protocol; no inference or provider setup was started.'},plan
+        return None
     def build_preflight(self,preparation=None,selection=None,track_progress=True):
+        blocked=self.study_protocol_block(preparation,selection)
+        if blocked is not None:return blocked
         from prompt_builder.coverage import runtime_report
         try:
             coverage=runtime_report(self.root,selection,load_tests(self.root/'test_specs'))
@@ -279,12 +291,13 @@ class Controller(ModelManager):
         if omit_perchance:report['note']+=' Perchance was skipped for this run; its unfinished observations remain pending.'
         return report,plan
     def check(self,preparation=None,selection=None,setup=True):
-        if setup:
+        blocked=self.study_protocol_block(preparation,selection)
+        if setup and blocked is None:
             from .perchance_setup import prepare
             prepare(self,preparation,selection)
         self.message='Checking files, pending work, and backend readiness.'
         self.set_progress('preflight','Starting preflight',0,0,'Preparing readiness checks.')
-        report,plan=self.build_preflight(preparation,selection)
+        report,plan=blocked if blocked is not None else self.build_preflight(preparation,selection)
         report['perchance_setup']=copy.deepcopy(self.perchance_setup_decision)
         if self.perchance_setup_decision and self.perchance_setup_decision['status']=='failed':
             report['issues'].append(preflight.issue('perchance_setup_failed',self.perchance_setup_decision['reason']))
@@ -495,6 +508,9 @@ class Controller(ModelManager):
         if selection is not None:validate_selection(selection,self.selection_models(),load_tests(self.root/'test_specs'))
         self.requested_run_selection=copy.deepcopy(selection)
         self.log('run_requested',json.dumps({'selection':selection},sort_keys=True))
+        if self.study_protocol_block(selection=selection) is not None:
+            self.check(selection=selection,setup=False)
+            self.state='idle';return
         from .perchance_setup import prepare
         prepare(self,selection=selection,reuse=True)
         if not self.demo and self.settings['sync_source']:

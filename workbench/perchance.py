@@ -174,6 +174,13 @@ def browser_executable(settings):
 
 
 def preflight(app, preparation=None, selection=None):
+    from .study_protocol import load as load_protocol, remote_context
+    try:requested_context = remote_context(load_protocol(app.root))
+    except (ValueError, OSError, TypeError) as exc:
+        pending={'pending':0,'complete':0,'model_loads':0,'groups':[]}
+        return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'selection':selection,
+                'issues':[{'id':'study_protocol','message':str(exc),'level':'blocked'}],
+                'plan':pending,'note':'Invalid study protocol; no inference was started.'},pending
     from .inventory import detect_gpus
     issues = []
     tests = load_tests(app.root / 'test_specs')
@@ -194,8 +201,6 @@ def preflight(app, preparation=None, selection=None):
         issues.append({'id': 'perchance_tier', 'message': 'Perchance is assigned strictly to an 8 GB worker; larger tiers are excluded.', 'level': 'blocked'})
     target = {'backend': 'perchance', 'vram_gb': tier or gpu['total_gib'], 'gpu_name': gpu['name'],
               'os': platform.platform(), 'execution_class': 'remote_service', 'execution_policy': VERSION}
-    from .study_protocol import load as load_protocol, remote_context
-    requested_context = remote_context(load_protocol(app.root))
     if requested_context is not None:target['context_request'] = requested_context
     result = plan(tests, app.settings, target, app.store, selection)
     if result['pending']:
