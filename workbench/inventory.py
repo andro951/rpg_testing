@@ -154,7 +154,13 @@ def detect_gpus(run=command) -> list[dict]:
 
 
 def automatic_context(tests: list[dict], metadata: dict) -> dict:
-    """Automatic finite allocation, including the explicitly shared cached prefix."""
+    """Plan one finite request context, not eight copies of the original prompt.
+
+    This portable preflight uses UTF-8 bytes, NOT measured tokenizer counts. The
+    native backend verifies each complete, untruncated request with the actual
+    model tokenizer. Continuation space is headroom, never an output-token cap.
+    """
+    from .self_review import RETRY_LIMIT, REVIEW_QUESTION, REPLACEMENT_REQUEST
     maximum=next((int(v) for k,v in metadata.items() if k.endswith('.context_length')),None)
     if not maximum or maximum<512:raise ValueError('Model context metadata is unavailable')
     def prompt_bytes(steps):
@@ -163,24 +169,46 @@ def automatic_context(tests: list[dict], metadata: dict) -> dict:
             if step.get('type')=='loop':total+=step['max_iterations']*prompt_bytes(step['steps'])
             else:total+=len(step.get('prompt','').encode('utf-8'))+128
         return total
-    longest=0
+    # Actual fixed review/replacement text and conservative message framing.
+    # Candidate answers share the ordinary continuation/history reserve. They
+    # are not assumed to be 8192 tokens each, nor are prior turns discarded.
+    review_controls=((RETRY_LIMIT+1)*len(REVIEW_QUESTION.encode('utf-8'))+
+                     RETRY_LIMIT*(len(REPLACEMENT_REQUEST.encode('utf-8'))+len('no!'))+
+                     (4*RETRY_LIMIT+3)*32)
+    longest=0;planned=0;ordinary_planned=0;review_overhead=0;direct_only=True
     for test in tests:
         for variant in (v for v in test['variants'] if v.get('enabled',True)):
-            mode=presentation_mode(test,variant)
-            fixed=len(render_source_text(test['source'],mode).encode('utf-8'))
-            fixed+=len(test.get('shared_prefix','').encode('utf-8'))+len(test.get('instructions','').encode('utf-8'))
-            fixed+=len(presentation_instruction(mode).encode('utf-8'))+256
+            direct=variant.get('prompt_style')=='direct_text_v1'
+            direct_only=direct_only and direct
+            if direct:
+                # workflows.messages puts only instructions and the assembled
+                # step prompt on the wire. source/shared_prefix are NOT extra
+                # messages: adding source here counts embedded data twice.
+                fixed=len(test.get('instructions',"Follow the user's prompt.").encode('utf-8'))+256
+            else:
+                mode=presentation_mode(test,variant)
+                fixed=len(render_source_text(test['source'],mode).encode('utf-8'))
+                fixed+=len(test.get('shared_prefix','').encode('utf-8'))+len(test.get('instructions','').encode('utf-8'))
+                fixed+=len(presentation_instruction(mode).encode('utf-8'))+256
             estimate=fixed+prompt_bytes(variant['steps'])
-            if variant.get('retry_enabled',False):
-                # Retained answers/reviews share the finite native context.
-                estimate=estimate*2+8*8192
-            longest=max(longest,estimate)
-    desired=max(16384,2**math_ceil_log2(max(1,longest*2+8192)))
-    # Bytes are only a planning estimate, not tokenizer output. A conservative estimate
-    # exceeding native context must not falsely prove that the actual tokens cannot fit.
+            extra=review_controls if variant.get('retry_enabled',False) else 0
+            longest=max(longest,estimate);review_overhead=max(review_overhead,extra)
+            # Preserve the historical non-direct workflow estimator. Direct
+            # prompts need no source duplication or blanket 2x multiplier.
+            ordinary=estimate+4096 if direct else estimate*2+8192
+            ordinary_planned=max(ordinary_planned,ordinary)
+            planned=max(planned,ordinary+extra)
+    # Keep the original baseline rounding, but do not let a small review
+    # addition trigger another power-of-two jump. Only add 1024-token blocks
+    # when the ordinary allocation does not already cover the review controls.
+    baseline=max(16384,2**math_ceil_log2(max(1,ordinary_planned)))
+    desired=max(baseline,((planned+1023)//1024)*1024)
     context=min(desired,maximum)
     return {'allocated_tokens':context,'native_tokens':maximum,'input_estimate_bytes':longest,
-            'method':'generous source/step byte estimate plus 8192 continuation allowance; exact native runtime guard; allowance is not an output cap',
+            'review_control_estimate_bytes':review_overhead,
+            'continuation_history_headroom':4096 if direct_only else 8192,
+            'capacity_policy':'fixed-case-local-v1',
+            'method':'assembled direct prompt once plus shared continuation/history headroom and literal review controls; UTF-8 byte estimate, exact native tokenizer guard',
             'input_may_exceed_native_context':longest>=maximum,'output_cap':None}
 
 

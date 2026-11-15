@@ -18,6 +18,11 @@ from .workflows import Cancelled
 def now():return datetime.now(timezone.utc).isoformat()
 
 
+class ContextCleanupFailure(RunFailure):
+    """A fixed-capacity case finished, but cache isolation could not be restored."""
+    reason = 'context_cleanup_failed'
+
+
 class Session:
     def __init__(self, app, report, plan, backend_factory, monitor_factory=GpuMonitor):
         self.app,self.report,self.plan=app,report,plan
@@ -58,6 +63,8 @@ class Session:
 
     def skip(self,group,jobs,exc,mode='full_gpu',recoverable=False):
         for job in jobs:
+            # Bulk bookkeeping must remain interruptible before each result.
+            self.check_stop()
             if self.terminal(group,job,mode):continue
             r=self.base_record(group,job,mode)
             r.update(status='skipped',reason=getattr(exc,'reason','runtime_error'),error=str(exc),
@@ -170,6 +177,37 @@ class Session:
                     break
                 except ContextCapacity as exc:
                     self.app.timing_active=False
+                    mid=group['model']['id']
+                    if self.contexts[mid].get('capacity_policy') == 'fixed-case-local-v1':
+                        partial=copy.deepcopy(getattr(exc,'partial',{}) or {})
+                        record.update(status='completed',reason=exc.reason,error=str(exc),
+                                      partial=partial,calls=copy.deepcopy(partial.get('calls',[])),
+                                      outputs=copy.deepcopy(partial.get('outputs',{})),
+                                      step_events=copy.deepcopy(partial.get('step_events',[])),
+                                      pipeline_seconds=partial.get('pipeline_seconds'),
+                                      gpu_memory=copy.deepcopy(partial.get('gpu_memory')),
+                                      measurement_valid=False,valid_for_full_gpu_comparison=False,
+                                      context_capacity={'policy':'fixed-case-local-v1',
+                                          'allocated_tokens':self.contexts[mid]['allocated_tokens'],
+                                          'native_tokens':self.contexts[mid]['native_tokens'],
+                                          'required_tokens':exc.required_tokens,
+                                          'evidence':copy.deepcopy(getattr(exc,'evidence',{}))},
+                                      score={'valid':False,'exact_match':None,
+                                             'error':str(exc),
+                                             'note':'This case exhausted its fixed context allocation. Partial evidence is preserved; semantic correctness was not determined.'})
+                        self.app.completed_now+=1
+                        try:self.app.backend.clear_cache()
+                        except Cancelled:
+                            record['context_cleanup']={'status':'cancelled'}
+                            self.save(record);raise
+                        except Exception as failed:
+                            record['context_cleanup']={'status':'failed','error':str(failed)}
+                            self.save(record)
+                            raise ContextCleanupFailure('Cache cleanup failed after a fixed-context case; later cases remain pending',
+                                                        {'case_id':record['case_id'],'cleanup_error':str(failed)}) from failed
+                        record['context_cleanup']={'status':'cleared'}
+                        self.save(record)
+                        break
                     record.update(status='error',reason=exc.reason,error=str(exc),partial=getattr(exc,'partial',{}),measurement_valid=False)
                     self.save(record,False)
                     mid=group['model']['id'];larger=next_context(self.contexts[mid],exc.required_tokens)
@@ -212,7 +250,7 @@ class Session:
                     self.load(group)
                     remaining=self.run_cases(group,primary)
                     if remaining:self.deferred.append((group,remaining))
-                except Cancelled:raise
+                except (Cancelled,ContextCleanupFailure):raise
                 except Exception as exc:
                     retry=isinstance(exc,DoesNotFit)
                     self.skip(group,primary,exc,recoverable=retry)
@@ -251,7 +289,7 @@ class Session:
                         a.run_total+=len([j for j in jobs if not self.terminal(group,j,'cpu_offloaded')])
                         self.run_cases(group,jobs,'cpu_offloaded',layers,'recovery-offloaded')
                     else:self.skip(group,jobs,last,'cpu_offloaded')
-                except Cancelled:raise
+                except (Cancelled,ContextCleanupFailure):raise
                 except Exception as exc:self.skip(group,jobs,exc,'cpu_offloaded');a.session_errors+=1
                 finally:self.close_model()
         finally:
