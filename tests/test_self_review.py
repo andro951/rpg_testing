@@ -192,7 +192,8 @@ class SelfReviewTests(unittest.TestCase):
         # Context allocation/overflow semantics changed intentionally; do not
         # whitelist the new implementation as the frozen old experiment.
         self.assertNotEqual(domain.code_fingerprint(), PREVIOUS_CODE)
-        self.assertEqual(perchance.identity({})['adapter_hash'], PREVIOUS_ADAPTER)
+        # New requested-context provenance has a new adapter source identity.
+        self.assertNotEqual(perchance.identity({})['adapter_hash'], PREVIOUS_ADAPTER)
         with patch.object(domain, 'implementation_fingerprint', return_value='f'*64):
             self.assertEqual(domain.code_fingerprint(), 'f'*64)
 
@@ -255,11 +256,11 @@ class SelfReviewTests(unittest.TestCase):
                 count += 1
         self.assertEqual(count,372)
 
-    def test_v3_evaluator_pin_stays_exact_with_raw_sources_visible(self):
+    def test_new_study_source_is_not_aliased_to_retired_evaluator_pin(self):
         from evaluation.array_identities_intent import configuration, identity_info
-        self.assertEqual(configuration()['fingerprint'],
-                         '7f8348680b973038b3d29323fbbca442d553138e11086c05b9f124cd9cfd573e')
-        self.assertNotEqual(identity_info()['implementation_fingerprint'], configuration()['fingerprint'])
+        self.assertNotEqual(configuration()['fingerprint'],
+                            '7f8348680b973038b3d29323fbbca442d553138e11086c05b9f124cd9cfd573e')
+        self.assertEqual(identity_info()['implementation_fingerprint'], configuration()['fingerprint'])
         self.assertIn('workbench/workflows.py', identity_info()['source_hashes'])
 
     def test_intent_pass_and_strict_format_failure_stay_independent_after_review(self):

@@ -89,7 +89,7 @@ def implementation_fingerprint():
     """Exact source provenance, including operational loading code."""
     base=Path(__file__).parent
     return digest({name:hashlib.sha256((base/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest()
-                   for name in ('domain.py','workflows.py','scoring.py','value_paths.py','dot_paths.py','backends.py','inventory.py','presentation.py','seedcheck.py','native.py','scheduler.py','execution_policy.py','telemetry.py','self_review.py')})
+                   for name in ('domain.py','workflows.py','scoring.py','value_paths.py','dot_paths.py','backends.py','inventory.py','presentation.py','seedcheck.py','native.py','scheduler.py','execution_policy.py','telemetry.py','self_review.py','study_protocol.py','preflight.py')})
 
 
 def code_fingerprint():

@@ -115,6 +115,10 @@ def allocation_walltime(value='04:00:00'):
 def bundle(app, state, worker):
     import base64
     root = app.root
+    from workbench.study_protocol import FILENAME, load as load_protocol, snapshot as protocol_snapshot
+    protocol = load_protocol(root)
+    if state['scope'].get('study_protocol') != protocol_snapshot(protocol):
+        raise ValueError('Study protocol differs from the frozen requested coverage')
     required = ('model', 'model_path', 'runtime_path', 'python', 'constraint', 'qos', 'remote_base', 'ssh', 'inference_port')
     if any(k not in worker for k in required):
         raise ValueError('Unity worker lacks pinned model/runtime/allocation configuration')
@@ -138,6 +142,8 @@ def bundle(app, state, worker):
     manifest['source_files']={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
         for folder in ('workbench','optimization','prompt_builder','evaluation','intent_parser') for p in (root/folder).rglob('*')
         if p.is_file() and not p.is_symlink() and '__pycache__' not in p.parts}
+    if protocol is not None:
+        manifest['source_files'][FILENAME]=hashlib.sha256((root/FILENAME).read_bytes()).hexdigest()
     manifest['source_digest']=digest(manifest['source_files'])
     manifest['settings_digest']=digest(settings)
     manifest['model_digest']=digest([worker['model']])
@@ -157,6 +163,7 @@ def bundle(app, state, worker):
                     tar.add(path,arcname=path.relative_to(root).as_posix())
         def add(name,value):
             raw=value.encode();info=tarfile.TarInfo(name);info.size=len(raw);tar.addfile(info,io.BytesIO(raw))
+        if protocol is not None:tar.add(root/FILENAME,arcname=FILENAME)
         add('models.json',json.dumps([worker['model']]))
         add('.local/workbench/settings.json',json.dumps(settings))
         add('coverage-manifest.json',json.dumps(manifest))

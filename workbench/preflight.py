@@ -40,6 +40,14 @@ def build(app, preparation=None, track_progress=True, selection=None):
     models=[m for m in all_models if not selection or 'model_id' not in selection or m['id']==selection['model_id']]
     update('Loading benchmark definitions',100,15,f'{len(tests)} enabled tests loaded.')
     if not tests:problems.append(issue('tests','No enabled test files. Add or enable a test in Test definitions.'))
+    from .study_protocol import load as load_protocol, snapshot as protocol_snapshot, context_plan
+    try:
+        protocol=load_protocol(app.root)
+    except (ValueError, OSError, TypeError) as exc:
+        plan={'pending':0,'complete':0,'model_loads':0,'groups':[]}
+        return {'ready':False,'prepared':False,'preparation_only':bool(preparation),'selection':selection,
+                'issues':[issue('study_protocol',str(exc))],'plan':plan,
+                'note':'Invalid study protocol; no inference was started.'},plan
     update('Detecting GPU and runtime',10,16,'Inspecting the execution environment.')
     if app.demo:
         gpu={'name':'SIMULATED GTX 1080','uuid':'demo','total_gib':8,'free_gib':8,'driver':'simulated'}
@@ -60,8 +68,10 @@ def build(app, preparation=None, track_progress=True, selection=None):
             'os':platform.platform(),'python':platform.python_version(),'cpu':platform.processor() or platform.machine(),'driver':gpu.get('driver'),
             # Context allocation uses the whole enabled suite, never just what remains.
             # The recipe is computable without model files so completed models remain optional.
-            'context_recipe':automatic_context(context_tests, {'planning.context_length':2**63-1})['allocated_tokens'],
+            'context_recipe':(protocol['context']['tokens'] if protocol is not None else
+                              automatic_context(context_tests, {'planning.context_length':2**63-1})['allocated_tokens']),
             'execution_policy':'native-two-pass-v2'}
+    if protocol is not None:target['study_protocol']=protocol_snapshot(protocol)
     update('Checking existing results',0,20,'Validating saved completion evidence.')
     # Pins are metadata, NOT completion tracking. Recover from checksummed results if needed.
     for file in app.store.root.glob('*/*.json'):
@@ -182,7 +192,7 @@ def build(app, preparation=None, track_progress=True, selection=None):
                 action={'type':'download_model','model_id':mid} if not model['errors'] and group['model'].get('repo_id') else None
                 problems.append(issue('invalid_'+mid,'Incomplete/invalid model '+mid+': '+str(model['missing_shards']+model['errors']), 'Download missing shards' if action else None,action));continue
             try:
-                group['context']=automatic_context(context_tests,model['metadata'])
+                group['context']=context_plan(context_tests,model['metadata'],protocol)
             except ValueError as exc:problems.append(issue('context_'+mid,str(exc)));continue
     if selection and 'model_id' in selection and selection['model_id'] in plan['excluded']:
         problems.append(issue('selected_model_tier','The selected model is not eligible for this GPU tier. Check its assignment in Installed models.','Review VRAM assignment',{'type':'models'}))

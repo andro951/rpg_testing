@@ -274,7 +274,9 @@ class NativeBackend:
                 props=self.transport.request('/props')
                 settings=props.get('default_generation_settings',{})
                 actual=settings.get('n_ctx') or settings.get('params',{}).get('n_ctx')
-                if actual and actual!=self.context:raise RunFailure('Runtime changed the context allocation')
+                from .study_protocol import verify_native_context
+                try:verify_native_context(context,actual)
+                except ValueError as exc:raise RunFailure(str(exc)) from exc
                 self.load_metadata={'placement':evidence,'execution_class':execution_class,'requested_gpu_layers':layers,
                     'context':context,'load_seconds':time.perf_counter()-started,'load_timeout_seconds':None,
                     'implementation_fingerprint':implementation_fingerprint(),
