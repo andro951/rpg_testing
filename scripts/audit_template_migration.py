@@ -23,6 +23,8 @@ EXPERIMENT_DATA = {'.json', '.txt', '.jsonl', '.csv'}
 # Only this reviewed relocation is recognized; never search arbitrary archives.
 RESULT_ARCHIVE = 'archives/desktop-results-before-2026-11-11'
 RESULT_ARCHIVE_SOURCE = 'fd73a328fb89e0398d6d9c940f05ee8f44f648ec'
+SUITE_ARCHIVE = 'archives/suite-before-240-2026-11-15'
+SUITE_ARCHIVE_SOURCE = 'f78bdf518398b9f75091194d258bc7c5cc5d38fa'
 
 
 def require(condition, message):
@@ -133,6 +135,62 @@ def verify_result_relocation(root, name, entry):
     require(blob_id(raw) == entry['git_blob'], 'Archived result differs from pinned baseline bytes: ' + name)
 
 
+def suite_relocations(root, entries):
+    """Recognize only the reviewed 21-to-240 archive, never arbitrary snapshots.
+
+    Its full manifest also lists templates/configuration and newer evidence.
+    Those entries are validated for shape/path/duplicates but cannot authorize
+    relocating anything outside pinned-baseline EVIDENCE paths.
+    """
+    directory = root / SUITE_ARCHIVE
+    if not directory.exists() and not directory.is_symlink():
+        return {}
+    manifest_path = strict_archive_file(root, SUITE_ARCHIVE + '/manifest.json')
+    manifest = json.loads(manifest_path.read_text(encoding='utf8'))
+    require(isinstance(manifest, dict) and manifest.get('source_commit') == SUITE_ARCHIVE_SOURCE,
+            'Unexpected suite archive source commit')
+    files = manifest.get('files')
+    require(isinstance(files, list) and bool(files), 'Suite archive manifest has no files')
+    seen = set()
+    relocations = {}
+    for entry in files:
+        require(isinstance(entry, dict) and set(entry) == {'path', 'sha256', 'bytes'},
+                'Invalid suite archive manifest entry')
+        name = entry['path']
+        require(isinstance(name, str) and bool(name) and '\\' not in name and ':' not in name,
+                'Unsafe suite archive path: ' + str(name))
+        relative = PurePosixPath(name)
+        require(not relative.is_absolute() and '..' not in relative.parts
+                and relative.as_posix() == name and name != '.',
+                'Unsafe suite archive path: ' + name)
+        require(name not in seen, 'Duplicate suite archive path: ' + name)
+        seen.add(name)
+        require(isinstance(entry['sha256'], str) and bool(re.fullmatch('[0-9a-f]{64}', entry['sha256'])),
+                'Invalid suite archive SHA-256: ' + name)
+        require(type(entry['bytes']) is int and entry['bytes'] >= 0,
+                'Invalid suite archive byte count: ' + name)
+        if name.startswith(EVIDENCE) and name in entries:
+            relocations[name] = {**entry, 'git_blob': entries[name]}
+    return relocations
+
+
+def strict_archive_file(root, name):
+    path = regular_file(root, name)
+    current = root
+    for part in PurePosixPath(name).parts:
+        current = current / part
+        require(not current.is_symlink(), 'Missing or unsafe file: ' + name)
+    return path
+
+
+def verify_suite_relocation(root, name, entry):
+    raw = strict_archive_file(root, SUITE_ARCHIVE + '/' + name).read_bytes()
+    require(len(raw) == entry['bytes'], 'Archived suite evidence byte count changed: ' + name)
+    require(hashlib.sha256(raw).hexdigest() == entry['sha256'], 'Archived suite evidence SHA-256 changed: ' + name)
+    # Manifest metadata cannot certify changed data or normalize line endings.
+    require(blob_id(raw) == entry['git_blob'], 'Archived suite evidence differs from pinned baseline bytes: ' + name)
+
+
 def expected_definitions(root):
     # Compilation is pure and checks reference data without executing a model.
     sys.path.insert(0, str(root))
@@ -200,6 +258,9 @@ def audit(root, baseline=BASELINE):
     require(bool(re.fullmatch('[0-9a-f]{40}', baseline)), 'Baseline must be a complete commit SHA')
     entries = git_tree(root, baseline)
     relocations = result_relocations(root, entries)
+    suite_moved = suite_relocations(root, entries)
+    require(not set(relocations).intersection(suite_moved), 'Duplicate evidence relocation across reviewed archives')
+    relocated_names = set(relocations) | set(suite_moved)
     preserved = {prefix: 0 for prefix in PRESERVED}
     immutable_count = 0
     old_ids = set()
@@ -216,9 +277,15 @@ def audit(root, baseline=BASELINE):
             elif immutable(name):
                 if name in relocations:
                     verify_result_relocation(root, name, relocations[name])
+                if name in suite_moved:
+                    verify_suite_relocation(root, name, suite_moved[name])
                 original = root / name
+                if name in suite_moved:
+                    parts = PurePosixPath(name).parts
+                    require(not any(root.joinpath(*parts[:i]).is_symlink() for i in range(1, len(parts)+1)),
+                            'Missing or unsafe file: ' + name)
                 # An archive never conceals changed or unsafe evidence still at its original path.
-                if name not in relocations or original.exists() or original.is_symlink():
+                if name not in relocated_names or original.exists() or original.is_symlink():
                     raw = regular_file(root, name).read_bytes()
                     # The common path needs no baseline blob transfer at all.
                     if oid not in {blob_id(raw), blob_id(checkout_content(raw))}:
@@ -230,6 +297,7 @@ def audit(root, baseline=BASELINE):
     return {'baseline': baseline, 'intentional_suite_and_evaluator_migration': True,
             'archived_files_checked': preserved, 'immutable_evidence_files_checked': immutable_count,
             'archived_result_files_checked': len(relocations),
+            'archived_suite_evidence_files_checked': len(suite_moved),
             'historical_root_ids': len(old_ids), **current,
             'source_equivalence_claimed': False, 'inference_performed': False, 'files_modified': False}
 
