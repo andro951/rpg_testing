@@ -1,3 +1,8 @@
+## Context allocation correction (2026-11-15)
+
+- Preserve cumulative self-review history, three replacement attempts, uncapped outputs, and all raw turns. Do not duplicate the initial prompt or add huge per-turn context allowances. Current direct-text planning counts the actual assembled prompt once, shared continuation/history headroom, and only literal review control overhead; see docs/context-sizing.md.
+- Fixed-case-local context exhaustion is terminal infrastructure evidence for that case, not a wrong semantic answer and not permission to silently truncate, reload at a larger context, or skip later cases. Preserve failed/partial evidence and independent experiment identities. Never reuse old 262k load failures as successful revised-context observations.
+
 ## Current suite migration (2026-11-15, supersedes earlier current-suite counts)
 
 - Isaac authorized archiving the 21 existing tests and all results, then creating 240 tests: 40 substantially diverse starting JSON states, each independently tested with Update, Append, Remove, Move, Copy and no-op. Preserve meaningful original cases in the documented successor mapping, and preserve archived bytes/grading.

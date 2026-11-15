@@ -40,7 +40,8 @@ class PreservationAuditTests(unittest.TestCase):
     def test_same_full_path_context_projection_and_wrong_answers_stay_completed(self):
         raw = automatic_context([self.fixture()], {'planning.context_length': 2**63 - 1})['allocated_tokens']
         result = self.run_audit()
-        self.assertNotEqual(raw, result['context_recipe_before'])
+        # Direct-text source metadata is not another message on the wire.
+        self.assertEqual(raw, result['context_recipe_before'])
         self.assertEqual(result['context_recipe_before'], result['context_recipe_after'])
         self.assertEqual(result['existing_cases_checked_per_model'], 2)
         self.assertEqual(result['newly_invalidated_old_cases'], 0)

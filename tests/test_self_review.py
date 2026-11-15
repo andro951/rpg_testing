@@ -184,12 +184,14 @@ class SelfReviewTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 domain.validate_test(test)
 
-    def test_disabled_identity_and_provider_effective_definition_are_historical(self):
+    def test_disabled_flag_is_identity_neutral_but_context_policy_is_new(self):
         test = fixture(False); variant = test['variants'][0]
         missing = copy.deepcopy(variant); del missing['retry_enabled']
         self.assertEqual(domain.experiment_spec(test, variant), domain.experiment_spec(test, missing))
         self.assertEqual(perchance.effective(test, variant), perchance.effective(test, missing))
-        self.assertEqual(domain.code_fingerprint(), PREVIOUS_CODE)
+        # Context allocation/overflow semantics changed intentionally; do not
+        # whitelist the new implementation as the frozen old experiment.
+        self.assertNotEqual(domain.code_fingerprint(), PREVIOUS_CODE)
         self.assertEqual(perchance.identity({})['adapter_hash'], PREVIOUS_ADAPTER)
         with patch.object(domain, 'implementation_fingerprint', return_value='f'*64):
             self.assertEqual(domain.code_fingerprint(), 'f'*64)
@@ -268,13 +270,16 @@ class SelfReviewTests(unittest.TestCase):
         self.assertTrue(result['score']['exact_match'])
         self.assertFalse(result['score']['format_compliance']['compliant'])
 
-    def test_retries_get_a_finite_larger_context_estimate_only_when_enabled(self):
+    def test_retries_add_control_text_without_multiplying_context(self):
         from workbench.inventory import automatic_context
         test=fixture(False)
         disabled=automatic_context([test],{'model.context_length':262144})
         test['variants'][0]['retry_enabled']=True
         enabled=automatic_context([test],{'model.context_length':262144})
-        self.assertGreater(enabled['allocated_tokens'],disabled['allocated_tokens'])
+        self.assertEqual(enabled['allocated_tokens'],disabled['allocated_tokens'])
+        self.assertGreater(enabled['review_control_estimate_bytes'],0)
+        self.assertEqual(disabled['review_control_estimate_bytes'],0)
+        self.assertEqual(enabled['input_estimate_bytes'],disabled['input_estimate_bytes'])
         self.assertLessEqual(enabled['allocated_tokens'],262144)
         self.assertIsNone(enabled['output_cap'])
 
