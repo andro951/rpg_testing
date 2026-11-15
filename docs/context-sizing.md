@@ -28,7 +28,13 @@ Q4_K_M tokenizer found a maximum of 3,518 tokens across all 4,320 initial prompt
 A synthetic sizing check retaining four **reference-sized** candidates and every
 review/replacement turn peaked at 3,836 tokens. This diagnostic is not model
 inference, is not an output guarantee, and does not enter benchmark prompts.
-Other model tokenizers can differ. Runtime token checks remain authoritative.
+A subsequent real native 16k load/readiness diagnostic on the desktop verified
+37/37 model layers on the GPU, returned `READY`, and measured **3,524 tokens**
+for the largest initial fixture through the actual runtime chat template and
+`/tokenize(add_special=True)`. That is six more than the offline framing check;
+the runtime count is authoritative. No benchmark result was created by either
+diagnostic. The diagnostic process was unloaded afterward. Other model
+tokenizers can differ; runtime token checks remain authoritative.
 
 ## Overflow and identity
 
