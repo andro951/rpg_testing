@@ -129,13 +129,15 @@ class SelfCheckTests(unittest.TestCase):
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const source=fs.readFileSync(process.argv[1],'utf8');
 const snippet=source.slice(source.indexOf("on('add-retry-pairs',"),source.indexOf("on('save-test',"));
-let callback;const input={value:process.argv[2]};
+let callback;const input={value:fs.readFileSync(0,'utf8')};
 vm.runInNewContext(snippet,{on:(id,fn)=>callback=fn,$:id=>input,structuredClone,toast:()=>{}});
 callback();callback();const result=JSON.parse(input.value);
 assert.equal(result.variants.length,6);
 assert.equal(result.variants.filter(v=>v.retry_enabled).length,3);
 """
-        subprocess.run(['node','-e',script,str(source),json.dumps(self.test)],check=True,capture_output=True,text=True)
+        # Expanded definitions exceed Windows' command-line length limit.
+        subprocess.run(['node','-e',script,str(source)],input=json.dumps(self.test),
+                       check=True,capture_output=True,text=True,encoding='utf-8')
     def test_complete_manifest_carries_both_conditions(self):
         dest = Path(self.temp.name)/'build'
         manifest = build(dest, root=self.root)
