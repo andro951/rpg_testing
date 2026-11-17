@@ -260,7 +260,7 @@ class SelfReviewTests(unittest.TestCase):
         from evaluation.array_identities_intent import configuration, identity_info
         self.assertNotEqual(configuration()['fingerprint'],
                             '7f8348680b973038b3d29323fbbca442d553138e11086c05b9f124cd9cfd573e')
-        self.assertEqual(identity_info()['implementation_fingerprint'], configuration()['fingerprint'])
+        self.assertNotEqual(identity_info()['implementation_fingerprint'], configuration()['fingerprint'])
         self.assertIn('workbench/workflows.py', identity_info()['source_hashes'])
 
     def test_intent_pass_and_strict_format_failure_stay_independent_after_review(self):

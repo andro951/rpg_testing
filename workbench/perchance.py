@@ -342,7 +342,7 @@ class BrowserBackend:
 def execute_job(job, backend, cancel, progress=None):
     from jsonschema import Draft202012Validator
     test, variant = job['test'], job['variant']
-    from .self_review import enabled, generate as reviewed_generate
+    from .self_review import enabled, protocol, generate as reviewed_generate
     retry_enabled = enabled(variant)
     values, calls, events = {}, [], []
     started = time.perf_counter()
@@ -376,7 +376,7 @@ def execute_job(job, backend, cancel, progress=None):
                 response = reviewed_generate(prompt, schema,
                     lambda request, output: backend.generate(request, requested, output, cancel),
                     calls, events, {'step': step['id'], 'iteration': iteration, 'base_seed': base_seed,
-                                    'requested_sampling': requested}, cancel, progress, finish='provider_completed')
+                                    'requested_sampling': requested}, cancel, progress, finish='provider_completed', review_protocol=protocol(variant))
             else:
                 try:
                     response = backend.generate(prompt, requested, schema, cancel)

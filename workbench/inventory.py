@@ -160,7 +160,9 @@ def automatic_context(tests: list[dict], metadata: dict) -> dict:
     native backend verifies each complete, untruncated request with the actual
     model tokenizer. Continuation space is headroom, never an output-token cap.
     """
-    from .self_review import RETRY_LIMIT, REVIEW_QUESTION, REPLACEMENT_REQUEST
+    from .self_review import (RETRY_LIMIT, REVIEW_QUESTION, REPLACEMENT_REQUEST,
+                              JUSTIFIED_PROTOCOL, JUSTIFIED_REVIEW_QUESTION,
+                              JUSTIFIED_REPLACEMENT_REQUEST, protocol)
     maximum=next((int(v) for k,v in metadata.items() if k.endswith('.context_length')),None)
     if not maximum or maximum<512:raise ValueError('Model context metadata is unavailable')
     def prompt_bytes(steps):
@@ -175,6 +177,9 @@ def automatic_context(tests: list[dict], metadata: dict) -> dict:
     review_controls=((RETRY_LIMIT+1)*len(REVIEW_QUESTION.encode('utf-8'))+
                      RETRY_LIMIT*(len(REPLACEMENT_REQUEST.encode('utf-8'))+len('no!'))+
                      (4*RETRY_LIMIT+3)*32)
+    justified_controls=((RETRY_LIMIT+1)*len(JUSTIFIED_REVIEW_QUESTION.encode('utf-8'))+
+                        RETRY_LIMIT*(len(JUSTIFIED_REPLACEMENT_REQUEST.encode('utf-8'))+len('no!'))+
+                        (4*RETRY_LIMIT+3)*32)
     longest=0;planned=0;ordinary_planned=0;review_overhead=0;direct_only=True
     for test in tests:
         for variant in (v for v in test['variants'] if v.get('enabled',True)):
@@ -191,7 +196,8 @@ def automatic_context(tests: list[dict], metadata: dict) -> dict:
                 fixed+=len(test.get('shared_prefix','').encode('utf-8'))+len(test.get('instructions','').encode('utf-8'))
                 fixed+=len(presentation_instruction(mode).encode('utf-8'))+256
             estimate=fixed+prompt_bytes(variant['steps'])
-            extra=review_controls if variant.get('retry_enabled',False) else 0
+            controls=justified_controls if protocol(variant)==JUSTIFIED_PROTOCOL else review_controls
+            extra=controls if variant.get('retry_enabled',False) else 0
             longest=max(longest,estimate);review_overhead=max(review_overhead,extra)
             # Preserve the historical non-direct workflow estimator. Direct
             # prompts need no source duplication or blanket 2x multiplier.

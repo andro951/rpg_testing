@@ -218,7 +218,7 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progr
     if 'evaluator' in variant.get('result', {}):
         from evaluation.hosts import selected
         selected(variant['result']).validate_selection(test, variant)
-    from .self_review import enabled, generate as reviewed_generate
+    from .self_review import enabled, protocol, generate as reviewed_generate
     retry_enabled=enabled(variant)
     values={};calls=[];events=[];cache=variant.get('cache','default');cache_valid=True
     def units(items):
@@ -256,7 +256,7 @@ def execute(test,variant,backend,cancel=None,on_stage=None,repetition=0,on_progr
                     call=reviewed_generate(prompt,schema,
                         lambda request,output:backend.generate(request,settings,output,cache,cancel),
                         calls,events,{'step':step['id'],'iteration':iteration,'sampling':settings,'base_seed':base_seed},
-                        cancel,on_stage)
+                        cancel,on_stage,review_protocol=protocol(variant))
                 else:
                     try:call=backend.generate(prompt,settings,schema,cache,cancel)
                     except Exception as exc:
