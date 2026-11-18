@@ -52,7 +52,7 @@ class Sync:
         self.events.append('begin')
         return batch
 
-    def relative_result_path(self, path): return str(path.relative_to(self.root))
+    def relative_result_path(self, path): return path.relative_to(self.root).as_posix()
 
     def before_save(self, batch, path):
         self.events.append('before')
